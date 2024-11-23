@@ -3,14 +3,20 @@
 
 //! Application API example
 
+mod macros;
+
+use crate::macros::Instruction;
 use chrono::{Local, NaiveDate};
 use cosmic::app::{Core, Settings, Task};
+use cosmic::cosmic_config::{Config, ConfigSet};
 use cosmic::iced::widget::column;
 use cosmic::iced_core::Size;
 use cosmic::widget::nav_bar;
 use cosmic::{executor, iced, ApplicationExt, Element};
-use cosmic::cosmic_config::{Config, ConfigSet};
-use enigo::{Coordinate, Enigo, Keyboard, Mouse};
+use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::thread::{sleep, JoinHandle};
 
 #[derive(Clone, Copy)]
 pub enum Page {
@@ -50,7 +56,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     cosmic::app::run::<App>(settings, input)?;
 
-    println!("bruh");
     Ok(())
 }
 
@@ -61,10 +66,11 @@ pub enum Message {
     Input2(String),
     Ignore,
     ToggleHide,
+    RunMacro,
 }
 
 /// The [`App`] stores application-specific state.
-pub struct App {
+struct App {
     core: Core,
     nav_model: nav_bar::Model,
     input_1: String,
@@ -72,7 +78,34 @@ pub struct App {
     hidden: bool,
     date_selected: NaiveDate,
     config: Config,
-    enigo: Enigo,
+    enigo: Arc<Mutex<Enigo>>,
+    thread_pool: ThreadPool,
+}
+
+fn make_enigo() -> Enigo {
+    Enigo::new(&enigo::Settings::default()).unwrap()
+}
+
+struct ThreadPool {
+    workers: Vec<JoinHandle<()>>,
+}
+
+impl ThreadPool {
+    fn new() -> Self {
+        ThreadPool { workers: Vec::new() }
+    }
+
+    fn add_worker(&mut self, worker: JoinHandle<()>) {
+        self.workers.push(worker);
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        for worker in self.workers.drain(..) {
+            worker.join().expect("TODO: panic message");
+        }
+    }
 }
 
 /// Implement [`cosmic::Application`] to integrate with COSMIC.
@@ -115,7 +148,8 @@ impl cosmic::Application for App {
             hidden: true,
             date_selected: NaiveDate::from(Local::now().naive_local()),
             config: Config::new(Self::APP_ID, 1).unwrap(),
-            enigo: Enigo::new(&enigo::Settings::default()).unwrap()
+            enigo: Arc::new(Mutex::from(make_enigo())),
+            thread_pool: ThreadPool::new(),
         };
 
         let config = &app.config;
@@ -130,10 +164,6 @@ impl cosmic::Application for App {
         println!("Commit transaction: {:?}", tx.commit());
 
         let command = app.update_title();
-
-        let enigo = &mut app.enigo;
-        enigo.move_mouse(40, 40, Coordinate::Rel).expect("TODO: panic message");
-        enigo.fast_text("baka").expect("TODO: panic message");
 
         (app, command)
     }
@@ -161,6 +191,60 @@ impl cosmic::Application for App {
             Message::Ignore => {}
             Message::ToggleHide => {
                 self.hidden = !self.hidden;
+            }
+            Message::RunMacro => {
+                let pool = &mut self.thread_pool;
+                let thread_num = pool.workers.len();
+                let enigo = (&self.enigo).clone();
+                let thread = thread::Builder::new().name(format!("macro_thread: {thread_num}")).spawn(move || {
+                    println!("Running macro...");
+                    let mac = macros::Macro::new("macro".into(), "description".into(), vec![
+                        Instruction::Wait(1000),
+                        Instruction::MouseMove(100, 100),
+                        Instruction::KeyDown(Key::Unicode('a'.into())),
+                        Instruction::KeyUp(Key::Unicode('a'.into())),
+                        Instruction::KeyDown(Key::Unicode('a'.into())),
+                        Instruction::KeyUp(Key::Unicode('a'.into())),
+                        Instruction::Wait(1000),
+                        Instruction::KeyDown(Key::Unicode('b'.into())),
+                        Instruction::KeyUp(Key::Unicode('b'.into())),
+                    ]);
+                    let mut enigo = enigo.lock().unwrap();
+
+                    for ins in mac.code {
+                        match ins {
+                            Instruction::Wait(duration) => {
+                                sleep(std::time::Duration::from_millis(duration));
+                            }
+                            Instruction::Text(text) => {
+                                enigo.text(&text).expect("TODO: panic message");
+                            }
+                            Instruction::KeyDown(key) => {
+                                enigo.key(key, Direction::Press).expect("TODO: panic message");
+                            }
+                            Instruction::KeyUp(key) => {
+                                enigo.key(key, Direction::Release).expect("TODO: panic message");
+                            }
+                            Instruction::ButtonDown(button) => {
+                                enigo.button(button, Direction::Press).expect("TODO: panic message");
+                            }
+                            Instruction::ButtonUp(button) => {
+                                enigo.button(button, Direction::Release).expect("TODO: panic message");
+                            }
+                            Instruction::MouseMove(x, y) => {
+                                enigo.move_mouse(x, y, Coordinate::Rel).expect("TODO: panic message");
+                            }
+                            _ => {
+                                println!("Instruction not implemented.");
+                            }
+                        }
+                    }
+                    //enigo.move_mouse(100, 100, Coordinate::Rel).expect("TODO: panic message");
+                    //sleep(std::time::Duration::from_secs(2));
+                    //enigo.button(Left, Direction::Click).expect("TODO: panic message");
+                    println!("Macro complete.");
+                }).expect("TODO: panic message");
+                pool.add_worker(thread);
             }
         }
         Task::none()
@@ -198,6 +282,10 @@ impl cosmic::Application for App {
                 .align_x(iced::Alignment::Center);
 
         content = content.push(cosmic::widget::calendar::calendar(now, |date| Message::Input2(format!("Selected date: {}", date))));
+
+        content = content.push(cosmic::widget::button::text("Run macro")
+            .on_press(Message::RunMacro)
+        );
 
         let centered = cosmic::widget::container(content)
             .width(iced::Length::Fill)

@@ -5,7 +5,7 @@
 
 mod macros;
 
-use crate::macros::Instruction;
+use crate::macros::{Instruction, Macro};
 use chrono::{Local, NaiveDate};
 use cosmic::app::{Core, Settings, Task};
 use cosmic::cosmic_config::{Config, ConfigSet};
@@ -17,6 +17,8 @@ use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{sleep, JoinHandle};
+use enigo::agent::Token;
+use tracing::warn;
 
 #[derive(Clone, Copy)]
 pub enum Page {
@@ -161,6 +163,17 @@ impl cosmic::Application for App {
             tx.set("example-string", "")
         );
         println!("Set random thing to some big object {:?}", tx.set("random-thing", vec![1, 2, 3, 4, 5]));
+        tx.set("macro", Macro::new("macro".into(), "description".into(), vec![
+            Instruction::Wait(1000),
+            Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
+            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+            Instruction::Wait(1000),
+            Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
+            Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
+        ])).expect("TODO: panic message");
         println!("Commit transaction: {:?}", tx.commit());
 
         let command = app.update_title();
@@ -198,16 +211,16 @@ impl cosmic::Application for App {
                 let enigo = (&self.enigo).clone();
                 let thread = thread::Builder::new().name(format!("macro_thread: {thread_num}")).spawn(move || {
                     println!("Running macro...");
-                    let mac = macros::Macro::new("macro".into(), "description".into(), vec![
+                    let mac = Macro::new("macro".into(), "description".into(), vec![
                         Instruction::Wait(1000),
-                        Instruction::MouseMove(100, 100),
-                        Instruction::KeyDown(Key::Unicode('a'.into())),
-                        Instruction::KeyUp(Key::Unicode('a'.into())),
-                        Instruction::KeyDown(Key::Unicode('a'.into())),
-                        Instruction::KeyUp(Key::Unicode('a'.into())),
+                        Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
+                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
                         Instruction::Wait(1000),
-                        Instruction::KeyDown(Key::Unicode('b'.into())),
-                        Instruction::KeyUp(Key::Unicode('b'.into())),
+                        Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
+                        Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
                     ]);
                     let mut enigo = enigo.lock().unwrap();
 
@@ -216,23 +229,30 @@ impl cosmic::Application for App {
                             Instruction::Wait(duration) => {
                                 sleep(std::time::Duration::from_millis(duration));
                             }
-                            Instruction::Text(text) => {
-                                enigo.text(&text).expect("TODO: panic message");
-                            }
-                            Instruction::KeyDown(key) => {
-                                enigo.key(key, Direction::Press).expect("TODO: panic message");
-                            }
-                            Instruction::KeyUp(key) => {
-                                enigo.key(key, Direction::Release).expect("TODO: panic message");
-                            }
-                            Instruction::ButtonDown(button) => {
-                                enigo.button(button, Direction::Press).expect("TODO: panic message");
-                            }
-                            Instruction::ButtonUp(button) => {
-                                enigo.button(button, Direction::Release).expect("TODO: panic message");
-                            }
-                            Instruction::MouseMove(x, y) => {
-                                enigo.move_mouse(x, y, Coordinate::Rel).expect("TODO: panic message");
+                            Instruction::Token(token) => {
+                                match token {
+                                    Token::Text(text) => {
+                                        enigo.text(&text).expect("TODO: panic message");
+                                    }
+                                    Token::Key(key, direction) => {
+                                        enigo.key(key, direction).expect("TODO: panic message");
+                                    }
+                                    Token::Raw(keycode, direction) => {
+                                        enigo.raw(keycode, direction).expect("TODO: panic message");
+                                    }
+                                    Token::Button(button, direction) => {
+                                        enigo.button(button, direction).expect("TODO: panic message");
+                                    }
+                                    Token::MoveMouse(x, y, coord) => {
+                                        enigo.move_mouse(x, y, coord).expect("TODO: panic message");
+                                    }
+                                    Token::Scroll(amount, axis) => {
+                                        enigo.scroll(amount, axis).expect("TODO: panic message");
+                                    }
+                                    _ => {
+                                        warn!("Token not implemented.");
+                                    }
+                                }
                             }
                             _ => {
                                 println!("Instruction not implemented.");

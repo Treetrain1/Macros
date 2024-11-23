@@ -1,5 +1,9 @@
-use enigo::{Button, Key};
+use enigo::{Button, Direction, Key};
+use enigo::agent::Token;
+use serde::{Deserialize, Serialize, Serializer};
+use serde::ser::{SerializeStruct, SerializeStructVariant};
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Macro {
     name: String, /// displayed in GUI
     description: String, /// displayed in GUI
@@ -12,17 +16,8 @@ impl Macro {
     }
 }
 
-//pub(crate) struct Instruction {
-//    pub(crate) instruction_type: InstructionType,
-//    pub(crate) duration: i32,
-//}
-
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Instruction {
+    Token(Token),
     Wait(u64),
-    Text(String),
-    KeyDown(Key),
-    KeyUp(Key),
-    ButtonDown(Button),
-    ButtonUp(Button),
-    MouseMove(i32, i32),
 }

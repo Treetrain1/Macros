@@ -1,7 +1,5 @@
-use enigo::{Button, Direction, Key};
 use enigo::agent::Token;
-use serde::{Deserialize, Serialize, Serializer};
-use serde::ser::{SerializeStruct, SerializeStructVariant};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Macro {

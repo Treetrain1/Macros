@@ -225,7 +225,7 @@ impl cosmic::Application for App {
                     let mut enigo = enigo.lock().unwrap();
 
                     for ins in mac.code {
-                        match ins {
+                        #[allow(unreachable_patterns)] match ins {
                             Instruction::Wait(duration) => {
                                 sleep(std::time::Duration::from_millis(duration));
                             }
@@ -259,9 +259,6 @@ impl cosmic::Application for App {
                             }
                         }
                     }
-                    //enigo.move_mouse(100, 100, Coordinate::Rel).expect("TODO: panic message");
-                    //sleep(std::time::Duration::from_secs(2));
-                    //enigo.button(Left, Direction::Click).expect("TODO: panic message");
                     println!("Macro complete.");
                 }).expect("TODO: panic message");
                 pool.add_worker(thread);

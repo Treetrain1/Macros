@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Macro {
-    name: String, /// displayed in GUI
-    description: String, /// displayed in GUI
+    pub(crate) name: String, /// displayed in GUI
+    pub(crate) description: String, /// displayed in GUI
     pub(crate) code: Vec<Instruction>,
 }
 

@@ -8,12 +8,12 @@ mod macros;
 use crate::macros::{Instruction, Macro};
 use chrono::{Local, NaiveDate};
 use cosmic::app::{Core, Settings, Task};
-use cosmic::cosmic_config::{Config, ConfigSet};
+use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use cosmic::iced::widget::column;
 use cosmic::iced_core::Size;
 use cosmic::widget::nav_bar;
 use cosmic::{executor, iced, ApplicationExt, Element};
-use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse};
+use enigo::{Axis, Coordinate, Direction, Enigo, Key, Keyboard, Mouse};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{sleep, JoinHandle};
@@ -68,7 +68,8 @@ pub enum Message {
     Input2(String),
     Ignore,
     ToggleHide,
-    RunMacro,
+    SelectMacro(usize),
+    RunMacro(Option<usize>),
 }
 
 /// The [`App`] stores application-specific state.
@@ -79,6 +80,7 @@ struct App {
     input_2: String,
     hidden: bool,
     date_selected: NaiveDate,
+    macro_selected: Option<usize>,
     config: Config,
     enigo: Arc<Mutex<Enigo>>,
     thread_pool: ThreadPool,
@@ -149,6 +151,7 @@ impl cosmic::Application for App {
             input_2: String::new(),
             hidden: true,
             date_selected: NaiveDate::from(Local::now().naive_local()),
+            macro_selected: Some(0),
             config: Config::new(Self::APP_ID, 1).unwrap(),
             enigo: Arc::new(Mutex::from(make_enigo())),
             thread_pool: ThreadPool::new(),
@@ -163,17 +166,28 @@ impl cosmic::Application for App {
             tx.set("example-string", "")
         );
         println!("Set random thing to some big object {:?}", tx.set("random-thing", vec![1, 2, 3, 4, 5]));
-        tx.set("macro", Macro::new("macro".into(), "description".into(), vec![
-            Instruction::Wait(1000),
-            Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
-            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-            Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-            Instruction::Wait(1000),
-            Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
-            Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
-        ])).expect("TODO: panic message");
+        tx.set("macros", vec![
+            Macro::new("macro".into(), "description".into(), vec![
+                Instruction::Wait(1000),
+                Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
+                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+                Instruction::Wait(1000),
+                Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
+                Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
+                Instruction::Token(Token::Text("Skibidi toilet ohio rizz".into())),
+                Instruction::Wait(500),
+                Instruction::Token(Token::Scroll(4, Axis::Vertical)),
+            ]),
+            Macro::new("macro2".into(), "description".into(), vec![
+                Instruction::Wait(1000),
+                Instruction::Token(Token::Text("NJOPFPDSFSODPFJODSIFJOPSDPFJ THIS IS FROM A MACRO".into())),
+                Instruction::Wait(500),
+                Instruction::Token(Token::Scroll(4, Axis::Vertical)),
+            ]),
+        ]).expect("TODO: panic message");
         println!("Commit transaction: {:?}", tx.commit());
 
         let command = app.update_title();
@@ -205,29 +219,27 @@ impl cosmic::Application for App {
             Message::ToggleHide => {
                 self.hidden = !self.hidden;
             }
-            Message::RunMacro => {
+            Message::SelectMacro(mac) => {
+                self.macro_selected = Some(mac);
+            }
+            Message::RunMacro(selected) => {
+                if selected.is_none() {
+                    return Task::none();
+                }
+                let selected = selected.unwrap();
                 let pool = &mut self.thread_pool;
                 let thread_num = pool.workers.len();
                 let enigo = (&self.enigo).clone();
+                let config = self.config.clone();
                 let thread = thread::Builder::new().name(format!("macro_thread: {thread_num}")).spawn(move || {
                     println!("Running macro...");
-                    let mac = Macro::new("macro".into(), "description".into(), vec![
-                        Instruction::Wait(1000),
-                        Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
-                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-                        Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-                        Instruction::Wait(1000),
-                        Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
-                        Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
-                    ]);
+                    let macs = config.get::<Vec<Macro>>("macros").expect("TODO: panic message");
+                    let mac = &macs[selected as usize];
                     let mut enigo = enigo.lock().unwrap();
-
-                    for ins in mac.code {
+                    for ins in &mac.code {
                         #[allow(unreachable_patterns)] match ins {
                             Instruction::Wait(duration) => {
-                                sleep(std::time::Duration::from_millis(duration));
+                                sleep(std::time::Duration::from_millis(*duration));
                             }
                             Instruction::Token(token) => {
                                 match token {
@@ -235,19 +247,19 @@ impl cosmic::Application for App {
                                         enigo.text(&text).expect("TODO: panic message");
                                     }
                                     Token::Key(key, direction) => {
-                                        enigo.key(key, direction).expect("TODO: panic message");
+                                        enigo.key(*key, *direction).expect("TODO: panic message");
                                     }
                                     Token::Raw(keycode, direction) => {
-                                        enigo.raw(keycode, direction).expect("TODO: panic message");
+                                        enigo.raw(*keycode, *direction).expect("TODO: panic message");
                                     }
                                     Token::Button(button, direction) => {
-                                        enigo.button(button, direction).expect("TODO: panic message");
+                                        enigo.button(*button, *direction).expect("TODO: panic message");
                                     }
                                     Token::MoveMouse(x, y, coord) => {
-                                        enigo.move_mouse(x, y, coord).expect("TODO: panic message");
+                                        enigo.move_mouse(*x, *y, *coord).expect("TODO: panic message");
                                     }
                                     Token::Scroll(amount, axis) => {
-                                        enigo.scroll(amount, axis).expect("TODO: panic message");
+                                        enigo.scroll(*amount, *axis).expect("TODO: panic message");
                                     }
                                     _ => {
                                         warn!("Token not implemented.");
@@ -300,8 +312,10 @@ impl cosmic::Application for App {
 
         content = content.push(cosmic::widget::calendar::calendar(now, |date| Message::Input2(format!("Selected date: {}", date))));
 
+        content = content.push(cosmic::widget::dropdown(["macro", "macro2"].as_ref(), Some(0), Message::SelectMacro));
+
         content = content.push(cosmic::widget::button::text("Run macro")
-            .on_press(Message::RunMacro)
+            .on_press(Message::RunMacro(self.macro_selected.clone()))
         );
 
         let centered = cosmic::widget::container(content)

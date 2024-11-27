@@ -6,7 +6,6 @@
 mod macros;
 
 use crate::macros::{Instruction, Macro};
-use chrono::{Local, NaiveDate};
 use cosmic::app::{Core, Settings, Task};
 use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use cosmic::iced::widget::column;
@@ -17,6 +16,7 @@ use enigo::{Axis, Coordinate, Direction, Enigo, Key, Keyboard, Mouse};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{sleep, JoinHandle};
+use cosmic::iced_widget::row;
 use enigo::agent::Token;
 use tracing::warn;
 
@@ -79,11 +79,11 @@ struct App {
     input_1: String,
     input_2: String,
     hidden: bool,
-    date_selected: NaiveDate,
     macro_selected: Option<usize>,
     config: Config,
     enigo: Arc<Mutex<Enigo>>,
     thread_pool: ThreadPool,
+    macros: Option<Vec<String>>,
 }
 
 fn make_enigo() -> Enigo {
@@ -150,45 +150,49 @@ impl cosmic::Application for App {
             input_1: String::new(),
             input_2: String::new(),
             hidden: true,
-            date_selected: NaiveDate::from(Local::now().naive_local()),
             macro_selected: Some(0),
             config: Config::new(Self::APP_ID, 1).unwrap(),
             enigo: Arc::new(Mutex::from(make_enigo())),
             thread_pool: ThreadPool::new(),
+            macros: None,
         };
 
         let config = &app.config;
         let tx = config.transaction();
-        println!("Set example-bool to false: {:?}", tx.set("example-bool", false));
-        println!("Set example-int to 0: {:?}", tx.set("example-int", 0));
-        println!(
-            "Set example-string to \"\": {:?}",
-            tx.set("example-string", "")
-        );
-        println!("Set random thing to some big object {:?}", tx.set("random-thing", vec![1, 2, 3, 4, 5]));
-        tx.set("macros", vec![
-            Macro::new("macro".into(), "description".into(), vec![
-                Instruction::Wait(1000),
-                Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
-                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
-                Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
-                Instruction::Wait(1000),
-                Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
-                Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
-                Instruction::Token(Token::Text("Skibidi toilet ohio rizz".into())),
-                Instruction::Wait(500),
-                Instruction::Token(Token::Scroll(4, Axis::Vertical)),
-            ]),
-            Macro::new("macro2".into(), "description".into(), vec![
-                Instruction::Wait(1000),
-                Instruction::Token(Token::Text("NJOPFPDSFSODPFJODSIFJOPSDPFJ THIS IS FROM A MACRO".into())),
-                Instruction::Wait(500),
-                Instruction::Token(Token::Scroll(4, Axis::Vertical)),
-            ]),
-        ]).expect("TODO: panic message");
+        let mut macros = config.get::<Vec<Macro>>("macros");
+        if macros.is_err() {
+            tx.set("macros", vec![
+                Macro::new("macro".into(), "description".into(), vec![
+                    Instruction::Wait(1000),
+                    Instruction::Token(Token::MoveMouse(100, 100, Coordinate::Rel)),
+                    Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                    Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+                    Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Press)),
+                    Instruction::Token(Token::Key(Key::Unicode('a'.into()), Direction::Release)),
+                    Instruction::Wait(1000),
+                    Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Press)),
+                    Instruction::Token(Token::Key(Key::Unicode('b'.into()), Direction::Release)),
+                    Instruction::Token(Token::Text("Skibidi toilet ohio rizz".into())),
+                    Instruction::Wait(500),
+                    Instruction::Token(Token::Scroll(4, Axis::Vertical)),
+                ]),
+                Macro::new("macro2".into(), "description".into(), vec![
+                    Instruction::Wait(1000),
+                    Instruction::Token(Token::Text("NJOPFPDSFSODPFJODSIFJOPSDPFJ THIS IS FROM A MACRO".into())),
+                    Instruction::Wait(500),
+                    Instruction::Token(Token::Scroll(4, Axis::Vertical)),
+                ]),
+                Macro::new("skibidi".into(), "awesome macro".into(), vec![
+                    Instruction::Wait(1000),
+                    Instruction::Token(Token::Text("Skibidi Skibidi Skibidi Skibidi Skibidi Skibidi Skibidi".into())),
+                ]),
+            ]).expect("TODO: panic message");
+            macros = config.get::<Vec<Macro>>("macros");
+        }
         println!("Commit transaction: {:?}", tx.commit());
+
+        let macros = macros.unwrap();
+        app.macros = Some(macros.iter().map(|x| x.name.clone()).collect::<Vec<String>>());
 
         let command = app.update_title();
 
@@ -234,7 +238,7 @@ impl cosmic::Application for App {
                 let thread = thread::Builder::new().name(format!("macro_thread: {thread_num}")).spawn(move || {
                     println!("Running macro...");
                     let macs = config.get::<Vec<Macro>>("macros").expect("TODO: panic message");
-                    let mac = &macs[selected as usize];
+                    let mac = &macs[selected];
                     let mut enigo = enigo.lock().unwrap();
                     for ins in &mac.code {
                         #[allow(unreachable_patterns)] match ins {
@@ -287,7 +291,6 @@ impl cosmic::Application for App {
             .map_or("No page selected", String::as_str);
 
         let text = cosmic::widget::text(page_content);
-        let now: &NaiveDate = &self.date_selected;
 
         let mut content = column![
                 text,
@@ -310,13 +313,15 @@ impl cosmic::Application for App {
                 .height(iced::Length::Shrink)
                 .align_x(iced::Alignment::Center);
 
-        content = content.push(cosmic::widget::calendar::calendar(now, |date| Message::Input2(format!("Selected date: {}", date))));
+        //content = content.push(cosmic::widget::calendar::calendar(now, |date| Message::Input2(format!("Selected date: {}", date))));
+        if let Some(macs) = &self.macros {
+            content = content.push(row![
+                cosmic::widget::dropdown(macs, Some(0), Message::SelectMacro),
 
-        content = content.push(cosmic::widget::dropdown(["macro", "macro2"].as_ref(), Some(0), Message::SelectMacro));
-
-        content = content.push(cosmic::widget::button::text("Run macro")
-            .on_press(Message::RunMacro(self.macro_selected.clone()))
-        );
+            cosmic::widget::button::text("Run macro")
+                .on_press(Message::RunMacro(self.macro_selected.clone()))
+            ]);
+        }
 
         let centered = cosmic::widget::container(content)
             .width(iced::Length::Fill)

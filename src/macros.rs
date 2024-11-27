@@ -1,7 +1,7 @@
 use enigo::agent::Token;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub(crate) struct Macro {
     pub(crate) name: String, /// displayed in GUI
     pub(crate) description: String, /// displayed in GUI

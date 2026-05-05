@@ -21,6 +21,12 @@ use cosmic::dialog::ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShort
 use cosmic::iced::futures::executor::block_on;
 #[cfg(not(target_os = "linux"))]
 use cosmic::iced::futures::{SinkExt, Stream};
+#[cfg(target_os = "linux")]
+use cosmic::iced::futures::{SinkExt, Stream};
+#[cfg(target_os = "linux")]
+use std::sync::OnceLock;
+#[cfg(target_os = "linux")]
+use std::collections::VecDeque;
 use cosmic::iced::futures::StreamExt;
 #[cfg(not(target_os = "linux"))]
 use cosmic::iced::futures::channel::mpsc::Sender;
@@ -276,6 +282,34 @@ fn add_default_config(config: &Config) {
 enum GlobalShortcutAction {
     RunMacro,
     StopLoop,
+    #[cfg(target_os = "linux")]
+    NextMacro,
+    #[cfg(target_os = "linux")]
+    PrevMacro,
+}
+
+#[cfg(target_os = "linux")]
+static MACRO_NAV_QUEUE: OnceLock<Mutex<VecDeque<usize>>> = OnceLock::new();
+
+#[cfg(target_os = "linux")]
+fn get_macro_nav_queue() -> &'static Mutex<VecDeque<usize>> {
+    MACRO_NAV_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+#[cfg(target_os = "linux")]
+fn macro_nav_sub() -> impl Stream<Item = Message> {
+    cosmic::iced::stream::channel(32, |mut sender: cosmic::iced::futures::channel::mpsc::Sender<Message>| async move {
+        loop {
+            async_std::task::sleep(std::time::Duration::from_millis(50)).await;
+            let pending: Vec<usize> = get_macro_nav_queue()
+                .try_lock()
+                .map(|mut q| q.drain(..).collect())
+                .unwrap_or_default();
+            for idx in pending {
+                let _ = sender.send(SelectMacro(idx)).await;
+            }
+        }
+    })
 }
 
 fn spawn_global_shortcut_action(
@@ -298,6 +332,31 @@ fn execute_global_shortcut_action(
     match action {
         GlobalShortcutAction::RunMacro => run_selected_macro_from_shortcut(config, enigo, is_looping),
         GlobalShortcutAction::StopLoop => stop_macro_loop_from_shortcut(is_looping),
+        #[cfg(target_os = "linux")]
+        GlobalShortcutAction::NextMacro => navigate_macro_from_shortcut(config, 1),
+        #[cfg(target_os = "linux")]
+        GlobalShortcutAction::PrevMacro => navigate_macro_from_shortcut(config, -1),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn navigate_macro_from_shortcut(config: &Config, direction: isize) {
+    let macros = config::get_macros_from_config(config);
+    if macros.is_empty() { return; }
+    let current_id = config::get_selected_macro_id(config);
+    let current_idx = current_id
+        .and_then(|id| macros.iter().position(|m| m.id == id))
+        .unwrap_or(0);
+    let len = macros.len();
+    let next_idx = if direction > 0 {
+        (current_idx + 1) % len
+    } else if current_idx == 0 {
+        len - 1
+    } else {
+        current_idx - 1
+    };
+    if let Ok(mut q) = get_macro_nav_queue().lock() {
+        q.push_back(next_idx);
     }
 }
 
@@ -481,8 +540,12 @@ impl cosmic::Application for App {
                         .preferred_trigger(Some("<Ctrl><Alt>M"));
                     let stop_loop_sc = NewShortcut::new("stop_loop", "Stop Macro Loop")
                         .preferred_trigger(Some("<Ctrl><Alt>S"));
+                    let next_macro_sc = NewShortcut::new("next_macro", "Select Next Macro")
+                        .preferred_trigger(Some("<Ctrl><Alt>Right"));
+                    let prev_macro_sc = NewShortcut::new("prev_macro", "Select Previous Macro")
+                        .preferred_trigger(Some("<Ctrl><Alt>Left"));
 
-                    if block_on(shortcuts.bind_shortcuts(&session, &[run_macro_sc, stop_loop_sc], None)).is_ok() {
+                    if block_on(shortcuts.bind_shortcuts(&session, &[run_macro_sc, stop_loop_sc, next_macro_sc, prev_macro_sc], None)).is_ok() {
                         if let Ok(mut activations) = block_on(shortcuts.receive_activated()) {
                             let enigo_clone = Arc::clone(&app.enigo);
                             let config_clone = app.config.clone();
@@ -502,6 +565,22 @@ impl cosmic::Application for App {
                                         "stop_loop" => {
                                             spawn_global_shortcut_action(
                                                 GlobalShortcutAction::StopLoop,
+                                                config_clone.clone(),
+                                                Arc::clone(&enigo_clone),
+                                                Arc::clone(&is_looping_clone),
+                                            );
+                                        }
+                                        "next_macro" => {
+                                            spawn_global_shortcut_action(
+                                                GlobalShortcutAction::NextMacro,
+                                                config_clone.clone(),
+                                                Arc::clone(&enigo_clone),
+                                                Arc::clone(&is_looping_clone),
+                                            );
+                                        }
+                                        "prev_macro" => {
+                                            spawn_global_shortcut_action(
+                                                GlobalShortcutAction::PrevMacro,
                                                 config_clone.clone(),
                                                 Arc::clone(&enigo_clone),
                                                 Arc::clone(&is_looping_clone),
@@ -545,7 +624,10 @@ impl cosmic::Application for App {
 
         #[cfg(target_os = "linux")]
         {
-            key_capture_subscription
+            Subscription::batch(vec![
+                key_capture_subscription,
+                Subscription::run(macro_nav_sub),
+            ])
         }
     }
 

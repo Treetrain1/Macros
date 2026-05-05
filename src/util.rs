@@ -17,6 +17,20 @@ pub(crate) fn add_macro(config: &Config, mut mac: Macro) -> Result<(), String> {
 }
 
 pub(crate) fn run_macro(mac: Macro, enigo: Arc<Mutex<Enigo>>) {
+    let mut pressed_keys: Vec<EnigoKey> = Vec::new();
+
+    let normalize_modifier_key = |key: EnigoKey| -> EnigoKey {
+        match key {
+            // Use a concrete shift side for press/release stability across backends.
+            EnigoKey::Shift => EnigoKey::LShift,
+            _ => key,
+        }
+    };
+
+    let shift_is_pressed = |keys: &[EnigoKey]| -> bool {
+        keys.iter().any(|k| matches!(k, EnigoKey::Shift | EnigoKey::LShift | EnigoKey::RShift))
+    };
+
     for ins in mac.code {
         #[allow(unreachable_patterns)] match ins {
             Instruction::Wait(duration) => {
@@ -41,22 +55,56 @@ pub(crate) fn run_macro(mac: Macro, enigo: Arc<Mutex<Enigo>>) {
 
                 match token {
                     Text(text) => {
-                        enigo.text(&text).expect(&format!("Failed to type text: {text}"));
+                        if let Err(err) = enigo.text(&text) {
+                            warn!("Failed to type text '{}': {}", text, err);
+                        }
                     }
                     Key(key, direction) => {
-                        enigo.key(key, direction).expect("Failed to type key");
+                        let normalized_key = normalize_modifier_key(key);
+                        let key_for_event = match (normalized_key.clone(), direction) {
+                            // Unicode keys are text-oriented; promote lowercase letters when Shift is held.
+                            (EnigoKey::Unicode(c), enigo::Direction::Click) if shift_is_pressed(&pressed_keys) && c.is_ascii_lowercase() => {
+                                EnigoKey::Unicode(c.to_ascii_uppercase())
+                            }
+                            (key, _) => key,
+                        };
+
+                        match enigo.key(key_for_event, direction) {
+                            Ok(()) => match direction {
+                                enigo::Direction::Press => {
+                                    if !pressed_keys.contains(&normalized_key) {
+                                        pressed_keys.push(normalized_key);
+                                    }
+                                }
+                                enigo::Direction::Release => {
+                                    pressed_keys.retain(|k| k != &normalized_key);
+                                }
+                                enigo::Direction::Click => {}
+                            },
+                            Err(err) => {
+                                warn!("Failed to type key {:?} ({:?}): {}", normalized_key, direction, err);
+                            }
+                        }
                     }
                     Raw(keycode, direction) => {
-                        enigo.raw(keycode, direction).expect(&format!("Failed to type raw keycode: {keycode}"));
+                        if let Err(err) = enigo.raw(keycode, direction) {
+                            warn!("Failed to type raw keycode {}: {}", keycode, err);
+                        }
                     }
                     Button(button, direction) => {
-                        enigo.button(button, direction).expect("Failed to click mouse button");
+                        if let Err(err) = enigo.button(button, direction) {
+                            warn!("Failed to click mouse button {:?} ({:?}): {}", button, direction, err);
+                        }
                     }
                     MoveMouse(x, y, coord) => {
-                        enigo.move_mouse(x, y, coord).expect(&format!("Failed to move mouse to: ({x}, {y})"));
+                        if let Err(err) = enigo.move_mouse(x, y, coord) {
+                            warn!("Failed to move mouse to ({}, {}): {}", x, y, err);
+                        }
                     }
                     Scroll(amount, axis) => {
-                        enigo.scroll(amount, axis).expect(&format!("Failed to scroll by: {amount}"));
+                        if let Err(err) = enigo.scroll(amount, axis) {
+                            warn!("Failed to scroll by {}: {}", amount, err);
+                        }
                     }
                     _ => {
                         warn!("Token not implemented.");
@@ -66,6 +114,18 @@ pub(crate) fn run_macro(mac: Macro, enigo: Arc<Mutex<Enigo>>) {
             _ => {
                 warn!("Instruction not implemented.");
             }
+        }
+    }
+
+    if !pressed_keys.is_empty() {
+        if let Ok(mut enigo) = enigo.lock() {
+            for key in pressed_keys.into_iter().rev() {
+                if let Err(err) = enigo.key(key.clone(), enigo::Direction::Release) {
+                    warn!("Failed to release key {:?} during macro cleanup: {}", key, err);
+                }
+            }
+        } else {
+            warn!("Failed to lock enigo mutex for macro key cleanup");
         }
     }
 }
@@ -138,8 +198,6 @@ pub(crate) fn string_to_key(key_str: &str) -> Result<EnigoKey, &'static str> {
         "Backspace" => Ok(EnigoKey::Backspace),
         "CapsLock" => Ok(EnigoKey::CapsLock),
         "Shift" => Ok(EnigoKey::LShift),
-        "LShift" => Ok(EnigoKey::LShift),
-        "RShift" => Ok(EnigoKey::RShift),
         "Control" => Ok(EnigoKey::Control),
         "Alt" => Ok(EnigoKey::Alt),
         "Meta" => Ok(EnigoKey::Meta),

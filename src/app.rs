@@ -286,6 +286,8 @@ enum GlobalShortcutAction {
     NextMacro,
     #[cfg(target_os = "linux")]
     PrevMacro,
+    #[cfg(target_os = "linux")]
+    ToggleLoop,
 }
 
 #[cfg(target_os = "linux")]
@@ -297,16 +299,31 @@ fn get_macro_nav_queue() -> &'static Mutex<VecDeque<usize>> {
 }
 
 #[cfg(target_os = "linux")]
+static LOOP_TOGGLE_QUEUE: OnceLock<Mutex<VecDeque<bool>>> = OnceLock::new();
+
+#[cfg(target_os = "linux")]
+fn get_loop_toggle_queue() -> &'static Mutex<VecDeque<bool>> {
+    LOOP_TOGGLE_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+#[cfg(target_os = "linux")]
 fn macro_nav_sub() -> impl Stream<Item = Message> {
     cosmic::iced::stream::channel(32, |mut sender: cosmic::iced::futures::channel::mpsc::Sender<Message>| async move {
         loop {
             async_std::task::sleep(std::time::Duration::from_millis(50)).await;
-            let pending: Vec<usize> = get_macro_nav_queue()
+            let pending_nav: Vec<usize> = get_macro_nav_queue()
                 .try_lock()
                 .map(|mut q| q.drain(..).collect())
                 .unwrap_or_default();
-            for idx in pending {
+            for idx in pending_nav {
                 let _ = sender.send(SelectMacro(idx)).await;
+            }
+            let pending_toggles: Vec<bool> = get_loop_toggle_queue()
+                .try_lock()
+                .map(|mut q| q.drain(..).collect())
+                .unwrap_or_default();
+            for enabled in pending_toggles {
+                let _ = sender.send(ToggleLoopMode(enabled)).await;
             }
         }
     })
@@ -336,6 +353,8 @@ fn execute_global_shortcut_action(
         GlobalShortcutAction::NextMacro => navigate_macro_from_shortcut(config, 1),
         #[cfg(target_os = "linux")]
         GlobalShortcutAction::PrevMacro => navigate_macro_from_shortcut(config, -1),
+        #[cfg(target_os = "linux")]
+        GlobalShortcutAction::ToggleLoop => toggle_loop_mode_from_shortcut(config),
     }
 }
 
@@ -357,6 +376,14 @@ fn navigate_macro_from_shortcut(config: &Config, direction: isize) {
     };
     if let Ok(mut q) = get_macro_nav_queue().lock() {
         q.push_back(next_idx);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn toggle_loop_mode_from_shortcut(config: &Config) {
+    let current = config.get::<bool>("loop_mode_enabled").unwrap_or(false);
+    if let Ok(mut q) = get_loop_toggle_queue().lock() {
+        q.push_back(!current);
     }
 }
 
@@ -544,8 +571,10 @@ impl cosmic::Application for App {
                         .preferred_trigger(Some("<Ctrl><Alt>Right"));
                     let prev_macro_sc = NewShortcut::new("prev_macro", "Select Previous Macro")
                         .preferred_trigger(Some("<Ctrl><Alt>Left"));
+                    let toggle_loop_sc = NewShortcut::new("toggle_loop_mode", "Toggle Loop Mode")
+                        .preferred_trigger(Some("<Ctrl><Alt>L"));
 
-                    if block_on(shortcuts.bind_shortcuts(&session, &[run_macro_sc, stop_loop_sc, next_macro_sc, prev_macro_sc], None)).is_ok() {
+                    if block_on(shortcuts.bind_shortcuts(&session, &[run_macro_sc, stop_loop_sc, next_macro_sc, prev_macro_sc, toggle_loop_sc], None)).is_ok() {
                         if let Ok(mut activations) = block_on(shortcuts.receive_activated()) {
                             let enigo_clone = Arc::clone(&app.enigo);
                             let config_clone = app.config.clone();
@@ -581,6 +610,14 @@ impl cosmic::Application for App {
                                         "prev_macro" => {
                                             spawn_global_shortcut_action(
                                                 GlobalShortcutAction::PrevMacro,
+                                                config_clone.clone(),
+                                                Arc::clone(&enigo_clone),
+                                                Arc::clone(&is_looping_clone),
+                                            );
+                                        }
+                                        "toggle_loop_mode" => {
+                                            spawn_global_shortcut_action(
+                                                GlobalShortcutAction::ToggleLoop,
                                                 config_clone.clone(),
                                                 Arc::clone(&enigo_clone),
                                                 Arc::clone(&is_looping_clone),

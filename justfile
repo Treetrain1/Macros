@@ -21,9 +21,11 @@ clean:
 
 # Install the project
 install:
-    install -Dm0755 {{TARGET}} /usr/bin/macros
-    install -Dm0644 res/macros.desktop /usr/share/applications/macros.desktop
+    sudo install -Dm0755 {{TARGET}} /usr/bin/macros
+    sudo install -Dm0644 res/macros.desktop /usr/share/applications/macros.desktop
 
 # Uninstall the project
 uninstall:
-    rm /usr/bin/macros /usr/share/applications/macros.desktop
+    sudo rm -f /usr/bin/macros /usr/share/applications/macros.desktop
+
+replace: build uninstall install

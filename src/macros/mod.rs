@@ -2,6 +2,11 @@ use enigo::agent::Token;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) mod runner;
+pub(crate) mod thread_pool;
+pub(crate) mod thread;
+pub(crate) mod loop_control;
+
 fn default_macro_id() -> String {
     Uuid::new_v4().simple().to_string()
 }

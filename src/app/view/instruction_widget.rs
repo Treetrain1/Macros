@@ -1,4 +1,4 @@
-use super::{DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME, ICON_DOWN, ICON_REMOVE, ICON_UP};
+use super::{icon_path, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::input::ui_utils::{axis_to_index, coordinate_to_index, direction_to_index, index_to_axis, index_to_coordinate, index_to_direction};
@@ -17,8 +17,8 @@ pub(crate) fn instruction_row<'a>(
     key_capture_index: Option<usize>,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
-    let compact_icon_button = |icon_path: &'static str| {
-        widget::button::icon(widget::icon::from_path(PathBuf::from(icon_path))).padding(8)
+    let compact_icon_button = |path: PathBuf| {
+        widget::button::icon(widget::icon::from_path(path)).padding(8)
     };
 
     let instruction: Element<Message> = match ins {
@@ -131,17 +131,17 @@ pub(crate) fn instruction_row<'a>(
         cosmic::widget::container(
             cosmic::widget::row![
                 cosmic::widget::tooltip(
-                    compact_icon_button(ICON_UP).on_press(ReorderInstruction(index, -1)),
+                    compact_icon_button(icon_path("up.svg")).on_press(ReorderInstruction(index, -1)),
                     cosmic::widget::container("Move up"),
                     cosmic::widget::tooltip::Position::Top
                 ),
                 cosmic::widget::tooltip(
-                    compact_icon_button(ICON_DOWN).on_press(ReorderInstruction(index, 1)),
+                    compact_icon_button(icon_path("down.svg")).on_press(ReorderInstruction(index, 1)),
                     cosmic::widget::container("Move down"),
                     cosmic::widget::tooltip::Position::Bottom
                 ),
                 cosmic::widget::tooltip(
-                    compact_icon_button(ICON_REMOVE).on_press(RemoveInstruction(index as isize)),
+                    compact_icon_button(icon_path("remove.svg")).on_press(RemoveInstruction(index as isize)),
                     cosmic::widget::container("Remove instruction"),
                     cosmic::widget::tooltip::Position::Left
                 ),

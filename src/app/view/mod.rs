@@ -13,9 +13,13 @@ pub(crate) const DEFAULT_WAIT_TIME: u64 = 1000;
 pub(crate) const DEFAULT_SCROLL_AMOUNT: i32 = 4;
 pub(crate) const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
 
-pub(crate) const ICON_REMOVE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/remove.svg");
-pub(crate) const ICON_UP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/up.svg");
-pub(crate) const ICON_DOWN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/down.svg");
+pub(crate) fn icon_path(name: &str) -> std::path::PathBuf {
+    let installed = std::path::PathBuf::from("/usr/share/macros/icons").join(name);
+    if installed.exists() {
+        return installed;
+    }
+    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/")).join(name)
+}
 
 pub(crate) fn build_view(app: &App) -> Element<'_, Message> {
     let spacing = cosmic::theme::active().cosmic().spacing;

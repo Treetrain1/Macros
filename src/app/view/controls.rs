@@ -1,4 +1,4 @@
-use super::ICON_REMOVE;
+use super::icon_path;
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use cosmic::iced::widget::button;
@@ -12,8 +12,8 @@ pub(crate) fn macro_selector_row<'a>(
     confirm_remove_macro: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
-    let compact_icon_button = |icon_path: &'static str| {
-        widget::button::icon(widget::icon::from_path(PathBuf::from(icon_path))).padding(8)
+    let compact_icon_button = |path: PathBuf| {
+        widget::button::icon(widget::icon::from_path(path)).padding(8)
     };
 
     let symbol_label_button = |symbol: &'static str, label: &'static str| {
@@ -32,9 +32,9 @@ pub(crate) fn macro_selector_row<'a>(
 
     let new_macro_button = symbol_label_button("＋", "New macro").on_press(NewMacro);
     let remove_macro_button = if has_selected {
-        compact_icon_button(ICON_REMOVE).on_press(RemoveMacro)
+        compact_icon_button(icon_path("remove.svg")).on_press(RemoveMacro)
     } else {
-        compact_icon_button(ICON_REMOVE)
+        compact_icon_button(icon_path("remove.svg"))
     };
 
     cosmic::widget::row![

@@ -1,21 +1,21 @@
 # Macros
 
-A WIP libcosmic app to manage and run macros on Linux
+A libcosmic app to manage and run macros on Linux.\
+Windows support is experimental/unfinished.
 
 ## Building
 
 ### Build
 ```bash
-git clone https://github.com/Treetrain1/macros.git
+git clone https://github.com/EthanRStokes/macros.git
 cd macros
 just
 ```
 
 ### Installation
 
+(Future) AUR: `macros-git`
+
 ```bash
-sudo just install
+just install
 ```
-
-
-<small>Warning: This project contains hideous code. Prepare your eyes before an endeavour.</small>

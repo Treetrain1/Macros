@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 
+use std::thread::sleep;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
 use cosmic::cosmic_config::{Config, ConfigGet};
@@ -24,7 +25,7 @@ pub(crate) fn get_loop_toggle_queue() -> &'static Mutex<VecDeque<bool>> {
 pub(crate) fn macro_nav_sub() -> impl Stream<Item = Message> {
     cosmic::iced::stream::channel(32, |mut sender: cosmic::iced::futures::channel::mpsc::Sender<Message>| async move {
         loop {
-            async_std::task::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let pending_nav: Vec<usize> = get_macro_nav_queue()
                 .try_lock()
                 .map(|mut q| q.drain(..).collect())

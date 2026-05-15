@@ -20,7 +20,7 @@ pub(crate) fn hotkey_sub() -> impl Stream<Item = Message> {
                         .unwrap();
                 }
             }
-            async_std::task::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     })
 }

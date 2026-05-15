@@ -38,8 +38,34 @@ impl Macro {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "InstructionDe")]
 pub(crate) enum Instruction {
     Token(Token),
-    Wait(u64),
-    Script(String)
+    Wait(u64, u64),
+    Script(String),
+}
+
+#[derive(Deserialize)]
+enum InstructionDe {
+    Token(Token),
+    Wait(WaitDe),
+    Script(String),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WaitDe {
+    Legacy(u64),
+    Current(u64, u64),
+}
+
+impl From<InstructionDe> for Instruction {
+    fn from(de: InstructionDe) -> Self {
+        match de {
+            InstructionDe::Token(t)                    => Instruction::Token(t),
+            InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(d, 0),
+            InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
+            InstructionDe::Script(s)                   => Instruction::Script(s),
+        }
+    }
 }

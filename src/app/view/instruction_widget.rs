@@ -107,11 +107,14 @@ pub(crate) fn instruction_row<'a>(
                 }
             }
         }
-        Instruction::Wait(duration) => {
+        Instruction::Wait(duration, randomness) => {
             cosmic::widget::row![
                 widget::text::body("Wait (ms):".to_string()).align_y(Alignment::Center),
                 widget::text_input("", duration.to_string())
-                    .on_input(move |x| EditInstruction(index, Instruction::Wait(x.parse().unwrap_or(duration)))),
+                    .on_input(move |x| EditInstruction(index, Instruction::Wait(x.parse().unwrap_or(duration), randomness))),
+                widget::text::body("Random ±".to_string()).align_y(Alignment::Center),
+                widget::text_input("0", randomness.to_string())
+                    .on_input(move |x| EditInstruction(index, Instruction::Wait(duration, x.parse().unwrap_or(randomness)))),
             ].spacing(10).into()
         }
         Instruction::Script(script) => {
@@ -163,7 +166,7 @@ pub(crate) fn add_instruction_at(index: usize, selected: usize) -> Message {
     use enigo::{Key, Button, Direction, Coordinate, Axis};
     use enigo::agent::Token;
     match selected {
-        0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME)),
+        0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME, 0)),
         1 => AddInstruction(index, Instruction::Token(Token::Text("text".into()))),
         2 => AddInstruction(index, Instruction::Token(Token::Key(Key::Unicode('a'), Direction::Click))),
         3 => AddInstruction(index, Instruction::Token(Token::Button(Button::Left, Direction::Click))),

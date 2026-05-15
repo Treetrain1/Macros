@@ -24,8 +24,19 @@ impl Macro {
 
         for ins in self.code {
             #[allow(unreachable_patterns)] match ins {
-                Instruction::Wait(duration) => {
-                    sleep(std::time::Duration::from_millis(duration));
+                Instruction::Wait(duration, randomness) => {
+                    let actual = if randomness > 0 {
+                        use rand::Rng;
+                        let offset = rand::thread_rng().gen_range(0..=randomness);
+                        if rand::random::<bool>() {
+                            duration.saturating_add(offset)
+                        } else {
+                            duration.saturating_sub(offset)
+                        }
+                    } else {
+                        duration
+                    };
+                    sleep(std::time::Duration::from_millis(actual));
                 }
                 Instruction::Script(script) => {
                     println!("Running script: {script}");

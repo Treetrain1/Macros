@@ -1,21 +1,21 @@
-use std::sync::Arc;
-use cosmic::app::Task;
-use cosmic::cosmic_config::ConfigGet;
-use enigo::agent::Token;
-use tracing::warn;
-use crate::app::App;
+#[cfg(not(target_os = "linux"))]
+use crate::app::hotkeys::{spawn_global_shortcut_action, GlobalShortcutAction};
+use crate::app::key_mapping::{map_iced_key_to_enigo_key, map_iced_physical_key_to_enigo_key};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-use crate::app::key_mapping::{map_iced_key_to_enigo_key, map_iced_physical_key_to_enigo_key};
 use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
+use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
 use crate::macros::loop_control;
 use crate::macros::{thread, Instruction};
+use cosmic::app::Task;
+use cosmic::cosmic_config::ConfigGet;
+use cosmic::iced::keyboard;
+use enigo::agent::Token;
 #[cfg(not(target_os = "linux"))]
 use global_hotkey::HotKeyState;
-#[cfg(not(target_os = "linux"))]
-use crate::app::hotkeys::{spawn_global_shortcut_action, GlobalShortcutAction};
-use cosmic::iced::keyboard;
+use std::sync::Arc;
+use tracing::warn;
 
 pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
     match message {

@@ -3,11 +3,11 @@ pub(crate) mod linux;
 #[cfg(not(target_os = "linux"))]
 pub(crate) mod non_linux;
 
-use std::sync::{Arc, Mutex};
+use crate::config;
 use cosmic::cosmic_config::{Config, ConfigGet};
 use enigo::Enigo;
+use std::sync::{Arc, Mutex};
 use tracing::warn;
-use crate::config;
 
 pub(crate) const LOOP_ITERATION_DELAY_MS: u64 = 1;
 

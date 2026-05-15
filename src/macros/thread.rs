@@ -1,9 +1,9 @@
+use crate::macros::thread_pool::ThreadPool;
+use crate::macros::Macro;
+use enigo::Enigo;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use enigo::Enigo;
 use tracing::warn;
-use crate::macros::Macro;
-use crate::macros::thread_pool::ThreadPool;
 
 impl Macro {
     pub(crate) fn into_loop_task(

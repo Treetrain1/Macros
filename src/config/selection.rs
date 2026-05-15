@@ -1,7 +1,7 @@
+use super::persistence::get_macros_from_config;
+use crate::macros::Macro;
 use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use tracing::warn;
-use crate::macros::Macro;
-use super::persistence::get_macros_from_config;
 
 const SELECTED_MACRO_ID_KEY: &str = "selected_macro_id";
 

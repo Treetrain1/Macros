@@ -1,15 +1,15 @@
-use std::path::PathBuf;
-use cosmic::{widget, Element};
-use cosmic::iced::Alignment;
-use cosmic::iced::widget::button;
-use enigo::agent::Token;
-use enigo::{Axis, Coordinate, Direction};
+use super::{DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME, ICON_DOWN, ICON_REMOVE, ICON_UP};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+use crate::input::ui_utils::{axis_to_index, coordinate_to_index, direction_to_index, index_to_axis, index_to_coordinate, index_to_direction};
+use crate::input::{get_mouse_button_names, index_to_mouse_button, key_to_string, mouse_button_to_index};
 use crate::macros::Instruction;
-use crate::input::{key_to_string, get_mouse_button_names, mouse_button_to_index, index_to_mouse_button};
-use crate::input::ui_utils::{direction_to_index, index_to_direction, coordinate_to_index, index_to_coordinate, axis_to_index, index_to_axis};
-use super::{ICON_REMOVE, ICON_UP, ICON_DOWN, DEFAULT_WAIT_TIME, DEFAULT_SCROLL_AMOUNT};
+use cosmic::iced::widget::button;
+use cosmic::iced::Alignment;
+use cosmic::{widget, Element};
+use enigo::agent::Token;
+use enigo::{Axis, Coordinate, Direction};
+use std::path::PathBuf;
 
 pub(crate) fn instruction_row<'a>(
     index: usize,
@@ -163,7 +163,7 @@ pub(crate) fn instruction_row<'a>(
 }
 
 pub(crate) fn add_instruction_at(index: usize, selected: usize) -> Message {
-    use enigo::{Key, Button, Direction, Coordinate, Axis};
+    use enigo::{Axis, Button, Coordinate, Direction, Key};
     use enigo::agent::Token;
     match selected {
         0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME, 0)),

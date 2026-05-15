@@ -2,11 +2,11 @@ pub(crate) mod controls;
 pub(crate) mod editor;
 pub(crate) mod instruction_widget;
 
-use cosmic::Element;
-use cosmic::iced::{Alignment, Length};
-use crate::app::App;
 use crate::app::message::Message;
+use crate::app::App;
 use controls::{macro_selector_row, run_controls_row};
+use cosmic::iced::{Alignment, Length};
+use cosmic::Element;
 use editor::macro_editor;
 
 pub(crate) const DEFAULT_WAIT_TIME: u64 = 1000;

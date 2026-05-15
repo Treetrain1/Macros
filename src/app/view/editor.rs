@@ -1,12 +1,11 @@
-use cosmic::{widget, Element};
-use cosmic::iced::{Alignment, Length};
-use cosmic::iced::widget::button;
-use cosmic::Apply;
+use super::instruction_widget::{add_instruction_at, instruction_row};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::macros::Macro;
-use super::instruction_widget::{instruction_row, add_instruction_at};
-use super::DEFAULT_WAIT_TIME;
+use cosmic::iced::widget::button;
+use cosmic::iced::{Alignment, Length};
+use cosmic::Apply;
+use cosmic::{widget, Element};
 
 pub(crate) fn macro_editor<'a>(
     mac: &'a Macro,

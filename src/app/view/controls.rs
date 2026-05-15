@@ -1,10 +1,10 @@
-use std::path::PathBuf;
-use cosmic::{widget, Element};
-use cosmic::iced::{Alignment, Length};
-use cosmic::iced::widget::button;
+use super::ICON_REMOVE;
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-use super::{ICON_REMOVE};
+use cosmic::iced::widget::button;
+use cosmic::iced::{Alignment, Length};
+use cosmic::{widget, Element};
+use std::path::PathBuf;
 
 pub(crate) fn macro_selector_row<'a>(
     macro_strs: &'a [String],

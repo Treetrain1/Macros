@@ -1,11 +1,11 @@
+use crate::macros::{Instruction, Macro};
+use enigo::agent::Token::{Button, Key, MoveMouse, Raw, Scroll, Text};
+use enigo::Key as EnigoKey;
+use enigo::{Enigo, Keyboard, Mouse};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
-use enigo::{Enigo, Keyboard, Mouse};
-use enigo::agent::Token::{Button, Key, MoveMouse, Raw, Scroll, Text};
-use enigo::Key as EnigoKey;
 use tracing::warn;
-use crate::macros::{Instruction, Macro};
 
 impl Macro {
     pub(crate) fn run(self, enigo: Arc<Mutex<Enigo>>) {

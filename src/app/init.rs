@@ -1,16 +1,16 @@
-use std::sync::{Arc, Mutex};
-use cosmic::app::{Core, Task};
-use cosmic::cosmic_config::ConfigGet;
-use cosmic::cosmic_config::Config;
-use slotmap::{SecondaryMap, SlotMap};
-use tracing::warn;
-use crate::app::App;
 use crate::app::message::Message;
 use crate::app::state::{EditorUiState, ExecutionState, MacroLibraryState};
+use crate::app::App;
 use crate::config;
-use crate::macros::Macro;
 use crate::macros::runner::make_enigo;
 use crate::macros::thread_pool::ThreadPool;
+use crate::macros::Macro;
+use cosmic::app::{Core, Task};
+use cosmic::cosmic_config::Config;
+use cosmic::cosmic_config::ConfigGet;
+use slotmap::{SecondaryMap, SlotMap};
+use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 pub(crate) fn build_app(core: Core) -> App {
     #[cfg(not(target_os = "linux"))]

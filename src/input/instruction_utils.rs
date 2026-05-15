@@ -1,6 +1,6 @@
+use crate::macros::Instruction;
 use enigo::agent::Token;
 use enigo::{Axis, Button, Coordinate, Direction, Key};
-use crate::macros::Instruction;
 
 pub(crate) fn create_default_instruction(instruction_type: usize) -> Option<Instruction> {
     match instruction_type {

@@ -5,9 +5,9 @@ mod config;
 mod input;
 mod app;
 
+use app::App;
 use cosmic::app::Settings;
 use cosmic::iced::Size;
-use app::App;
 
 /// Runs application with these settings
 #[rustfmt::skip]

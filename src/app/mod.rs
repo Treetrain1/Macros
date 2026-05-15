@@ -7,13 +7,13 @@ pub(crate) mod subscription;
 pub(crate) mod update;
 pub(crate) mod view;
 
+use crate::app::message::Message;
+#[cfg(not(target_os = "linux"))]
+use crate::app::state::HotkeyState;
+use crate::app::state::{EditorUiState, ExecutionState, MacroLibraryState};
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::Config;
 use cosmic::{executor, ApplicationExt, Element};
-use crate::app::message::Message;
-use crate::app::state::{EditorUiState, ExecutionState, MacroLibraryState};
-#[cfg(not(target_os = "linux"))]
-use crate::app::state::HotkeyState;
 
 pub(crate) struct App {
     pub(crate) core: Core,

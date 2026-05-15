@@ -1,6 +1,6 @@
-use cosmic::iced::{keyboard, Subscription};
 use crate::app::message::Message;
 use crate::app::App;
+use cosmic::iced::{keyboard, Subscription};
 
 pub(crate) fn build_subscription(app: &App) -> Subscription<Message> {
     let key_capture_subscription = if app.editor_ui.key_capture_index.is_some() {

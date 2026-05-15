@@ -1,9 +1,9 @@
+use super::APP_ID;
+use crate::macros::Macro;
+use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use tracing::warn;
-use crate::macros::Macro;
-use super::APP_ID;
 
 const MACROS_DIR_NAME: &str = "macros";
 const MACRO_FILE_EXTENSION: &str = "json";

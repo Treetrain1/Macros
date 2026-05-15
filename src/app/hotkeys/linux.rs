@@ -1,14 +1,14 @@
 #![cfg(target_os = "linux")]
 
-use std::thread::sleep;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
-use cosmic::cosmic_config::{Config, ConfigGet};
-use cosmic::iced::futures::{SinkExt, Stream, StreamExt};
+use super::{spawn_global_shortcut_action, GlobalShortcutAction};
 use crate::app::message::Message;
 use crate::config;
-use super::{GlobalShortcutAction, spawn_global_shortcut_action};
+use cosmic::cosmic_config::{Config, ConfigGet};
+use cosmic::iced::futures::{SinkExt, Stream, StreamExt};
 use enigo::Enigo;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::sleep;
 
 static MACRO_NAV_QUEUE: OnceLock<Mutex<VecDeque<usize>>> = OnceLock::new();
 

@@ -1,12 +1,12 @@
 #![cfg(not(target_os = "linux"))]
 
+use crate::app::message::Message;
+use crate::app::state::HotkeyState;
+use cosmic::iced::futures::channel::mpsc::Sender;
 use cosmic::iced::futures::SinkExt;
 use cosmic::iced::futures::Stream;
 use cosmic::iced::stream::channel;
-use cosmic::iced::futures::channel::mpsc::Sender;
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::{Code, HotKey, Modifiers}};
-use crate::app::message::Message;
-use crate::app::state::HotkeyState;
+use global_hotkey::{hotkey::{Code, HotKey, Modifiers}, GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
 pub(crate) fn hotkey_sub() -> impl Stream<Item = Message> {
     channel(32, |mut sender: Sender<Message>| async move {

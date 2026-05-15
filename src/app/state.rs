@@ -1,13 +1,13 @@
-use std::sync::{Arc, Mutex};
+use crate::config::{get_macros_from_config, get_selected_macro_id, set_selected_macro_id};
+use crate::macros::thread_pool::ThreadPool;
+use crate::macros::Macro;
 use cosmic::cosmic_config::{Config, ConfigGet};
 use enigo::Enigo;
-use slotmap::{DefaultKey, SecondaryMap, SlotMap};
-use tracing::warn;
-use crate::macros::Macro;
-use crate::config::{get_macros_from_config, get_selected_macro_id, set_selected_macro_id};
 #[cfg(not(target_os = "linux"))]
 use global_hotkey::GlobalHotKeyManager;
-use crate::macros::thread_pool::ThreadPool;
+use slotmap::{DefaultKey, SecondaryMap, SlotMap};
+use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 pub(crate) struct MacroLibraryState {
     pub(crate) macro_selected: Option<usize>,

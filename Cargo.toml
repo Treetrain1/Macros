@@ -16,21 +16,21 @@ enigo = {
     rev = "6f311ea",
     features = ["serde", "x11rb", "wayland"]
 }
-rand = "0.8"
+rand = "0.10.1"
 slotmap = { version = "1.0.7", features = ["serde"] }
-tokio = { version = "1.52.2", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
 global-hotkey = "0.8.0"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "0e0960f"
+rev = "631c81b"
 version = "1.0.0"
 default-features = false
 
 [target.'cfg(windows)'.dependencies]
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "0e0960f",
+    rev = "631c81b",
     version = "1.0.0",
     default-features = false,
     features = [
@@ -45,7 +45,7 @@ libcosmic = {
 [target.'cfg(target_os = "linux")'.dependencies]
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "0e0960f",
+    rev = "631c81b",
     version = "1.0.0",
     default-features = false,
     features = [

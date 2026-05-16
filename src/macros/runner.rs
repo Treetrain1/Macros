@@ -5,6 +5,7 @@ use enigo::{Enigo, Keyboard, Mouse};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
+use rand::RngExt;
 use tracing::warn;
 
 impl Macro {
@@ -26,8 +27,7 @@ impl Macro {
             #[allow(unreachable_patterns)] match ins {
                 Instruction::Wait(duration, randomness) => {
                     let actual = if randomness > 0 {
-                        use rand::Rng;
-                        let offset = rand::thread_rng().gen_range(0..=randomness);
+                        let offset = rand::rng().random_range(0..=randomness);
                         if rand::random::<bool>() {
                             duration.saturating_add(offset)
                         } else {

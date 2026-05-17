@@ -45,6 +45,8 @@ pub(crate) fn build_view(app: &App) -> Element<'_, Message> {
             mac,
             app.editor_ui.confirm_clear_instructions,
             app.editor_ui.key_capture_index,
+            !app.editor_ui.undo_stack.is_empty(),
+            !app.editor_ui.redo_stack.is_empty(),
             &spacing,
         ));
     }

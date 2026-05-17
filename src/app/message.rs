@@ -3,12 +3,13 @@ use cosmic::iced::keyboard;
 #[cfg(not(target_os = "linux"))]
 use global_hotkey::GlobalHotKeyEvent;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Message {
     SelectMacro(usize),
     RunMacro,
     ToggleLoopMode(bool),
     SetTitle(String),
+    SetDescription(String),
     AddInstruction(usize, Instruction),
     EditInstruction(usize, Instruction),
     StartKeyCapture(usize),
@@ -22,6 +23,8 @@ pub(crate) enum Message {
     SaveMacro,
     NewMacro,
     RemoveMacro,
+    Undo,
+    Redo,
     #[cfg(not(target_os = "linux"))]
     GlobalHotkeyEvent(GlobalHotKeyEvent),
 }

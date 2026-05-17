@@ -17,6 +17,16 @@ use global_hotkey::HotKeyState;
 use std::sync::Arc;
 use tracing::warn;
 
+fn push_undo(app: &mut App) {
+    if let Some(mac) = &app.macro_lib.current_macro {
+        if app.editor_ui.undo_stack.len() >= 50 {
+            app.editor_ui.undo_stack.remove(0);
+        }
+        app.editor_ui.undo_stack.push(mac.code.clone());
+        app.editor_ui.redo_stack.clear();
+    }
+}
+
 pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
     match message {
         SetTitle(title) => {
@@ -25,9 +35,41 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 auto_save_current_macro(app);
             }
         }
+        SetDescription(desc) => {
+            if let Some(mac) = &mut app.macro_lib.current_macro {
+                mac.description = desc;
+                auto_save_current_macro(app);
+            }
+        }
         SelectMacro(selected) => {
             let config = app.config.clone();
             app.macro_lib.update_macro(&config, Some(selected));
+            app.editor_ui.undo_stack.clear();
+            app.editor_ui.redo_stack.clear();
+        }
+        Undo => {
+            if let Some(prev_code) = app.editor_ui.undo_stack.pop() {
+                let current_code = app.macro_lib.current_macro.as_ref().map(|m| m.code.clone());
+                if let Some(current) = current_code {
+                    app.editor_ui.redo_stack.push(current);
+                }
+                if let Some(mac) = &mut app.macro_lib.current_macro {
+                    mac.code = prev_code;
+                }
+                auto_save_current_macro(app);
+            }
+        }
+        Redo => {
+            if let Some(next_code) = app.editor_ui.redo_stack.pop() {
+                let current_code = app.macro_lib.current_macro.as_ref().map(|m| m.code.clone());
+                if let Some(current) = current_code {
+                    app.editor_ui.undo_stack.push(current);
+                }
+                if let Some(mac) = &mut app.macro_lib.current_macro {
+                    mac.code = next_code;
+                }
+                auto_save_current_macro(app);
+            }
         }
         RunMacro => {
             if let Some(mac) = app.macro_lib.current_macro.clone() {
@@ -66,6 +108,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         AddInstruction(index, instruction) => {
+            push_undo(app);
             if let Some(mac) = &mut app.macro_lib.current_macro {
                 mac.code.insert(index, instruction);
                 auto_save_current_macro(app);
@@ -106,15 +149,18 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         RemoveInstruction(index) => {
-            if let Some(mac) = &mut app.macro_lib.current_macro {
+            if let Some(mac) = &app.macro_lib.current_macro {
                 if !mac.code.is_empty() && index >= 0 {
-                    mac.code.remove(index as usize);
-                    auto_save_current_macro(app);
+                    push_undo(app);
+                    if let Some(mac) = &mut app.macro_lib.current_macro {
+                        mac.code.remove(index as usize);
+                        auto_save_current_macro(app);
+                    }
                 }
             }
         }
         ReorderInstruction(index, direction) => {
-            if let Some(mac) = &mut app.macro_lib.current_macro {
+            if let Some(mac) = &app.macro_lib.current_macro {
                 let len = mac.code.len();
                 if len > 1 && index < len {
                     let new_index = if direction < 0 {
@@ -122,10 +168,12 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     } else {
                         if index < len - 1 { index + 1 } else { index }
                     };
-
                     if new_index != index {
-                        mac.code.swap(index, new_index);
-                        auto_save_current_macro(app);
+                        push_undo(app);
+                        if let Some(mac) = &mut app.macro_lib.current_macro {
+                            mac.code.swap(index, new_index);
+                            auto_save_current_macro(app);
+                        }
                     }
                 }
             }
@@ -143,10 +191,13 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     },
                     |generation| ClearInstructionsTimeout(generation).into(),
                 );
-            } else if let Some(mac) = &mut app.macro_lib.current_macro {
-                mac.code.clear();
-                auto_save_current_macro(app);
-                app.editor_ui.confirm_clear_instructions = false;
+            } else {
+                push_undo(app);
+                if let Some(mac) = &mut app.macro_lib.current_macro {
+                    mac.code.clear();
+                    auto_save_current_macro(app);
+                    app.editor_ui.confirm_clear_instructions = false;
+                }
             }
         }
         ClearInstructionsTimeout(generation) => {

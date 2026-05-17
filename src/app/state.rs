@@ -1,6 +1,6 @@
 use crate::config::{get_macros_from_config, get_selected_macro_id, set_selected_macro_id};
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::Macro;
+use crate::macros::{Instruction, Macro};
 use cosmic::cosmic_config::{Config, ConfigGet};
 use enigo::Enigo;
 #[cfg(not(target_os = "linux"))]
@@ -90,6 +90,8 @@ pub(crate) struct EditorUiState {
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) clear_confirm_generation: u64,
     pub(crate) key_capture_index: Option<usize>,
+    pub(crate) undo_stack: Vec<Vec<Instruction>>,
+    pub(crate) redo_stack: Vec<Vec<Instruction>>,
 }
 
 impl EditorUiState {
@@ -99,6 +101,8 @@ impl EditorUiState {
             confirm_clear_instructions: false,
             clear_confirm_generation: 0,
             key_capture_index: None,
+            undo_stack: vec![],
+            redo_stack: vec![],
         }
     }
 

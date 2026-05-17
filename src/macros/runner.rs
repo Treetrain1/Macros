@@ -25,6 +25,7 @@ impl Macro {
 
         for ins in self.code {
             #[allow(unreachable_patterns)] match ins {
+                Instruction::Comment(_) => {}
                 Instruction::Wait(duration, randomness) => {
                     let actual = if randomness > 0 {
                         let offset = rand::rng().random_range(0..=randomness);

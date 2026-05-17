@@ -43,6 +43,7 @@ pub(crate) enum Instruction {
     Token(Token),
     Wait(u64, u64),
     Script(String),
+    Comment(String),
 }
 
 #[derive(Deserialize)]
@@ -50,6 +51,7 @@ enum InstructionDe {
     Token(Token),
     Wait(WaitDe),
     Script(String),
+    Comment(String),
 }
 
 #[derive(Deserialize)]
@@ -66,6 +68,7 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(d, 0),
             InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
             InstructionDe::Script(s)                   => Instruction::Script(s),
+            InstructionDe::Comment(s)                  => Instruction::Comment(s),
         }
     }
 }

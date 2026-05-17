@@ -124,6 +124,13 @@ pub(crate) fn instruction_row<'a>(
                     .on_input(move |x| EditInstruction(index, Instruction::Script(x))),
             ].spacing(10).into()
         }
+        Instruction::Comment(text) => {
+            cosmic::widget::row![
+                widget::text::body("//".to_string()).align_y(Alignment::Center),
+                widget::text_input("Comment", text)
+                    .on_input(move |x| EditInstruction(index, Instruction::Comment(x))),
+            ].spacing(10).into()
+        }
     };
 
     cosmic::widget::row![
@@ -146,7 +153,7 @@ pub(crate) fn instruction_row<'a>(
                     cosmic::widget::tooltip::Position::Left
                 ),
                 cosmic::widget::dropdown(
-                    &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Run Script"],
+                    &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Run Script", "Comment"],
                     None,
                     move |selected| add_instruction_at(index, selected),
                 )
@@ -173,6 +180,7 @@ pub(crate) fn add_instruction_at(index: usize, selected: usize) -> Message {
         4 => AddInstruction(index, Instruction::Token(Token::MoveMouse(0, 0, Coordinate::Rel))),
         5 => AddInstruction(index, Instruction::Token(Token::Scroll(DEFAULT_SCROLL_AMOUNT, Axis::Vertical))),
         6 => AddInstruction(index, Instruction::Script("script".into())),
+        7 => AddInstruction(index, Instruction::Comment(String::new())),
         _ => unreachable!(),
     }
 }

@@ -11,6 +11,8 @@ pub(crate) fn macro_editor<'a>(
     mac: &'a Macro,
     confirm_clear_instructions: bool,
     key_capture_index: Option<usize>,
+    can_undo: bool,
+    can_redo: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
     let pill_button = |label: &'static str| {
@@ -23,6 +25,17 @@ pub(crate) fn macro_editor<'a>(
         "⚠ Clear instructions"
     };
 
+    let undo_button = if can_undo {
+        pill_button("↩ Undo").on_press(Undo)
+    } else {
+        pill_button("↩ Undo")
+    };
+    let redo_button = if can_redo {
+        pill_button("↪ Redo").on_press(Redo)
+    } else {
+        pill_button("↪ Redo")
+    };
+
     let mut instructions: Vec<Element<Message>> = vec![];
 
     for (index, ins) in mac.code.iter().cloned().enumerate() {
@@ -32,7 +45,7 @@ pub(crate) fn macro_editor<'a>(
     let len = mac.code.len();
     instructions.push(
         cosmic::widget::dropdown(
-            &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Run Script"],
+            &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Run Script", "Comment"],
             None,
             move |selected| add_instruction_at(len, selected),
         ).into()
@@ -57,6 +70,16 @@ pub(crate) fn macro_editor<'a>(
                         widget::column::with_children(instructions).spacing(spacing.space_xs).into(),
                         cosmic::widget::container(
                             cosmic::widget::row![
+                                cosmic::widget::tooltip(
+                                    undo_button,
+                                    cosmic::widget::container("Undo last instruction change"),
+                                    cosmic::widget::tooltip::Position::Top
+                                ),
+                                cosmic::widget::tooltip(
+                                    redo_button,
+                                    cosmic::widget::container("Redo last undone change"),
+                                    cosmic::widget::tooltip::Position::Top
+                                ),
                                 cosmic::widget::tooltip(
                                     pill_button(clear_instructions_label).on_press(ClearInstructions),
                                     cosmic::widget::container(if confirm_clear_instructions {

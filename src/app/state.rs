@@ -121,6 +121,8 @@ pub(crate) struct EditorUiState {
     pub(crate) hotkey_bindings: Vec<HotkeyBinding>,
     /// (macro index, key combo) for the Add per-macro hotkey form.
     pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
+    pub(crate) scroll_offset_y: f32,
+    pub(crate) scroll_viewport_height: f32,
 }
 
 impl EditorUiState {
@@ -139,6 +141,8 @@ impl EditorUiState {
             combo_capture: None,
             hotkey_bindings: vec![],
             pending_macro_hotkey: None,
+            scroll_offset_y: 0.0,
+            scroll_viewport_height: 600.0,
         }
     }
 

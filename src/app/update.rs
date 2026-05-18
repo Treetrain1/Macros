@@ -415,6 +415,11 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 return handle_update(app, SaveHotkeyBindings);
             }
         }
+        EditorScrolled(offset_y, viewport_h) => {
+            app.editor_ui.scroll_offset_y = offset_y;
+            app.editor_ui.scroll_viewport_height = viewport_h;
+        }
+        NoOp => {}
         ExecuteHotkeyAction(action) => {
             match &action {
                 HotkeyAction::RunMacro | HotkeyAction::RunSpecificMacro(_) => {

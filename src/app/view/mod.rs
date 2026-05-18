@@ -59,6 +59,8 @@ fn build_main_view(app: &App) -> Element<'_, Message> {
             !app.editor_ui.undo_stack.is_empty(),
             !app.editor_ui.redo_stack.is_empty(),
             &spacing,
+            app.editor_ui.scroll_offset_y,
+            app.editor_ui.scroll_viewport_height,
         ));
     }
 

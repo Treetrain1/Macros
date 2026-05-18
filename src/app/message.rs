@@ -40,4 +40,7 @@ pub(crate) enum Message {
     ClearNamedHotkey(HotkeyAction),
     ResetHotkeyToDefault(HotkeyAction),
     ExecuteHotkeyAction(HotkeyAction),
+    /// (scroll_offset_y, viewport_height) from the instructions scrollable
+    EditorScrolled(f32, f32),
+    NoOp,
 }

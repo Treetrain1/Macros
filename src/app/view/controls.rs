@@ -1,6 +1,8 @@
 use super::icon_path;
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+#[cfg(target_os = "linux")]
+use crate::app::state::RecordingPhase;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
@@ -80,6 +82,8 @@ pub(crate) fn macro_selector_row<'a>(
 pub(crate) fn run_controls_row<'a>(
     loop_mode_enabled: bool,
     has_selected_macro: bool,
+    #[cfg(target_os = "linux")] recording_phase: &RecordingPhase,
+    #[cfg(target_os = "linux")] record_mouse_relative: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
     let pill_button = |label: &'static str| {
@@ -106,37 +110,87 @@ pub(crate) fn run_controls_row<'a>(
     let loop_mode = cosmic::widget::checkbox(loop_mode_enabled)
         .on_toggle(ToggleLoopMode);
 
-    cosmic::widget::row![
-        cosmic::widget::container(
-            cosmic::widget::row![
-                cosmic::widget::tooltip(
-                    run_macro_button,
-                    cosmic::widget::container("Runs the current macro once or starts looping if enabled"),
-                    cosmic::widget::tooltip::Position::Top
-                ),
-                cosmic::widget::tooltip(
-                    cosmic::widget::container(
-                        cosmic::widget::row![
-                            cosmic::widget::text("Loop mode"),
-                            loop_mode,
-                        ]
-                        .spacing(8)
-                        .align_y(Alignment::Center)
-                    )
-                    .padding([8, 12]),
-                    cosmic::widget::container("Enable to loop the macro continuously"),
-                    cosmic::widget::tooltip::Position::Top
-                )
-            ]
+    #[cfg(target_os = "linux")]
+    let record_element: Element<'_, Message> = {
+        let label = match recording_phase {
+            RecordingPhase::Countdown(n) => format!("Recording in {}s...", n),
+            RecordingPhase::Active => "■ Recording (Esc to stop)".to_string(),
+            RecordingPhase::Idle => "● Record".to_string(),
+        };
+        let btn = button(cosmic::widget::text(label)).padding([10, 18]);
+        let btn = match recording_phase {
+            RecordingPhase::Idle if has_selected_macro => btn.on_press(StartRecording),
+            _ => btn,
+        };
+        let relative_toggle = cosmic::widget::tooltip(
+            cosmic::widget::container(
+                cosmic::widget::row![
+                    cosmic::widget::text("Relative mouse"),
+                    cosmic::widget::checkbox(record_mouse_relative)
+                        .on_toggle(ToggleRecordMouseRelative),
+                ]
+                .spacing(8)
+                .align_y(cosmic::iced::Alignment::Center),
+            )
+            .padding([8, 12]),
+            cosmic::widget::container("Record mouse movement as relative offsets instead of absolute coordinates"),
+            cosmic::widget::tooltip::Position::Top,
+        );
+        cosmic::widget::row![btn, relative_toggle]
             .spacing(12)
-            .align_y(Alignment::Center)
-        )
-        .width(Length::Fill)
-        .align_x(Alignment::Center),
-        cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill),
-        cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill).align_x(Alignment::Center),
-    ]
-    .spacing(spacing.space_s)
+            .align_y(cosmic::iced::Alignment::Center)
+            .into()
+    };
+
+    let left_column = cosmic::widget::container(
+        cosmic::widget::row![
+            cosmic::widget::tooltip(
+                run_macro_button,
+                cosmic::widget::container("Runs the current macro once or starts looping if enabled"),
+                cosmic::widget::tooltip::Position::Top
+            ),
+            cosmic::widget::tooltip(
+                cosmic::widget::container(
+                    cosmic::widget::row![
+                        cosmic::widget::text("Loop mode"),
+                        loop_mode,
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                )
+                .padding([8, 12]),
+                cosmic::widget::container("Enable to loop the macro continuously"),
+                cosmic::widget::tooltip::Position::Top
+            )
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+    )
     .width(Length::Fill)
-    .into()
+    .align_x(Alignment::Center);
+
+    let mut row = cosmic::widget::row![]
+        .spacing(spacing.space_s)
+        .width(Length::Fill)
+        .push(left_column)
+        .push(cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill));
+
+    #[cfg(target_os = "linux")]
+    {
+        row = row.push(
+            cosmic::widget::container(record_element)
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        row = row.push(
+            cosmic::widget::container(cosmic::widget::text(""))
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+        );
+    }
+
+    row.into()
 }

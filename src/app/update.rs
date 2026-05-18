@@ -3,17 +3,21 @@ use crate::app::hotkeys::{spawn_global_shortcut_action, GlobalShortcutAction};
 use crate::app::key_mapping::{map_iced_key_to_enigo_key, map_iced_physical_key_to_enigo_key};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+use crate::app::state::RecordingPhase;
 use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
 use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
 use crate::macros::loop_control;
 use crate::macros::{thread, Instruction};
+#[cfg(target_os = "linux")]
+use crate::recording;
 use cosmic::app::Task;
 use cosmic::cosmic_config::ConfigGet;
 use cosmic::iced::keyboard;
 use enigo::agent::Token;
 #[cfg(not(target_os = "linux"))]
 use global_hotkey::HotKeyState;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -254,6 +258,69 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             app.execution.loop_mode_enabled = enabled;
             if let Err(err) = config::save_config_value(&app.config, "loop_mode_enabled", enabled) {
                 warn!("Failed to save loop mode setting: {}", err);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        StartRecording => {
+            if app.macro_lib.current_macro.is_none() {
+                return Task::none();
+            }
+            app.editor_ui.recording_countdown_generation =
+                app.editor_ui.recording_countdown_generation.wrapping_add(1);
+            let countdown_gen = app.editor_ui.recording_countdown_generation;
+            app.editor_ui.recording_phase = RecordingPhase::Countdown(5);
+            return Task::perform(
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    countdown_gen
+                },
+                |g| RecordingCountdown(g).into(),
+            );
+        }
+        #[cfg(target_os = "linux")]
+        RecordingCountdown(countdown_gen) => {
+            if countdown_gen != app.editor_ui.recording_countdown_generation {
+                return Task::none();
+            }
+            match app.editor_ui.recording_phase {
+                RecordingPhase::Countdown(n) if n > 1 => {
+                    app.editor_ui.recording_phase = RecordingPhase::Countdown(n - 1);
+                    return Task::perform(
+                        async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            countdown_gen
+                        },
+                        |g| RecordingCountdown(g).into(),
+                    );
+                }
+                RecordingPhase::Countdown(_) => {
+                    app.editor_ui.recording_phase = RecordingPhase::Active;
+                    recording::reset_timing();
+                    recording::start_grab_thread();
+                    recording::RECORDING_ACTIVE.store(true, Ordering::Relaxed);
+                }
+                _ => {}
+            }
+        }
+        #[cfg(target_os = "linux")]
+        ToggleRecordMouseRelative(relative) => {
+            app.editor_ui.record_mouse_relative = relative;
+            recording::RECORD_MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
+        }
+        #[cfg(target_os = "linux")]
+        StopRecording => {
+            app.editor_ui.recording_phase = RecordingPhase::Idle;
+            let instructions: Vec<Instruction> = recording::get_recording_queue()
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect();
+            if !instructions.is_empty() {
+                push_undo(app);
+                if let Some(mac) = &mut app.macro_lib.current_macro {
+                    mac.code.extend(instructions);
+                    auto_save_current_macro(app);
+                }
             }
         }
         #[cfg(not(target_os = "linux"))]

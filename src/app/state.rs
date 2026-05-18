@@ -85,6 +85,13 @@ pub(crate) struct ExecutionState {
     pub(crate) loop_mode_enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RecordingPhase {
+    Idle,
+    Countdown(u8),
+    Active,
+}
+
 pub(crate) struct EditorUiState {
     pub(crate) confirm_remove_macro: bool,
     pub(crate) confirm_clear_instructions: bool,
@@ -92,6 +99,9 @@ pub(crate) struct EditorUiState {
     pub(crate) key_capture_index: Option<usize>,
     pub(crate) undo_stack: Vec<Vec<Instruction>>,
     pub(crate) redo_stack: Vec<Vec<Instruction>>,
+    pub(crate) recording_phase: RecordingPhase,
+    pub(crate) recording_countdown_generation: u64,
+    pub(crate) record_mouse_relative: bool,
 }
 
 impl EditorUiState {
@@ -103,6 +113,9 @@ impl EditorUiState {
             key_capture_index: None,
             undo_stack: vec![],
             redo_stack: vec![],
+            recording_phase: RecordingPhase::Idle,
+            recording_countdown_generation: 0,
+            record_mouse_relative: false,
         }
     }
 

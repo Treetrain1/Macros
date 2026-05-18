@@ -25,6 +25,14 @@ pub(crate) enum Message {
     RemoveMacro,
     Undo,
     Redo,
+    #[cfg(target_os = "linux")]
+    StartRecording,
+    #[cfg(target_os = "linux")]
+    RecordingCountdown(u64),
+    #[cfg(target_os = "linux")]
+    StopRecording,
+    #[cfg(target_os = "linux")]
+    ToggleRecordMouseRelative(bool),
     #[cfg(not(target_os = "linux"))]
     GlobalHotkeyEvent(GlobalHotKeyEvent),
 }

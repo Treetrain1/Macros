@@ -3,6 +3,7 @@
 use super::{spawn_global_shortcut_action, GlobalShortcutAction};
 use crate::app::message::Message;
 use crate::config;
+use crate::recording;
 use cosmic::cosmic_config::{Config, ConfigGet};
 use cosmic::iced::futures::{SinkExt, Stream, StreamExt};
 use enigo::Enigo;
@@ -39,6 +40,13 @@ pub(crate) fn macro_nav_sub() -> impl Stream<Item = Message> {
                 .unwrap_or_default();
             for enabled in pending_toggles {
                 let _ = sender.send(Message::ToggleLoopMode(enabled)).await;
+            }
+            let stop_count = recording::get_stop_signal()
+                .try_lock()
+                .map(|mut q| q.drain(..).count())
+                .unwrap_or(0);
+            for _ in 0..stop_count {
+                let _ = sender.send(Message::StopRecording).await;
             }
         }
     })

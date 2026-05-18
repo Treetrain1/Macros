@@ -37,6 +37,10 @@ pub(crate) fn build_view(app: &App) -> Element<'_, Message> {
     content = content.push(run_controls_row(
         app.execution.loop_mode_enabled,
         has_selected_macro,
+        #[cfg(target_os = "linux")]
+        &app.editor_ui.recording_phase,
+        #[cfg(target_os = "linux")]
+        app.editor_ui.record_mouse_relative,
         &spacing,
     ));
 

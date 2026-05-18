@@ -4,6 +4,8 @@ mod macros;
 mod config;
 mod input;
 mod app;
+#[cfg(target_os = "linux")]
+mod recording;
 
 use app::App;
 use cosmic::app::Settings;

@@ -2,7 +2,6 @@ pub(crate) mod instruction_utils;
 pub(crate) mod key_names;
 pub(crate) mod mouse;
 pub(crate) mod ui_utils;
-#[cfg(target_os = "linux")]
 pub(crate) mod rdev_mapping;
 
 pub(crate) use key_names::key_to_string;

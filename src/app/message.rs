@@ -1,7 +1,6 @@
+use crate::hotkey_types::{HotkeyAction, KeyCombo};
 use crate::macros::Instruction;
 use cosmic::iced::keyboard;
-#[cfg(not(target_os = "linux"))]
-use global_hotkey::GlobalHotKeyEvent;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Message {
@@ -25,14 +24,20 @@ pub(crate) enum Message {
     RemoveMacro,
     Undo,
     Redo,
-    #[cfg(target_os = "linux")]
     StartRecording,
-    #[cfg(target_os = "linux")]
     RecordingCountdown(u64),
-    #[cfg(target_os = "linux")]
     StopRecording,
-    #[cfg(target_os = "linux")]
     ToggleRecordMouseRelative(bool),
-    #[cfg(not(target_os = "linux"))]
-    GlobalHotkeyEvent(GlobalHotKeyEvent),
+    // Settings page
+    OpenSettings,
+    CloseSettings,
+    StartComboCapture(HotkeyAction),
+    StartPendingComboCapture,
+    SaveHotkeyBindings,
+    SetPendingMacroIdx(Option<usize>),
+    AddMacroHotkey,
+    RemoveHotkeyBinding(usize),
+    ClearNamedHotkey(HotkeyAction),
+    ResetHotkeyToDefault(HotkeyAction),
+    ExecuteHotkeyAction(HotkeyAction),
 }

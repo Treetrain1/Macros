@@ -5,17 +5,14 @@ use crate::config;
 use crate::macros::runner::make_enigo;
 use crate::macros::thread_pool::ThreadPool;
 use crate::macros::Macro;
+use crate::recording;
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::Config;
 use cosmic::cosmic_config::ConfigGet;
-use slotmap::{SecondaryMap, SlotMap};
 use std::sync::{Arc, Mutex};
 use tracing::warn;
 
 pub(crate) fn build_app(core: Core) -> App {
-    #[cfg(not(target_os = "linux"))]
-    let hotkey_state = crate::app::hotkeys::non_linux::setup_non_linux_hotkeys();
-
     App {
         core,
         config: Config::new(crate::config::APP_ID, 1).unwrap(),
@@ -27,8 +24,6 @@ pub(crate) fn build_app(core: Core) -> App {
             loop_mode_enabled: false,
         },
         editor_ui: EditorUiState::new(),
-        #[cfg(not(target_os = "linux"))]
-        hotkey_state,
     }
 }
 
@@ -49,12 +44,13 @@ pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
         app.execution.loop_mode_enabled = loop_mode;
     }
 
-    #[cfg(target_os = "linux")]
-    crate::app::hotkeys::linux::setup_linux_hotkeys(
-        Arc::clone(&app.execution.enigo),
-        app.config.clone(),
-        Arc::clone(&app.execution.is_looping),
-    );
+    // Start the grab thread unconditionally so hotkeys work from launch.
+    recording::start_grab_thread();
+
+    // Load and apply saved hotkey bindings.
+    let bindings = config::load_hotkey_bindings(&app.config);
+    recording::update_hotkey_table(bindings.clone());
+    app.editor_ui.hotkey_bindings = bindings;
 
     app.update_title()
 }

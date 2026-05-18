@@ -8,8 +8,6 @@ pub(crate) mod update;
 pub(crate) mod view;
 
 use crate::app::message::Message;
-#[cfg(not(target_os = "linux"))]
-use crate::app::state::HotkeyState;
 use crate::app::state::{EditorUiState, ExecutionState, MacroLibraryState};
 use cosmic::app::{Core, Task};
 use cosmic::cosmic_config::Config;
@@ -21,8 +19,6 @@ pub(crate) struct App {
     pub(crate) macro_lib: MacroLibraryState,
     pub(crate) execution: ExecutionState,
     pub(crate) editor_ui: EditorUiState,
-    #[cfg(not(target_os = "linux"))]
-    pub(crate) hotkey_state: HotkeyState,
 }
 
 impl App {
@@ -67,7 +63,10 @@ impl cosmic::Application for App {
         if !matches!(message, Message::RemoveMacro) {
             self.editor_ui.confirm_remove_macro = false;
         }
-        if !matches!(message, Message::ClearInstructions | Message::ClearInstructionsTimeout(_)) {
+        if !matches!(
+            message,
+            Message::ClearInstructions | Message::ClearInstructionsTimeout(_)
+        ) {
             self.editor_ui.confirm_clear_instructions = false;
         }
         update::handle_update(self, message)

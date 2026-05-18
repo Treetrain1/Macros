@@ -3,25 +3,14 @@ use crate::app::App;
 use cosmic::iced::{keyboard, Subscription};
 
 pub(crate) fn build_subscription(app: &App) -> Subscription<Message> {
-    let key_capture_subscription = if app.editor_ui.key_capture_index.is_some() {
+    let key_sub = if app.editor_ui.is_capturing_key() {
         keyboard::listen().map(Message::KeyCaptureEvent)
     } else {
         Subscription::none()
     };
 
-    #[cfg(not(target_os = "linux"))]
-    {
-        Subscription::batch(vec![
-            Subscription::run(crate::app::hotkeys::non_linux::hotkey_sub),
-            key_capture_subscription,
-        ])
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        Subscription::batch(vec![
-            key_capture_subscription,
-            Subscription::run(crate::app::hotkeys::linux::macro_nav_sub),
-        ])
-    }
+    Subscription::batch(vec![
+        key_sub,
+        Subscription::run(crate::app::hotkeys::queue::hotkey_sub),
+    ])
 }

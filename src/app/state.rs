@@ -1,10 +1,9 @@
 use crate::config::{get_macros_from_config, get_selected_macro_id, set_selected_macro_id};
+use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::macros::thread_pool::ThreadPool;
 use crate::macros::{Instruction, Macro};
 use cosmic::cosmic_config::{Config, ConfigGet};
 use enigo::Enigo;
-#[cfg(not(target_os = "linux"))]
-use global_hotkey::GlobalHotKeyManager;
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
 use std::sync::{Arc, Mutex};
 use tracing::warn;
@@ -92,6 +91,21 @@ pub(crate) enum RecordingPhase {
     Active,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Page {
+    Main,
+    Settings,
+}
+
+/// Which hotkey slot is currently being captured via keyboard::listen().
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ComboCapture {
+    /// Capturing for a named fixed-action binding.
+    Named(HotkeyAction),
+    /// Capturing for the "Add per-macro hotkey" form.
+    Pending,
+}
+
 pub(crate) struct EditorUiState {
     pub(crate) confirm_remove_macro: bool,
     pub(crate) confirm_clear_instructions: bool,
@@ -102,6 +116,11 @@ pub(crate) struct EditorUiState {
     pub(crate) recording_phase: RecordingPhase,
     pub(crate) recording_countdown_generation: u64,
     pub(crate) record_mouse_relative: bool,
+    pub(crate) page: Page,
+    pub(crate) combo_capture: Option<ComboCapture>,
+    pub(crate) hotkey_bindings: Vec<HotkeyBinding>,
+    /// (macro index, key combo) for the Add per-macro hotkey form.
+    pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
 }
 
 impl EditorUiState {
@@ -116,6 +135,10 @@ impl EditorUiState {
             recording_phase: RecordingPhase::Idle,
             recording_countdown_generation: 0,
             record_mouse_relative: false,
+            page: Page::Main,
+            combo_capture: None,
+            hotkey_bindings: vec![],
+            pending_macro_hotkey: None,
         }
     }
 
@@ -124,11 +147,8 @@ impl EditorUiState {
         self.confirm_clear_instructions = false;
         self.key_capture_index = None;
     }
-}
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) struct HotkeyState {
-    pub(crate) manager: GlobalHotKeyManager,
-    pub(crate) run_macro_id: u32,
-    pub(crate) stop_loop_id: u32,
+    pub(crate) fn is_capturing_key(&self) -> bool {
+        self.key_capture_index.is_some() || self.combo_capture.is_some()
+    }
 }

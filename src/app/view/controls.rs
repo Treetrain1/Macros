@@ -1,7 +1,6 @@
 use super::icon_path;
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-#[cfg(target_os = "linux")]
 use crate::app::state::RecordingPhase;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
@@ -39,6 +38,10 @@ pub(crate) fn macro_selector_row<'a>(
         compact_icon_button(icon_path("remove.svg"))
     };
 
+    let settings_button = widget::button::icon(
+        widget::icon::from_name("emblem-system-symbolic").size(32)
+    ).icon_size(24).padding(8).on_press(OpenSettings);
+
     cosmic::widget::row![
         cosmic::widget::container(
             cosmic::widget::column![
@@ -67,6 +70,11 @@ pub(crate) fn macro_selector_row<'a>(
                     }),
                     cosmic::widget::tooltip::Position::Left
                 ),
+                cosmic::widget::tooltip(
+                    settings_button,
+                    cosmic::widget::container("Open hotkey settings"),
+                    cosmic::widget::tooltip::Position::Left
+                ),
             ]
             .spacing(12)
             .align_x(Alignment::Center)
@@ -82,8 +90,8 @@ pub(crate) fn macro_selector_row<'a>(
 pub(crate) fn run_controls_row<'a>(
     loop_mode_enabled: bool,
     has_selected_macro: bool,
-    #[cfg(target_os = "linux")] recording_phase: &RecordingPhase,
-    #[cfg(target_os = "linux")] record_mouse_relative: bool,
+    recording_phase: &RecordingPhase,
+    record_mouse_relative: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
     let pill_button = |label: &'static str| {
@@ -102,15 +110,10 @@ pub(crate) fn run_controls_row<'a>(
         pill_button(run_macro_label)
     };
 
-    #[cfg(target_os = "linux")]
     let loop_mode = cosmic::widget::checkbox(loop_mode_enabled)
         .name("Loop mode")
         .on_toggle(ToggleLoopMode);
-    #[cfg(not(target_os = "linux"))]
-    let loop_mode = cosmic::widget::checkbox(loop_mode_enabled)
-        .on_toggle(ToggleLoopMode);
 
-    #[cfg(target_os = "linux")]
     let record_element: Element<'_, Message> = {
         let label = match recording_phase {
             RecordingPhase::Countdown(n) => format!("Recording in {}s...", n),
@@ -133,7 +136,9 @@ pub(crate) fn run_controls_row<'a>(
                 .align_y(cosmic::iced::Alignment::Center),
             )
             .padding([8, 12]),
-            cosmic::widget::container("Record mouse movement as relative offsets instead of absolute coordinates"),
+            cosmic::widget::container(
+                "Record mouse movement as relative offsets instead of absolute coordinates",
+            ),
             cosmic::widget::tooltip::Position::Top,
         );
         cosmic::widget::row![btn, relative_toggle]
@@ -146,7 +151,9 @@ pub(crate) fn run_controls_row<'a>(
         cosmic::widget::row![
             cosmic::widget::tooltip(
                 run_macro_button,
-                cosmic::widget::container("Runs the current macro once or starts looping if enabled"),
+                cosmic::widget::container(
+                    "Runs the current macro once or starts looping if enabled"
+                ),
                 cosmic::widget::tooltip::Position::Top
             ),
             cosmic::widget::tooltip(
@@ -169,28 +176,15 @@ pub(crate) fn run_controls_row<'a>(
     .width(Length::Fill)
     .align_x(Alignment::Center);
 
-    let mut row = cosmic::widget::row![]
+    cosmic::widget::row![]
         .spacing(spacing.space_s)
         .width(Length::Fill)
         .push(left_column)
-        .push(cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill));
-
-    #[cfg(target_os = "linux")]
-    {
-        row = row.push(
+        .push(cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill))
+        .push(
             cosmic::widget::container(record_element)
                 .width(Length::Fill)
                 .align_x(Alignment::Center),
-        );
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        row = row.push(
-            cosmic::widget::container(cosmic::widget::text(""))
-                .width(Length::Fill)
-                .align_x(Alignment::Center),
-        );
-    }
-
-    row.into()
+        )
+        .into()
 }

@@ -1,22 +1,22 @@
-#[cfg(not(target_os = "linux"))]
-use crate::app::hotkeys::{spawn_global_shortcut_action, GlobalShortcutAction};
-use crate::app::key_mapping::{map_iced_key_to_enigo_key, map_iced_physical_key_to_enigo_key};
+use crate::app::hotkeys;
+use crate::app::key_mapping::{
+    iced_code_to_rdev_key_name, is_modifier_code, map_iced_key_to_enigo_key,
+    map_iced_physical_key_to_enigo_key, mods_to_u8,
+};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-use crate::app::state::RecordingPhase;
+use crate::app::state::{ComboCapture, Page, RecordingPhase};
 use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
 use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
+use crate::hotkey_types::{HotkeyBinding, HotkeyAction, KeyCombo};
 use crate::macros::loop_control;
 use crate::macros::{thread, Instruction};
-#[cfg(target_os = "linux")]
 use crate::recording;
 use cosmic::app::Task;
 use cosmic::cosmic_config::ConfigGet;
 use cosmic::iced::keyboard;
 use enigo::agent::Token;
-#[cfg(not(target_os = "linux"))]
-use global_hotkey::HotKeyState;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::warn;
@@ -97,9 +97,8 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                         let _ = loop_control::stop_loop(&app.execution.is_looping);
                     }
                 } else {
-                    let single_task = mac.clone().into_single_run_task(
-                        Arc::clone(&app.execution.enigo),
-                    );
+                    let single_task =
+                        mac.clone().into_single_run_task(Arc::clone(&app.execution.enigo));
 
                     if let Err(err) = thread::spawn_macro_thread(
                         &mut app.execution.thread_pool,
@@ -130,7 +129,19 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             app.editor_ui.key_capture_index = Some(index);
         }
         KeyCaptureEvent(event) => {
-            if let keyboard::Event::KeyPressed { key, physical_key, .. } = event {
+            // Combo capture for hotkey settings
+            if app.editor_ui.combo_capture.is_some() {
+                handle_combo_capture_event(app, event);
+                return Task::none();
+            }
+
+            // Key capture for instruction editing
+            if let keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                ..
+            } = event
+            {
                 let Some(index) = app.editor_ui.key_capture_index else {
                     return Task::none();
                 };
@@ -143,7 +154,8 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                             .or_else(|| map_iced_key_to_enigo_key(key.as_ref()));
 
                         if let Some(captured_key) = captured_key {
-                            mac.code[index] = Instruction::Token(Token::Key(captured_key, direction));
+                            mac.code[index] =
+                                Instruction::Token(Token::Key(captured_key, direction));
                             auto_save_current_macro(app);
                         }
                     }
@@ -190,7 +202,10 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 let generation = app.editor_ui.clear_confirm_generation;
                 return Task::perform(
                     async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(CLEAR_CONFIRM_TIMEOUT_SECS)).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(
+                            CLEAR_CONFIRM_TIMEOUT_SECS,
+                        ))
+                        .await;
                         generation
                     },
                     |generation| ClearInstructionsTimeout(generation).into(),
@@ -256,11 +271,12 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         }
         ToggleLoopMode(enabled) => {
             app.execution.loop_mode_enabled = enabled;
-            if let Err(err) = config::save_config_value(&app.config, "loop_mode_enabled", enabled) {
+            if let Err(err) =
+                config::save_config_value(&app.config, "loop_mode_enabled", enabled)
+            {
                 warn!("Failed to save loop mode setting: {}", err);
             }
         }
-        #[cfg(target_os = "linux")]
         StartRecording => {
             if app.macro_lib.current_macro.is_none() {
                 return Task::none();
@@ -277,7 +293,6 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 |g| RecordingCountdown(g).into(),
             );
         }
-        #[cfg(target_os = "linux")]
         RecordingCountdown(countdown_gen) => {
             if countdown_gen != app.editor_ui.recording_countdown_generation {
                 return Task::none();
@@ -296,18 +311,15 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 RecordingPhase::Countdown(_) => {
                     app.editor_ui.recording_phase = RecordingPhase::Active;
                     recording::reset_timing();
-                    recording::start_grab_thread();
                     recording::RECORDING_ACTIVE.store(true, Ordering::Relaxed);
                 }
                 _ => {}
             }
         }
-        #[cfg(target_os = "linux")]
         ToggleRecordMouseRelative(relative) => {
             app.editor_ui.record_mouse_relative = relative;
             recording::RECORD_MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
         }
-        #[cfg(target_os = "linux")]
         StopRecording => {
             app.editor_ui.recording_phase = RecordingPhase::Idle;
             let instructions: Vec<Instruction> = recording::get_recording_queue()
@@ -323,32 +335,197 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 }
             }
         }
-        #[cfg(not(target_os = "linux"))]
-        GlobalHotkeyEvent(event) => {
-            if event.state != HotKeyState::Pressed {
-                return Task::none();
+        // Settings page
+        OpenSettings => {
+            app.editor_ui.page = Page::Settings;
+            let bindings = config::load_hotkey_bindings(&app.config);
+            app.editor_ui.hotkey_bindings = bindings;
+            app.editor_ui.combo_capture = None;
+            app.editor_ui.pending_macro_hotkey = None;
+        }
+        CloseSettings => {
+            app.editor_ui.page = Page::Main;
+            app.editor_ui.combo_capture = None;
+            app.editor_ui.pending_macro_hotkey = None;
+        }
+        StartComboCapture(action) => {
+            app.editor_ui.combo_capture = Some(ComboCapture::Named(action));
+        }
+        StartPendingComboCapture => {
+            app.editor_ui.combo_capture = Some(ComboCapture::Pending);
+        }
+        SaveHotkeyBindings => {
+            let bindings = app.editor_ui.hotkey_bindings.clone();
+            if let Err(err) =
+                config::save_config_value(&app.config, config::GLOBAL_HOTKEYS_KEY, &bindings)
+            {
+                warn!("Failed to save hotkey bindings: {}", err);
             }
-
-            println!("{:?}", event);
-            let action = if event.id == app.hotkey_state.run_macro_id {
-                Some(GlobalShortcutAction::RunMacro)
-            } else if event.id == app.hotkey_state.stop_loop_id {
-                Some(GlobalShortcutAction::StopLoop)
-            } else {
-                None
-            };
-
-            if let Some(action) = action {
-                spawn_global_shortcut_action(
-                    action,
-                    app.config.clone(),
-                    Arc::clone(&app.execution.enigo),
-                    Arc::clone(&app.execution.is_looping),
-                );
+            recording::update_hotkey_table(bindings);
+        }
+        SetPendingMacroIdx(idx) => {
+            let entry = app
+                .editor_ui
+                .pending_macro_hotkey
+                .get_or_insert((None, None));
+            entry.0 = idx;
+        }
+        AddMacroHotkey => {
+            if let Some((Some(idx), Some(combo))) =
+                app.editor_ui.pending_macro_hotkey.take()
+            {
+                let macs = config::get_macros_from_config(&app.config);
+                if let Some(mac) = macs.get(idx) {
+                    let binding = HotkeyBinding {
+                        action: HotkeyAction::RunSpecificMacro(mac.id.clone()),
+                        combo,
+                    };
+                    app.editor_ui.hotkey_bindings.push(binding);
+                    return handle_update(app, SaveHotkeyBindings);
+                }
+            }
+        }
+        RemoveHotkeyBinding(index) => {
+            if index < app.editor_ui.hotkey_bindings.len() {
+                app.editor_ui.hotkey_bindings.remove(index);
+                return handle_update(app, SaveHotkeyBindings);
+            }
+        }
+        ClearNamedHotkey(action) => {
+            app.editor_ui
+                .hotkey_bindings
+                .retain(|b| b.action != action);
+            return handle_update(app, SaveHotkeyBindings);
+        }
+        ResetHotkeyToDefault(action) => {
+            if let Some(default_combo) = config::default_combo_for_action(&action) {
+                if let Some(existing) = app
+                    .editor_ui
+                    .hotkey_bindings
+                    .iter_mut()
+                    .find(|b| b.action == action)
+                {
+                    existing.combo = default_combo;
+                } else {
+                    app.editor_ui.hotkey_bindings.push(HotkeyBinding {
+                        action,
+                        combo: default_combo,
+                    });
+                }
+                return handle_update(app, SaveHotkeyBindings);
+            }
+        }
+        ExecuteHotkeyAction(action) => {
+            match &action {
+                HotkeyAction::RunMacro | HotkeyAction::RunSpecificMacro(_) => {
+                    hotkeys::spawn_hotkey_action(
+                        action,
+                        app.config.clone(),
+                        Arc::clone(&app.execution.enigo),
+                        Arc::clone(&app.execution.is_looping),
+                    );
+                }
+                HotkeyAction::StopLoop => {
+                    hotkeys::stop_loop(&app.execution.is_looping);
+                }
+                HotkeyAction::NextMacro => {
+                    let macs = config::get_macros_from_config(&app.config);
+                    if !macs.is_empty() {
+                        let current_id = config::get_selected_macro_id(&app.config);
+                        let current_idx = current_id
+                            .and_then(|id| macs.iter().position(|m| m.id == id))
+                            .unwrap_or(0);
+                        let next = (current_idx + 1) % macs.len();
+                        let config = app.config.clone();
+                        app.macro_lib.update_macro(&config, Some(next));
+                    }
+                }
+                HotkeyAction::PrevMacro => {
+                    let macs = config::get_macros_from_config(&app.config);
+                    if !macs.is_empty() {
+                        let current_id = config::get_selected_macro_id(&app.config);
+                        let current_idx = current_id
+                            .and_then(|id| macs.iter().position(|m| m.id == id))
+                            .unwrap_or(0);
+                        let prev = if current_idx == 0 {
+                            macs.len() - 1
+                        } else {
+                            current_idx - 1
+                        };
+                        let config = app.config.clone();
+                        app.macro_lib.update_macro(&config, Some(prev));
+                    }
+                }
+                HotkeyAction::ToggleLoop => {
+                    let new_val = !app.execution.loop_mode_enabled;
+                    return handle_update(app, ToggleLoopMode(new_val));
+                }
             }
         }
     }
     Task::none()
+}
+
+fn handle_combo_capture_event(app: &mut App, event: keyboard::Event) {
+    match event {
+        keyboard::Event::KeyPressed {
+            physical_key,
+            modifiers,
+            key,
+            ..
+        } => {
+            // Escape cancels capture
+            if matches!(key.as_ref(), keyboard::Key::Named(keyboard::key::Named::Escape)) {
+                app.editor_ui.combo_capture = None;
+                return;
+            }
+
+            // Skip modifier-only presses
+            if is_modifier_code(&physical_key) {
+                return;
+            }
+
+            // Resolve rdev key name
+            let key_name = match iced_code_to_rdev_key_name(&physical_key) {
+                Some(n) => n,
+                None => return,
+            };
+
+            let combo = KeyCombo {
+                modifiers: mods_to_u8(&modifiers),
+                key: key_name,
+            };
+
+            match app.editor_ui.combo_capture.take() {
+                Some(ComboCapture::Named(action)) => {
+                    // Upsert binding for this named action
+                    if let Some(existing) = app
+                        .editor_ui
+                        .hotkey_bindings
+                        .iter_mut()
+                        .find(|b| b.action == action)
+                    {
+                        existing.combo = combo;
+                    } else {
+                        app.editor_ui.hotkey_bindings.push(HotkeyBinding {
+                            action,
+                            combo,
+                        });
+                    }
+                    let _ = handle_update(app, SaveHotkeyBindings);
+                }
+                Some(ComboCapture::Pending) => {
+                    let entry = app
+                        .editor_ui
+                        .pending_macro_hotkey
+                        .get_or_insert((None, None));
+                    entry.1 = Some(combo);
+                }
+                None => {}
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn auto_save_current_macro(app: &mut App) {

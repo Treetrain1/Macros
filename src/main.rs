@@ -2,9 +2,9 @@
 
 mod macros;
 mod config;
+mod hotkey_types;
 mod input;
 mod app;
-#[cfg(target_os = "linux")]
 mod recording;
 
 use app::App;

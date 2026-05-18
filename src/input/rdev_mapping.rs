@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use enigo::{Button as EnigoButton, Key as EnigoKey};
 use rdev::{Button as RdevButton, Key as RdevKey};
 

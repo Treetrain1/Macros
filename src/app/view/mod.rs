@@ -1,8 +1,10 @@
 pub(crate) mod controls;
 pub(crate) mod editor;
 pub(crate) mod instruction_widget;
+pub(crate) mod settings;
 
 use crate::app::message::Message;
+use crate::app::state::Page;
 use crate::app::App;
 use controls::{macro_selector_row, run_controls_row};
 use cosmic::iced::{Alignment, Length};
@@ -22,6 +24,13 @@ pub(crate) fn icon_path(name: &str) -> std::path::PathBuf {
 }
 
 pub(crate) fn build_view(app: &App) -> Element<'_, Message> {
+    match app.editor_ui.page {
+        Page::Settings => settings::settings_view(app),
+        Page::Main => build_main_view(app),
+    }
+}
+
+fn build_main_view(app: &App) -> Element<'_, Message> {
     let spacing = cosmic::theme::active().cosmic().spacing;
     let has_selected_macro = app.macro_lib.current_macro.is_some();
 
@@ -37,9 +46,7 @@ pub(crate) fn build_view(app: &App) -> Element<'_, Message> {
     content = content.push(run_controls_row(
         app.execution.loop_mode_enabled,
         has_selected_macro,
-        #[cfg(target_os = "linux")]
         &app.editor_ui.recording_phase,
-        #[cfg(target_os = "linux")]
         app.editor_ui.record_mouse_relative,
         &spacing,
     ));

@@ -216,11 +216,13 @@ fn event_to_instruction(event_type: &EventType) -> Option<Instruction> {
                     None
                 }
             } else {
-                Some(Instruction::Token(Token::MoveMouse(
+                None
+                // TODO fix absolute moving
+                /*Some(Instruction::Token(Token::MoveMouse(
                     *x as i32,
                     *y as i32,
                     Coordinate::Abs,
-                )))
+                )))*/
             }
         }
     }

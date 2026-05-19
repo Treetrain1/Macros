@@ -317,7 +317,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         ToggleRecordMouseRelative(relative) => {
-            app.editor_ui.record_mouse_relative = relative;
+            app.editor_ui.record_mouse_relative = relative; // TODO
             recording::RECORD_MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
         }
         StopRecording => {

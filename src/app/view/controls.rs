@@ -39,7 +39,7 @@ pub(crate) fn macro_selector_row<'a>(
     };
 
     let settings_button = widget::button::icon(
-        widget::icon::from_name("emblem-system-symbolic").size(32)
+        widget::icon::from_name("emblem-system-symbolic")
     ).icon_size(24).padding(8).on_press(OpenSettings);
 
     cosmic::widget::row![
@@ -141,7 +141,7 @@ pub(crate) fn run_controls_row<'a>(
             ),
             cosmic::widget::tooltip::Position::Top,
         );
-        cosmic::widget::row![btn, relative_toggle]
+        cosmic::widget::row![btn/*, relative_toggle*/] // TODO
             .spacing(12)
             .align_y(cosmic::iced::Alignment::Center)
             .into()

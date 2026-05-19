@@ -136,7 +136,7 @@ impl EditorUiState {
             redo_stack: vec![],
             recording_phase: RecordingPhase::Idle,
             recording_countdown_generation: 0,
-            record_mouse_relative: false,
+            record_mouse_relative: true, // TODO
             page: Page::Main,
             combo_capture: None,
             hotkey_bindings: vec![],

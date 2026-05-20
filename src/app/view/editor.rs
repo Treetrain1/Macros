@@ -128,6 +128,7 @@ pub(crate) fn macro_editor<'a>(
     .padding([0, 15, 0, 15]);
 
     let scrollable = cosmic::widget::scrollable(instructions_col)
+        .id(cosmic::widget::Id::new("macro-editor-scroll"))
         .on_scroll(move |vp| {
             let new_y = vp.absolute_offset().y;
             let new_raw = (new_y / ESTIMATED_ROW_HEIGHT).floor() as usize;

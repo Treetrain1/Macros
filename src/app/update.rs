@@ -16,10 +16,18 @@ use crate::recording;
 use cosmic::app::Task;
 use cosmic::cosmic_config::ConfigGet;
 use cosmic::iced::keyboard;
+use cosmic::iced::widget::scrollable;
 use enigo::agent::Token;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::warn;
+
+fn scroll_editor_to_end() -> Task<Message> {
+    scrollable::snap_to(
+        cosmic::widget::Id::new("macro-editor-scroll"),
+        scrollable::RelativeOffset::END.into(),
+    )
+}
 
 fn push_undo(app: &mut App) {
     if let Some(mac) = &app.macro_lib.current_macro {
@@ -113,8 +121,12 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         AddInstruction(index, instruction) => {
             push_undo(app);
             if let Some(mac) = &mut app.macro_lib.current_macro {
+                let is_append = index == mac.code.len();
                 mac.code.insert(index, instruction);
                 auto_save_current_macro(app);
+                if is_append {
+                    return scroll_editor_to_end();
+                }
             }
         }
         EditInstruction(index, instruction) => {
@@ -333,6 +345,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     mac.code.extend(instructions);
                     auto_save_current_macro(app);
                 }
+                return scroll_editor_to_end();
             }
         }
         // Settings page

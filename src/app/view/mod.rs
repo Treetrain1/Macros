@@ -8,12 +8,24 @@ use crate::app::state::Page;
 use crate::app::App;
 use controls::{macro_selector_row, run_controls_row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::Element;
+use cosmic::{widget, Element};
 use editor::macro_editor;
 
 pub(crate) const DEFAULT_WAIT_TIME: u64 = 1000;
 pub(crate) const DEFAULT_SCROLL_AMOUNT: i32 = 4;
 pub(crate) const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
+
+pub(crate) const ICON_DARK: cosmic::iced::Color = cosmic::iced::Color { r: 0.38, g: 0.38, b: 0.38, a: 1.0 };
+pub(crate) const ICON_RED: cosmic::iced::Color = cosmic::iced::Color { r: 0.80, g: 0.11, b: 0.16, a: 1.0 };
+
+pub(crate) fn colored_icon<'a>(name: &str, size: u16, color: cosmic::iced::Color) -> Element<'a, Message> {
+    widget::icon::icon(widget::icon::from_name(name).into())
+        .size(size)
+        .class(cosmic::theme::Svg::custom(move |_| {
+            cosmic::iced::widget::svg::Style { color: Some(color) }
+        }))
+        .into()
+}
 
 pub(crate) fn icon_path(name: &str) -> std::path::PathBuf {
     let installed = std::path::PathBuf::from("/usr/share/macros/icons").join(name);
@@ -21,6 +33,30 @@ pub(crate) fn icon_path(name: &str) -> std::path::PathBuf {
         return installed;
     }
     std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/")).join(name)
+}
+
+pub(crate) fn icon_label_button<'a>(
+    icon: &str,
+    label: &'static str,
+    spacing: u16,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use cosmic::iced::widget::button;
+    let icon_elem: Element<'_, Message> = if icon.ends_with(".svg") {
+        widget::icon::icon(widget::icon::from_path(icon_path(icon))).size(16).into()
+    } else {
+        colored_icon(icon, 16, ICON_DARK)
+    };
+    let b = button(
+        cosmic::widget::row![icon_elem, widget::text(label),]
+            .spacing(spacing)
+            .align_y(cosmic::iced::Alignment::Center),
+    )
+    .padding([8, 12]);
+    match on_press {
+        Some(msg) => b.on_press(msg).into(),
+        None => b.into(),
+    }
 }
 
 pub(crate) fn build_view(app: &App) -> Element<'_, Message> {

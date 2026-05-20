@@ -1,4 +1,5 @@
 use super::instruction_widget::{add_instruction_at, instruction_row};
+use super::{icon_label_button, icon_path};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::macros::Macro;
@@ -21,25 +22,21 @@ pub(crate) fn macro_editor<'a>(
     scroll_offset_y: f32,
     scroll_viewport_height: f32,
 ) -> Element<'a, Message> {
-    let pill_button = |label: &'static str| {
-        button(cosmic::widget::text(label)).padding([10, 18])
-    };
-
     let clear_instructions_label = if confirm_clear_instructions {
-        "⚠ Confirm clear (5s)"
+        "Confirm clear (5s)"
     } else {
-        "⚠ Clear instructions"
+        "Clear instructions"
     };
 
-    let undo_button = if can_undo {
-        pill_button("↩ Undo").on_press(Undo)
-    } else {
-        pill_button("↩ Undo")
+    let undo_button = {
+        let b = widget::button::icon(widget::icon::from_name("edit-undo-symbolic"))
+            .padding(8);
+        if can_undo { b.on_press(Undo) } else { b }
     };
-    let redo_button = if can_redo {
-        pill_button("↪ Redo").on_press(Redo)
-    } else {
-        pill_button("↪ Redo")
+    let redo_button = {
+        let b = widget::button::icon(widget::icon::from_name("edit-redo-symbolic"))
+            .padding(8);
+        if can_redo { b.on_press(Redo) } else { b }
     };
 
     let len = mac.code.len();
@@ -103,7 +100,7 @@ pub(crate) fn macro_editor<'a>(
                     cosmic::widget::tooltip::Position::Top
                 ),
                 cosmic::widget::tooltip(
-                    pill_button(clear_instructions_label).on_press(ClearInstructions),
+                    icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
                     cosmic::widget::container(if confirm_clear_instructions {
                         "Click again within 5 seconds to remove every instruction in this macro"
                     } else {
@@ -112,7 +109,7 @@ pub(crate) fn macro_editor<'a>(
                     cosmic::widget::tooltip::Position::Top
                 ),
                 cosmic::widget::tooltip(
-                    pill_button("💾 Save macro").on_press(SaveMacro),
+                    icon_label_button("document-save-symbolic", "Save macro", 6, Some(SaveMacro)),
                     cosmic::widget::container("Persist the current macro to your config"),
                     cosmic::widget::tooltip::Position::Top
                 ),

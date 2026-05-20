@@ -1,4 +1,4 @@
-use super::icon_path;
+use super::{colored_icon, icon_label_button, icon_path, ICON_DARK, ICON_RED};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::app::state::RecordingPhase;
@@ -94,20 +94,20 @@ pub(crate) fn run_controls_row<'a>(
     record_mouse_relative: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
-    let pill_button = |label: &'static str| {
-        button(cosmic::widget::text(label)).padding([10, 18])
-    };
+    let run_icon = if loop_mode_enabled { "media-playlist-repeat-symbolic" } else { "media-playback-start-symbolic" };
+    let run_label = if loop_mode_enabled { "Start loop" } else { "Run macro" };
 
-    let run_macro_label = if loop_mode_enabled {
-        "⟲ Start loop"
-    } else {
-        "▶ Run macro"
-    };
-
-    let run_macro_button = if has_selected_macro {
-        pill_button(run_macro_label).on_press(RunMacro)
-    } else {
-        pill_button(run_macro_label)
+    let run_macro_button = {
+        let b = button(
+            cosmic::widget::row![
+                colored_icon(run_icon, 16, ICON_DARK),
+                cosmic::widget::text(run_label),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+        )
+        .padding([10, 18]);
+        if has_selected_macro { b.on_press(RunMacro) } else { b }
     };
 
     let loop_mode = cosmic::widget::checkbox(loop_mode_enabled)
@@ -115,12 +115,20 @@ pub(crate) fn run_controls_row<'a>(
         .on_toggle(ToggleLoopMode);
 
     let record_element: Element<'_, Message> = {
-        let label = match recording_phase {
-            RecordingPhase::Countdown(n) => format!("Recording in {}s...", n),
-            RecordingPhase::Active => "■ Recording (Esc to stop)".to_string(),
-            RecordingPhase::Idle => "● Record".to_string(),
+        let (rec_icon, rec_color, rec_label): (&str, cosmic::iced::Color, String) = match recording_phase {
+            RecordingPhase::Countdown(n) => ("media-record-symbolic", ICON_RED, format!("Recording in {}s...", n)),
+            RecordingPhase::Active => ("media-playback-stop-symbolic", ICON_DARK, "Recording (Esc to stop)".to_string()),
+            RecordingPhase::Idle => ("media-record-symbolic", ICON_RED, "Record".to_string()),
         };
-        let btn = button(cosmic::widget::text(label)).padding([10, 18]);
+        let btn = button(
+            cosmic::widget::row![
+                colored_icon(rec_icon, 16, rec_color),
+                cosmic::widget::text(rec_label),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+        )
+        .padding([10, 18]);
         let btn = match recording_phase {
             RecordingPhase::Idle if has_selected_macro => btn.on_press(StartRecording),
             _ => btn,

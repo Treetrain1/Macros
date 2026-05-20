@@ -11,6 +11,7 @@ use enigo::agent::Token;
 use enigo::{Axis, Coordinate, Direction};
 use std::path::PathBuf;
 
+
 pub(crate) fn instruction_row<'a>(
     index: usize,
     ins: Instruction,

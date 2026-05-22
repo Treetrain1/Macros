@@ -10,7 +10,7 @@ pub(crate) fn create_default_instruction(instruction_type: usize) -> Option<Inst
         3 => Some(Instruction::Token(Token::Button(Button::Left, Direction::Click))),
         4 => Some(Instruction::Token(Token::MoveMouse(0, 0, Coordinate::Rel))),
         5 => Some(Instruction::Token(Token::Scroll(4, Axis::Vertical))),
-        6 => Some(Instruction::Script("script".into())),
+        6 => Some(Instruction::Command("script".into())),
         _ => None,
     }
 }

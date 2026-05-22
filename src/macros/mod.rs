@@ -42,7 +42,7 @@ impl Macro {
 pub(crate) enum Instruction {
     Token(Token),
     Wait(u64, u64),
-    Script(String),
+    Command(String),
     Comment(String),
 }
 
@@ -50,7 +50,7 @@ pub(crate) enum Instruction {
 enum InstructionDe {
     Token(Token),
     Wait(WaitDe),
-    Script(String),
+    Command(String),
     Comment(String),
 }
 
@@ -67,7 +67,7 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Token(t)                    => Instruction::Token(t),
             InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(d, 0),
             InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
-            InstructionDe::Script(s)                   => Instruction::Script(s),
+            InstructionDe::Command(s)                   => Instruction::Command(s),
             InstructionDe::Comment(s)                  => Instruction::Comment(s),
         }
     }

@@ -78,7 +78,7 @@ pub(crate) fn macro_editor<'a>(
 
     instructions.push(
         cosmic::widget::dropdown(
-            &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Run Script", "Comment"],
+            &["Wait", "Text", "Key", "Mouse Button", "Move Mouse", "Scroll", "Command", "Comment"],
             None,
             move |selected| add_instruction_at(len, selected),
         ).into()

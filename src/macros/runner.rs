@@ -39,12 +39,11 @@ impl Macro {
                     };
                     sleep(std::time::Duration::from_millis(actual));
                 }
-                Instruction::Script(script) => {
-                    println!("Running script: {script}");
-                    Command::new("bash")
-                        .arg(&script)
-                        .output()
-                        .expect(&format!("Failed to run script: {script}"));
+                Instruction::Command(command) => {
+                    println!("Running command: {command}");
+                    if let Err(e) = Command::new("bash").args(["-c", &command]).status() {
+                        warn!("Command failed: {}", e)
+                    }
                 }
                 Instruction::Token(token) => {
                     let mut enigo = match enigo.lock() {

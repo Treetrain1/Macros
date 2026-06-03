@@ -12,6 +12,11 @@ use tracing::warn;
 
 pub(crate) static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) static RECORD_MOUSE_RELATIVE: AtomicBool = AtomicBool::new(false);
+static GRAB_FAILED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn grab_failed() -> bool {
+    GRAB_FAILED.load(Ordering::Relaxed)
+}
 
 static RECORDING_QUEUE: OnceLock<Mutex<VecDeque<Instruction>>> = OnceLock::new();
 static STOP_SIGNAL: OnceLock<Mutex<VecDeque<()>>> = OnceLock::new();
@@ -158,6 +163,7 @@ pub(crate) fn start_grab_thread() {
                     Some(event)
                 });
                 if let Err(e) = result {
+                    GRAB_FAILED.store(true, Ordering::Relaxed);
                     warn!("rdev grab failed (global hotkeys and recording unavailable): {:?}", e);
                 }
             });

@@ -12,6 +12,22 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
     let spacing = cosmic::theme::active().cosmic().spacing;
     let bindings = &app.editor_ui.hotkey_bindings;
 
+    let yellow = cosmic::iced::Color { r: 0.95, g: 0.75, b: 0.1, a: 1.0 };
+    let grab_warning: Option<cosmic::Element<Message>> = if crate::recording::grab_failed() {
+        Some(
+            widget::column![
+                widget::text("⚠ Global hotkeys unavailable: user not in \"input\" group.")
+                    .class(cosmic::theme::Text::Color(yellow)),
+                widget::text("Run: sudo usermod -aG input $USER")
+                    .class(cosmic::theme::Text::Color(yellow)),
+            ]
+            .spacing(spacing.space_xxs)
+            .into(),
+        )
+    } else {
+        None
+    };
+
     let named_actions: &[(&str, HotkeyAction)] = &[
         ("Run Macro", HotkeyAction::RunMacro),
         ("Stop Loop", HotkeyAction::StopLoop),
@@ -78,30 +94,37 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
         .padding([10, 18])
         .on_press(CloseSettings);
 
-    let content = widget::column![
-        widget::row![back_btn].spacing(spacing.space_s),
-        widget::settings::view_column(vec![
-            widget::settings::section()
-                .title("Global Hotkeys")
-                .add(
-                    widget::column::with_children(named_rows)
-                        .spacing(spacing.space_xs)
-                        .padding([0, 15, 0, 15]),
-                )
-                .into(),
-            widget::settings::section()
-                .title("Per-Macro Hotkeys")
-                .add(
-                    widget::column::with_children(per_macro_rows)
-                        .spacing(spacing.space_s)
-                        .padding([0, 15, 0, 15]),
-                )
-                .into(),
-        ])
-        .width(Length::Fill),
-    ]
-    .spacing(spacing.space_s)
-    .padding(spacing.space_s);
+    let settings_col = widget::settings::view_column(vec![
+        widget::settings::section()
+            .title("Global Hotkeys")
+            .add(
+                widget::column::with_children(named_rows)
+                    .spacing(spacing.space_xs)
+                    .padding([0, 15, 0, 15]),
+            )
+            .into(),
+        widget::settings::section()
+            .title("Per-Macro Hotkeys")
+            .add(
+                widget::column::with_children(per_macro_rows)
+                    .spacing(spacing.space_s)
+                    .padding([0, 15, 0, 15]),
+            )
+            .into(),
+    ])
+    .width(Length::Fill);
+
+    let mut content_children: Vec<Element<Message>> = vec![
+        widget::row![back_btn].spacing(spacing.space_s).into(),
+    ];
+    if let Some(w) = grab_warning {
+        content_children.push(w);
+    }
+    content_children.push(settings_col.into());
+
+    let content = widget::column::with_children(content_children)
+        .spacing(spacing.space_s)
+        .padding(spacing.space_s);
 
     widget::container(content)
         .width(Length::Fill)

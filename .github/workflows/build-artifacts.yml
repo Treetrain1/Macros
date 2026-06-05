@@ -18,21 +18,18 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: macros-windows-x86_64.exe
-            binary_path: target/release/macros.exe
             experimental: false
 
           - name: linux-x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: macros-linux-x86_64
-            binary_path: target/release/macros
             experimental: false
 
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: macros-linux-arm64
-            binary_path: target/release/macros
             experimental: false
 
           # macOS is experimental: enigo is not declared as a macOS dep in Cargo.toml
@@ -40,7 +37,6 @@ jobs:
             runner: macos-latest
             target: aarch64-apple-darwin
             artifact_name: macros-macos-arm64
-            binary_path: target/release/macros
             experimental: true
 
     steps:
@@ -79,12 +75,12 @@ jobs:
 
       - name: Rename binary (Linux/macOS)
         if: runner.os != 'Windows'
-        run: cp ${{ matrix.binary_path }} ${{ matrix.artifact_name }}
+        run: cp target/${{ matrix.target }}/release/macros ${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item ${{ matrix.binary_path }} ${{ matrix.artifact_name }}
+        run: Copy-Item target/${{ matrix.target }}/release/macros.exe ${{ matrix.artifact_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -1,0 +1,164 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.3.0)'
+        required: true
+        type: string
+      release_name:
+        description: 'Release title (leave blank to use tag as title)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental == true }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: macros-windows-x86_64.exe
+            binary_path: target/release/macros.exe
+            experimental: false
+
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: macros-linux-x86_64
+            binary_path: target/release/macros
+            experimental: false
+
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact_name: macros-linux-arm64
+            binary_path: target/release/macros
+            experimental: false
+
+          # macOS is experimental: enigo is not declared as a macOS dep in Cargo.toml
+          - name: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: macros-macos-arm64
+            binary_path: target/release/macros
+            experimental: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libdbus-1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            libx11-dev \
+            libxtst-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libglib2.0-dev \
+            libatspi2.0-dev \
+            libclang-dev
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: cp ${{ matrix.binary_path }} ${{ matrix.artifact_name }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item ${{ matrix.binary_path }} ${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    permissions:
+      contents: write
+
+    steps:
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine release name
+        id: release_name
+        run: |
+          NAME="${{ inputs.release_name }}"
+          if [ -z "$NAME" ]; then
+            NAME="${{ steps.tag.outputs.value }}"
+          fi
+          echo "value=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: ./release-artifacts
+
+      - name: List release artifacts
+        run: ls -lh ./release-artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: ${{ steps.release_name.outputs.value }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: ./release-artifacts/*
+          body: |
+            ## Downloads
+
+            | Platform | File |
+            |---|---|
+            | Windows x86_64 | `macros-windows-x86_64.exe` |
+            | Linux x86_64 | `macros-linux-x86_64` |
+            | Linux arm64 | `macros-linux-arm64` |
+            | macOS arm64 (experimental) | `macros-macos-arm64` |
+
+            > **Note**: macOS builds are experimental and may be absent if compilation failed.

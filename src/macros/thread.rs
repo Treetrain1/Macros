@@ -1,6 +1,6 @@
 use crate::macros::thread_pool::ThreadPool;
+use crate::macros::uinput_emulator::UinputEmulator;
 use crate::macros::Macro;
-use enigo::Enigo;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tracing::warn;
@@ -8,7 +8,7 @@ use tracing::warn;
 impl Macro {
     pub(crate) fn into_loop_task(
         self,
-        enigo: Arc<Mutex<Enigo<'static>>>,
+        emulator: Arc<Mutex<UinputEmulator>>,
         loop_flag: Arc<Mutex<bool>>,
     ) -> impl FnOnce() + Send + 'static {
         move || {
@@ -23,7 +23,7 @@ impl Macro {
                     break;
                 }
 
-                self.clone().run(Arc::clone(&enigo));
+                self.clone().run(Arc::clone(&emulator));
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -33,11 +33,11 @@ impl Macro {
 
     pub(crate) fn into_single_run_task(
         self,
-        enigo: Arc<Mutex<Enigo<'static>>>,
+        emulator: Arc<Mutex<UinputEmulator>>,
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Running macro: {}", self.name);
-            self.run(enigo);
+            self.run(emulator);
             println!("Macro complete.");
         }
     }

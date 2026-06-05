@@ -1,15 +1,22 @@
+use crate::macros::uinput_emulator::UinputEmulator;
 use crate::macros::{Instruction, Macro};
 use enigo::agent::Token::{Button, Key, MoveMouse, Raw, Scroll, Text};
 use enigo::Key as EnigoKey;
-use enigo::{Enigo, Keyboard, Mouse};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use rand::RngExt;
 use tracing::warn;
 
+static EMULATOR_FAILED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn emulator_failed() -> bool {
+    EMULATOR_FAILED.load(Ordering::Relaxed)
+}
+
 impl Macro {
-    pub(crate) fn run(self, enigo: Arc<Mutex<Enigo>>) {
+    pub(crate) fn run(self, emulator: Arc<Mutex<UinputEmulator>>) {
         let mut pressed_keys: Vec<EnigoKey> = Vec::new();
 
         let normalize_modifier_key = |key: EnigoKey| -> EnigoKey {
@@ -46,30 +53,32 @@ impl Macro {
                     }
                 }
                 Instruction::Token(token) => {
-                    let mut enigo = match enigo.lock() {
+                    let mut em = match emulator.lock() {
                         Ok(guard) => guard,
                         Err(err) => {
-                            warn!("Failed to lock enigo mutex: {}", err);
+                            warn!("Failed to lock emulator mutex: {}", err);
                             return;
                         }
                     };
 
                     match token {
                         Text(text) => {
-                            if let Err(err) = enigo.text(&text) {
+                            if let Err(err) = em.text(&text) {
                                 warn!("Failed to type text '{}': {}", text, err);
                             }
                         }
                         Key(key, direction) => {
                             let normalized_key = normalize_modifier_key(key);
                             let key_for_event = match (normalized_key.clone(), direction) {
-                                (EnigoKey::Unicode(c), enigo::Direction::Click) if shift_is_pressed(&pressed_keys) && c.is_ascii_lowercase() => {
+                                (EnigoKey::Unicode(c), enigo::Direction::Click)
+                                    if shift_is_pressed(&pressed_keys) && c.is_ascii_lowercase() =>
+                                {
                                     EnigoKey::Unicode(c.to_ascii_uppercase())
                                 }
                                 (key, _) => key,
                             };
 
-                            match enigo.key(key_for_event, direction) {
+                            match em.key(key_for_event, direction) {
                                 Ok(()) => match direction {
                                     enigo::Direction::Press => {
                                         if !pressed_keys.contains(&normalized_key) {
@@ -82,27 +91,27 @@ impl Macro {
                                     enigo::Direction::Click => {}
                                 },
                                 Err(err) => {
-                                    warn!("Failed to type key {:?} ({:?}): {}", normalized_key, direction, err);
+                                    warn!("Failed to press key {:?} ({:?}): {}", normalized_key, direction, err);
                                 }
                             }
                         }
                         Raw(keycode, direction) => {
-                            if let Err(err) = enigo.raw(keycode, direction) {
-                                warn!("Failed to type raw keycode {}: {}", keycode, err);
+                            if let Err(err) = em.raw(keycode, direction) {
+                                warn!("Failed to emit raw keycode {}: {}", keycode, err);
                             }
                         }
                         Button(button, direction) => {
-                            if let Err(err) = enigo.button(button, direction) {
-                                warn!("Failed to click mouse button {:?} ({:?}): {}", button, direction, err);
+                            if let Err(err) = em.button(button, direction) {
+                                warn!("Failed to click button {:?} ({:?}): {}", button, direction, err);
                             }
                         }
                         MoveMouse(x, y, coord) => {
-                            if let Err(err) = enigo.move_mouse(x, y, coord) {
+                            if let Err(err) = em.move_mouse(x, y, coord) {
                                 warn!("Failed to move mouse to ({}, {}): {}", x, y, err);
                             }
                         }
                         Scroll(amount, axis) => {
-                            if let Err(err) = enigo.scroll(amount, axis) {
+                            if let Err(err) = em.scroll(amount, axis) {
                                 warn!("Failed to scroll by {}: {}", amount, err);
                             }
                         }
@@ -118,19 +127,26 @@ impl Macro {
         }
 
         if !pressed_keys.is_empty() {
-            if let Ok(mut enigo) = enigo.lock() {
+            if let Ok(mut em) = emulator.lock() {
                 for key in pressed_keys.into_iter().rev() {
-                    if let Err(err) = enigo.key(key.clone(), enigo::Direction::Release) {
-                        warn!("Failed to release key {:?} during macro cleanup: {}", key, err);
+                    if let Err(err) = em.key(key.clone(), enigo::Direction::Release) {
+                        warn!("Failed to release key {:?} during cleanup: {}", key, err);
                     }
                 }
             } else {
-                warn!("Failed to lock enigo mutex for macro key cleanup");
+                warn!("Failed to lock emulator mutex for key cleanup");
             }
         }
     }
 }
 
-pub fn make_enigo() -> Enigo<'static> {
-    Enigo::new(&enigo::Settings::default()).unwrap()
+pub fn make_emulator() -> Option<UinputEmulator> {
+    match UinputEmulator::new() {
+        Ok(e) => Some(e),
+        Err(err) => {
+            warn!("Failed to initialize uinput emulator: {}", err);
+            EMULATOR_FAILED.store(true, Ordering::Relaxed);
+            None
+        }
+    }
 }

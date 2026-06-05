@@ -27,6 +27,16 @@ static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
 static HOTKEY_ACTION_QUEUE: OnceLock<Mutex<VecDeque<HotkeyAction>>> = OnceLock::new();
 
+pub(crate) fn get_last_mouse_pos() -> Option<(f64, f64)> {
+    LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock().ok().and_then(|g| *g)
+}
+
+pub(crate) fn set_last_mouse_pos(x: f64, y: f64) {
+    if let Ok(mut g) = LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock() {
+        *g = Some((x, y));
+    }
+}
+
 pub(crate) fn get_recording_queue() -> &'static Mutex<VecDeque<Instruction>> {
     RECORDING_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
 }
@@ -144,6 +154,11 @@ pub(crate) fn start_grab_thread() {
                         }
 
                         return Some(event);
+                    }
+
+                    // Always track real cursor position for relative-move playback
+                    if let EventType::MouseMove { x, y } = &event.event_type {
+                        set_last_mouse_pos(*x, *y);
                     }
 
                     // Hotkey detection (only when not recording)

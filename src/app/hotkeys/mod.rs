@@ -2,8 +2,8 @@ pub(crate) mod queue;
 
 use crate::config;
 use crate::hotkey_types::HotkeyAction;
+use crate::macros::uinput_emulator::UinputEmulator;
 use cosmic::cosmic_config::{Config, ConfigGet};
-use enigo::Enigo;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
 
@@ -12,24 +12,24 @@ pub(crate) const LOOP_ITERATION_DELAY_MS: u64 = 1;
 pub(crate) fn spawn_hotkey_action(
     action: HotkeyAction,
     config: Config,
-    enigo: Arc<Mutex<Enigo<'static>>>,
+    emulator: Arc<Mutex<UinputEmulator>>,
     is_looping: Arc<Mutex<bool>>,
 ) {
     tokio::spawn(async move {
-        execute_run_action(action, &config, &enigo, &is_looping);
+        execute_run_action(action, &config, &emulator, &is_looping);
     });
 }
 
 fn execute_run_action(
     action: HotkeyAction,
     config: &Config,
-    enigo: &Arc<Mutex<Enigo<'static>>>,
+    emulator: &Arc<Mutex<UinputEmulator>>,
     is_looping: &Arc<Mutex<bool>>,
 ) {
     match action {
-        HotkeyAction::RunMacro => run_selected_macro(config, enigo, is_looping),
+        HotkeyAction::RunMacro => run_selected_macro(config, emulator, is_looping),
         HotkeyAction::RunSpecificMacro(ref macro_id) => {
-            run_specific_macro(config, enigo, is_looping, macro_id)
+            run_specific_macro(config, emulator, is_looping, macro_id)
         }
         _ => {}
     }
@@ -37,7 +37,7 @@ fn execute_run_action(
 
 pub(crate) fn run_selected_macro(
     config: &Config,
-    enigo: &Arc<Mutex<Enigo<'static>>>,
+    emulator: &Arc<Mutex<UinputEmulator>>,
     is_looping: &Arc<Mutex<bool>>,
 ) {
     let loop_mode_enabled = config.get::<bool>("loop_mode_enabled").unwrap_or(false);
@@ -56,12 +56,12 @@ pub(crate) fn run_selected_macro(
         return;
     };
 
-    run_macro_task(mac, enigo, is_looping, loop_mode_enabled);
+    run_macro_task(mac, emulator, is_looping, loop_mode_enabled);
 }
 
 pub(crate) fn run_specific_macro(
     config: &Config,
-    enigo: &Arc<Mutex<Enigo<'static>>>,
+    emulator: &Arc<Mutex<UinputEmulator>>,
     is_looping: &Arc<Mutex<bool>>,
     macro_id: &str,
 ) {
@@ -76,16 +76,16 @@ pub(crate) fn run_specific_macro(
         return;
     };
 
-    run_macro_task(mac, enigo, is_looping, loop_mode_enabled);
+    run_macro_task(mac, emulator, is_looping, loop_mode_enabled);
 }
 
 fn run_macro_task(
     mac: crate::macros::Macro,
-    enigo: &Arc<Mutex<Enigo<'static>>>,
+    emulator: &Arc<Mutex<UinputEmulator>>,
     is_looping: &Arc<Mutex<bool>>,
     loop_mode: bool,
 ) {
-    let enigo = Arc::clone(enigo);
+    let emulator = Arc::clone(emulator);
 
     if loop_mode {
         if let Ok(mut state) = is_looping.lock() {
@@ -101,12 +101,12 @@ fn run_macro_task(
                 warn!("Failed to lock loop flag, stopping");
                 break;
             }
-            mac.clone().run(Arc::clone(&enigo));
+            mac.clone().run(Arc::clone(&emulator));
             std::thread::sleep(std::time::Duration::from_millis(LOOP_ITERATION_DELAY_MS));
         });
     } else {
         tokio::task::spawn_blocking(move || {
-            mac.run(enigo);
+            mac.run(emulator);
         });
     }
 }

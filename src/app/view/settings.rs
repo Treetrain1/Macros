@@ -27,6 +27,20 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
     } else {
         None
     };
+    let emulator_warning: Option<cosmic::Element<Message>> = if crate::macros::runner::emulator_failed() {
+        Some(
+            widget::column![
+                widget::text("⚠ Input emulation unavailable: could not open /dev/uinput.")
+                    .class(cosmic::theme::Text::Color(yellow)),
+                widget::text("Run: sudo usermod -aG input $USER  (then log out and back in)")
+                    .class(cosmic::theme::Text::Color(yellow)),
+            ]
+            .spacing(spacing.space_xxs)
+            .into(),
+        )
+    } else {
+        None
+    };
 
     let named_actions: &[(&str, HotkeyAction)] = &[
         ("Run Macro", HotkeyAction::RunMacro),
@@ -118,6 +132,9 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
         widget::row![back_btn].spacing(spacing.space_s).into(),
     ];
     if let Some(w) = grab_warning {
+        content_children.push(w);
+    }
+    if let Some(w) = emulator_warning {
         content_children.push(w);
     }
     content_children.push(settings_col.into());

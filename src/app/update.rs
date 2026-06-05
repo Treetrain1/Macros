@@ -84,7 +84,10 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         RunMacro => {
-            if let Some(mac) = app.macro_lib.current_macro.clone() {
+            if let (Some(mac), Some(emulator)) = (
+                app.macro_lib.current_macro.clone(),
+                app.execution.emulator.as_ref(),
+            ) {
                 if app.execution.loop_mode_enabled {
                     if let Err(err) = loop_control::start_loop(&app.execution.is_looping) {
                         warn!("Failed to start loop: {}", err);
@@ -92,7 +95,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     }
 
                     let loop_task = mac.clone().into_loop_task(
-                        Arc::clone(&app.execution.enigo),
+                        Arc::clone(emulator),
                         Arc::clone(&app.execution.is_looping),
                     );
 
@@ -105,8 +108,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                         let _ = loop_control::stop_loop(&app.execution.is_looping);
                     }
                 } else {
-                    let single_task =
-                        mac.clone().into_single_run_task(Arc::clone(&app.execution.enigo));
+                    let single_task = mac.clone().into_single_run_task(Arc::clone(emulator));
 
                     if let Err(err) = thread::spawn_macro_thread(
                         &mut app.execution.thread_pool,
@@ -436,12 +438,14 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         ExecuteHotkeyAction(action) => {
             match &action {
                 HotkeyAction::RunMacro | HotkeyAction::RunSpecificMacro(_) => {
-                    hotkeys::spawn_hotkey_action(
-                        action,
-                        app.config.clone(),
-                        Arc::clone(&app.execution.enigo),
-                        Arc::clone(&app.execution.is_looping),
-                    );
+                    if let Some(emulator) = app.execution.emulator.as_ref() {
+                        hotkeys::spawn_hotkey_action(
+                            action,
+                            app.config.clone(),
+                            Arc::clone(emulator),
+                            Arc::clone(&app.execution.is_looping),
+                        );
+                    }
                 }
                 HotkeyAction::StopLoop => {
                     hotkeys::stop_loop(&app.execution.is_looping);

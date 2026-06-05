@@ -6,6 +6,8 @@ pub(crate) mod runner;
 pub(crate) mod thread_pool;
 pub(crate) mod thread;
 pub(crate) mod loop_control;
+pub(crate) mod key_mapping;
+pub(crate) mod uinput_emulator;
 
 fn default_macro_id() -> String {
     Uuid::new_v4().simple().to_string()

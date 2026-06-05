@@ -27,7 +27,10 @@ pub fn enigo_key_to_rdev(key: &EnigoKey) -> Option<(RdevKey, bool)> {
         EnigoKey::Meta => Some((RdevKey::MetaLeft, false)),
         EnigoKey::CapsLock => Some((RdevKey::CapsLock, false)),
         EnigoKey::Numlock => Some((RdevKey::NumLock, false)),
+        #[cfg(all(unix, not(target_os = "macos")))]
         EnigoKey::ScrollLock => Some((RdevKey::ScrollLock, false)),
+        #[cfg(windows)]
+        EnigoKey::Scroll => Some((RdevKey::ScrollLock, false)),
         EnigoKey::Pause => Some((RdevKey::Pause, false)),
         EnigoKey::PrintScr => Some((RdevKey::PrintScreen, false)),
         EnigoKey::F1 => Some((RdevKey::F1, false)),

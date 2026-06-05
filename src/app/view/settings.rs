@@ -14,30 +14,38 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
 
     let yellow = cosmic::iced::Color { r: 0.95, g: 0.75, b: 0.1, a: 1.0 };
     let grab_warning: Option<cosmic::Element<Message>> = if crate::recording::grab_failed() {
-        Some(
-            widget::column![
-                widget::text("⚠ Global hotkeys unavailable: user not in \"input\" group.")
-                    .class(cosmic::theme::Text::Color(yellow)),
-                widget::text("Run: sudo usermod -aG input $USER")
-                    .class(cosmic::theme::Text::Color(yellow)),
-            ]
-            .spacing(spacing.space_xxs)
-            .into(),
-        )
+        #[cfg(target_os = "linux")]
+        let col = widget::column![
+            widget::text("⚠ Global hotkeys unavailable: user not in \"input\" group.")
+                .class(cosmic::theme::Text::Color(yellow)),
+            widget::text("Run: sudo usermod -aG input $USER")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
+        #[cfg(target_os = "windows")]
+        let col = widget::column![
+            widget::text("⚠ Global hotkeys unavailable.")
+                .class(cosmic::theme::Text::Color(yellow)),
+            widget::text("Try running the app as administrator.")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
+        Some(col.spacing(spacing.space_xxs).into())
     } else {
         None
     };
     let emulator_warning: Option<cosmic::Element<Message>> = if crate::macros::runner::emulator_failed() {
-        Some(
-            widget::column![
-                widget::text("⚠ Input emulation unavailable: could not open /dev/uinput.")
-                    .class(cosmic::theme::Text::Color(yellow)),
-                widget::text("Run: sudo usermod -aG input $USER  (then log out and back in)")
-                    .class(cosmic::theme::Text::Color(yellow)),
-            ]
-            .spacing(spacing.space_xxs)
-            .into(),
-        )
+        #[cfg(target_os = "linux")]
+        let col = widget::column![
+            widget::text("⚠ Input emulation unavailable: could not open /dev/uinput.")
+                .class(cosmic::theme::Text::Color(yellow)),
+            widget::text("Run: sudo usermod -aG input $USER  (then log out and back in)")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
+        #[cfg(target_os = "windows")]
+        let col = widget::column![
+            widget::text("⚠ Input emulation unavailable.")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
+        Some(col.spacing(spacing.space_xxs).into())
     } else {
         None
     };

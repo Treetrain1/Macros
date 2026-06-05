@@ -11,11 +11,6 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 dirs = "6.0.0"
 uuid = { version = "1.18.1", features = ["v4"] }
-enigo = {
-    git = "https://github.com/enigo-rs/enigo.git",
-    rev = "6f311ea",
-    features = ["serde", "x11rb", "wayland"]
-}
 rand = "0.10.1"
 slotmap = { version = "1.0.7", features = ["serde"] }
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
@@ -28,6 +23,11 @@ version = "1.0.0"
 default-features = false
 
 [target.'cfg(windows)'.dependencies]
+enigo = {
+    git = "https://github.com/enigo-rs/enigo.git",
+    rev = "6f311ea",
+    features = ["serde"]
+}
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "f0f6893",
@@ -43,6 +43,11 @@ libcosmic = {
 }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+enigo = {
+    git = "https://github.com/enigo-rs/enigo.git",
+    rev = "6f311ea",
+    features = ["serde", "x11rb", "wayland"]
+}
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "f0f6893",

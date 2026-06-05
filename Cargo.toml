@@ -23,14 +23,14 @@ rdev = { version = "0.5.3", features = ["unstable_grab"] }
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "631c81b"
+rev = "f0f6893"
 version = "1.0.0"
 default-features = false
 
 [target.'cfg(windows)'.dependencies]
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "631c81b",
+    rev = "f0f6893",
     version = "1.0.0",
     default-features = false,
     features = [
@@ -45,7 +45,7 @@ libcosmic = {
 [target.'cfg(target_os = "linux")'.dependencies]
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "631c81b",
+    rev = "f0f6893",
     version = "1.0.0",
     default-features = false,
     features = [

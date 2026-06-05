@@ -39,7 +39,10 @@ pub(crate) fn map_rdev_key(key: RdevKey) -> Option<EnigoKey> {
         RdevKey::Tab => Some(EnigoKey::Tab),
         RdevKey::UpArrow => Some(EnigoKey::UpArrow),
         RdevKey::PrintScreen => Some(EnigoKey::PrintScr),
+        #[cfg(all(unix, not(target_os = "macos")))]
         RdevKey::ScrollLock => Some(EnigoKey::ScrollLock),
+        #[cfg(target_os = "windows")]
+        RdevKey::ScrollLock => Some(EnigoKey::Scroll),
         RdevKey::Pause => Some(EnigoKey::Pause),
         RdevKey::NumLock => Some(EnigoKey::Numlock),
         RdevKey::Insert => Some(EnigoKey::Insert),

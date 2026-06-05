@@ -111,8 +111,10 @@ pub(crate) fn run_controls_row<'a>(
     };
 
     let loop_mode = cosmic::widget::checkbox(loop_mode_enabled)
-        .name("Loop mode")
         .on_toggle(ToggleLoopMode);
+
+    #[cfg(target_os = "linux")]
+    let loop_mode = loop_mode.name("Loop mode");
 
     let record_element: Element<'_, Message> = {
         let (rec_icon, rec_color, rec_label): (&str, cosmic::iced::Color, String) = match recording_phase {

@@ -3,7 +3,7 @@ use std::io;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use evdev::{AttributeSet, EventType, InputEvent, Key, RelativeAxisType, uinput::VirtualDevice, uinput::VirtualDeviceBuilder};
+use evdev::{AbsoluteAxisType, AttributeSet, EventType, InputEvent, Key, PropType, RelativeAxisType, uinput::VirtualDevice, uinput::VirtualDeviceBuilder};
 use tracing::warn;
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
@@ -269,6 +269,17 @@ pub(super) fn start_capture_thread(
             .filter_map(|(path, mut device)| {
                 let name = device.name().unwrap_or("").to_owned();
                 if name == "macros-input" {
+                    return None;
+                }
+                // Skip touchpads and absolute pointer devices (tablets, trackpads).
+                // Touchpads report ABS_X and/or carry the BUTTONPAD property.
+                // External mice use only relative axes and will have neither.
+                let is_buttonpad = device.properties().contains(PropType::BUTTONPAD);
+                let has_abs = device
+                    .supported_absolute_axes()
+                    .map(|s| s.contains(AbsoluteAxisType::ABS_X))
+                    .unwrap_or(false);
+                if is_buttonpad || has_abs {
                     return None;
                 }
                 let has_keys = device

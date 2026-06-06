@@ -2,7 +2,7 @@ pub(crate) mod queue;
 
 use crate::config;
 use crate::hotkey_types::HotkeyAction;
-use crate::macros::uinput_emulator::UinputEmulator;
+use crate::macros::backend::InputBackend;
 use cosmic::cosmic_config::{Config, ConfigGet};
 use std::sync::{Arc, Mutex};
 use tracing::warn;
@@ -12,7 +12,7 @@ pub(crate) const LOOP_ITERATION_DELAY_MS: u64 = 1;
 pub(crate) fn spawn_hotkey_action(
     action: HotkeyAction,
     config: Config,
-    emulator: Arc<Mutex<UinputEmulator>>,
+    emulator: Arc<Mutex<dyn InputBackend>>,
     is_looping: Arc<Mutex<bool>>,
 ) {
     tokio::spawn(async move {
@@ -23,7 +23,7 @@ pub(crate) fn spawn_hotkey_action(
 fn execute_run_action(
     action: HotkeyAction,
     config: &Config,
-    emulator: &Arc<Mutex<UinputEmulator>>,
+    emulator: &Arc<Mutex<dyn InputBackend>>,
     is_looping: &Arc<Mutex<bool>>,
 ) {
     match action {
@@ -37,7 +37,7 @@ fn execute_run_action(
 
 pub(crate) fn run_selected_macro(
     config: &Config,
-    emulator: &Arc<Mutex<UinputEmulator>>,
+    emulator: &Arc<Mutex<dyn InputBackend>>,
     is_looping: &Arc<Mutex<bool>>,
 ) {
     let loop_mode_enabled = config.get::<bool>("loop_mode_enabled").unwrap_or(false);
@@ -61,7 +61,7 @@ pub(crate) fn run_selected_macro(
 
 pub(crate) fn run_specific_macro(
     config: &Config,
-    emulator: &Arc<Mutex<UinputEmulator>>,
+    emulator: &Arc<Mutex<dyn InputBackend>>,
     is_looping: &Arc<Mutex<bool>>,
     macro_id: &str,
 ) {
@@ -81,7 +81,7 @@ pub(crate) fn run_specific_macro(
 
 fn run_macro_task(
     mac: crate::macros::Macro,
-    emulator: &Arc<Mutex<UinputEmulator>>,
+    emulator: &Arc<Mutex<dyn InputBackend>>,
     is_looping: &Arc<Mutex<bool>>,
     loop_mode: bool,
 ) {

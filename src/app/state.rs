@@ -1,7 +1,7 @@
 use crate::config::{get_macros_from_config, get_selected_macro_id, set_selected_macro_id};
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::uinput_emulator::UinputEmulator;
+use crate::macros::backend::InputBackend;
 use crate::macros::{Instruction, Macro};
 use cosmic::cosmic_config::{Config, ConfigGet};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
@@ -78,7 +78,7 @@ impl MacroLibraryState {
 }
 
 pub(crate) struct ExecutionState {
-    pub(crate) emulator: Option<Arc<Mutex<UinputEmulator>>>,
+    pub(crate) emulator: Option<Arc<Mutex<dyn InputBackend>>>,
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,

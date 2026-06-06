@@ -2,7 +2,7 @@ use crate::app::message::Message;
 use crate::app::state::{EditorUiState, ExecutionState, MacroLibraryState};
 use crate::app::App;
 use crate::config;
-use crate::macros::runner::make_emulator;
+use crate::macros::runner::make_backend;
 use crate::macros::thread_pool::ThreadPool;
 use crate::macros::Macro;
 use crate::recording;
@@ -18,7 +18,7 @@ pub(crate) fn build_app(core: Core) -> App {
         config: Config::new(crate::config::APP_ID, 1).unwrap(),
         macro_lib: MacroLibraryState::new(),
         execution: ExecutionState {
-            emulator: make_emulator().map(|e| Arc::new(Mutex::new(e))),
+            emulator: make_backend(),
             thread_pool: ThreadPool::new(),
             is_looping: Arc::new(Mutex::new(false)),
             loop_mode_enabled: false,

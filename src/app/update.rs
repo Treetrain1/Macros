@@ -1,7 +1,7 @@
 use crate::app::hotkeys;
 use crate::app::key_mapping::{
-    iced_code_to_rdev_key_name, is_modifier_code, map_iced_key_to_enigo_key,
-    map_iced_physical_key_to_enigo_key, mods_to_u8,
+    iced_code_to_rdev_key_name, is_modifier_code, map_iced_key_to_macro_key,
+    map_iced_physical_key_to_macro_key, mods_to_u8,
 };
 use crate::app::message::Message;
 use crate::app::message::Message::*;
@@ -17,7 +17,7 @@ use cosmic::app::Task;
 use cosmic::cosmic_config::ConfigGet;
 use cosmic::iced::keyboard;
 use cosmic::iced::widget::scrollable;
-use enigo::agent::Token;
+use crate::input::types::InputToken;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::warn;
@@ -161,15 +161,15 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 };
 
                 if let Some(mac) = &mut app.macro_lib.current_macro {
-                    if let Some(Instruction::Token(Token::Key(_, direction))) =
+                    if let Some(Instruction::Token(InputToken::Key(_, direction))) =
                         mac.code.get(index).cloned()
                     {
-                        let captured_key = map_iced_physical_key_to_enigo_key(physical_key)
-                            .or_else(|| map_iced_key_to_enigo_key(key.as_ref()));
+                        let captured_key = map_iced_physical_key_to_macro_key(physical_key)
+                            .or_else(|| map_iced_key_to_macro_key(key.as_ref()));
 
                         if let Some(captured_key) = captured_key {
                             mac.code[index] =
-                                Instruction::Token(Token::Key(captured_key, direction));
+                                Instruction::Token(InputToken::Key(captured_key, direction));
                             auto_save_current_macro(app);
                         }
                     }

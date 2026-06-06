@@ -14,7 +14,6 @@ uuid = { version = "1.18.1", features = ["v4"] }
 rand = "0.10.1"
 slotmap = { version = "1.0.7", features = ["serde"] }
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
-rdev = { version = "0.5.3", features = ["unstable_grab"] }
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
@@ -22,32 +21,8 @@ rev = "f0f6893"
 version = "1.0.0"
 default-features = false
 
-[target.'cfg(windows)'.dependencies]
-enigo = {
-    git = "https://github.com/enigo-rs/enigo.git",
-    rev = "6f311ea",
-    features = ["serde"]
-}
-libcosmic = {
-    git = "https://github.com/pop-os/libcosmic.git",
-    rev = "f0f6893",
-    version = "1.0.0",
-    default-features = false,
-    features = [
-        #"debug",
-        "winit",
-        "tokio",
-        "multi-window",
-        "serde-keycode"
-    ]
-}
-
 [target.'cfg(target_os = "linux")'.dependencies]
-enigo = {
-    git = "https://github.com/enigo-rs/enigo.git",
-    rev = "6f311ea",
-    features = ["serde", "x11rb", "wayland"]
-}
+evdev = "0.12"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "f0f6893",
@@ -64,5 +39,29 @@ libcosmic = {
         "serde-keycode"
     ]
 }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+] }
+libcosmic = {
+    git = "https://github.com/pop-os/libcosmic.git",
+    rev = "f0f6893",
+    version = "1.0.0",
+    default-features = false,
+    features = [
+        #"debug",
+        "winit",
+        "tokio",
+        "multi-window",
+        "serde-keycode"
+    ]
+}
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.23"
+core-foundation = "0.9"
 
 [build-dependencies]

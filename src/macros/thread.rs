@@ -1,5 +1,5 @@
+use crate::macros::backend::InputBackend;
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::uinput_emulator::UinputEmulator;
 use crate::macros::Macro;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -8,7 +8,7 @@ use tracing::warn;
 impl Macro {
     pub(crate) fn into_loop_task(
         self,
-        emulator: Arc<Mutex<UinputEmulator>>,
+        emulator: Arc<Mutex<dyn InputBackend>>,
         loop_flag: Arc<Mutex<bool>>,
     ) -> impl FnOnce() + Send + 'static {
         move || {
@@ -33,7 +33,7 @@ impl Macro {
 
     pub(crate) fn into_single_run_task(
         self,
-        emulator: Arc<Mutex<UinputEmulator>>,
+        emulator: Arc<Mutex<dyn InputBackend>>,
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Running macro: {}", self.name);

@@ -1,4 +1,4 @@
-use enigo::{Axis, Coordinate, Direction};
+use crate::input::types::{Axis, Coordinate, Direction};
 
 pub(crate) fn direction_to_index(direction: &Direction) -> usize {
     match direction {

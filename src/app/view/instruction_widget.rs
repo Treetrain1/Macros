@@ -1,14 +1,13 @@
 use super::{icon_path, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
 use crate::input::ui_utils::{axis_to_index, coordinate_to_index, direction_to_index, index_to_axis, index_to_coordinate, index_to_direction};
 use crate::input::{get_mouse_button_names, index_to_mouse_button, key_to_string, mouse_button_to_index};
 use crate::macros::Instruction;
 use cosmic::iced::widget::button;
 use cosmic::iced::Alignment;
 use cosmic::{widget, Element};
-use enigo::agent::Token;
-use enigo::{Axis, Coordinate, Direction};
 use std::path::PathBuf;
 
 
@@ -25,14 +24,14 @@ pub(crate) fn instruction_row<'a>(
     let instruction: Element<Message> = match ins {
         Instruction::Token(token) => {
             match token {
-                Token::Text(text) => {
+                InputToken::Text(text) => {
                     cosmic::widget::row![
                         widget::text::body("Text:".to_string()).align_y(Alignment::Center),
                         widget::text_input("", text)
-                            .on_input(move |x| EditInstruction(index, Instruction::Token(Token::Text(x)))),
+                            .on_input(move |x| EditInstruction(index, Instruction::Token(InputToken::Text(x)))),
                     ].spacing(10).into()
                 }
-                Token::Key(key, direction) => {
+                InputToken::Key(key, direction) => {
                     let key_label = if key_capture_index == Some(index) {
                         "Press any key...".to_string()
                     } else {
@@ -48,14 +47,14 @@ pub(crate) fn instruction_row<'a>(
                         widget::dropdown(
                             &["Click", "Press", "Release"],
                             Some(dir_idx),
-                            move |x: usize| EditInstruction(index, Instruction::Token(Token::Key(key.clone(), index_to_direction(x))))
+                            move |x: usize| EditInstruction(index, Instruction::Token(InputToken::Key(key.clone(), index_to_direction(x))))
                         ),
                     ].spacing(10).width(cosmic::iced::Length::Fill).into()
                 }
-                Token::Raw(keycode, _) => {
+                InputToken::Raw(keycode, _) => {
                     widget::text::body(format!("Raw: {:?}", keycode)).into()
                 }
-                Token::Button(btn, direction) => {
+                InputToken::Button(btn, direction) => {
                     let btn_idx = mouse_button_to_index(&btn);
                     let dir_idx = direction_to_index(&direction);
 
@@ -64,42 +63,43 @@ pub(crate) fn instruction_row<'a>(
                         widget::dropdown(
                             get_mouse_button_names(),
                             Some(btn_idx),
-                            move |x: usize| EditInstruction(index, Instruction::Token(Token::Button(index_to_mouse_button(x), direction.clone())))
+                            move |x: usize| EditInstruction(index, Instruction::Token(InputToken::Button(index_to_mouse_button(x), direction.clone())))
                         ),
                         widget::dropdown(
                             &["Click", "Press", "Release"],
                             Some(dir_idx),
-                            move |x: usize| EditInstruction(index, Instruction::Token(Token::Button(btn, index_to_direction(x))))
+                            move |x: usize| EditInstruction(index, Instruction::Token(InputToken::Button(btn.clone(), index_to_direction(x))))
                         ),
                     ].spacing(10).width(cosmic::iced::Length::Fill).into()
                 }
-                Token::MoveMouse(x, y, coordinate) => {
+                InputToken::MoveMouse(x, y, coordinate) => {
                     let coord_idx = coordinate_to_index(&coordinate);
+                    let coord2 = coordinate.clone();
 
                     cosmic::widget::row![
                         widget::text::body("Move mouse:".to_string()).align_y(Alignment::Center),
                         widget::text_input("X", format!("{}", x))
-                            .on_input(move |new_x| EditInstruction(index, Instruction::Token(Token::MoveMouse(new_x.parse().unwrap_or(x), y, coordinate.clone())))),
+                            .on_input(move |new_x| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(new_x.parse().unwrap_or(x), y, coordinate.clone())))),
                         widget::text_input("Y", format!("{}", y))
-                            .on_input(move |new_y| EditInstruction(index, Instruction::Token(Token::MoveMouse(x, new_y.parse().unwrap_or(y), coordinate.clone())))),
+                            .on_input(move |new_y| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(x, new_y.parse().unwrap_or(y), coord2.clone())))),
                         widget::dropdown(
                             &["Absolute", "Relative"],
                             Some(coord_idx),
-                            move |coord: usize| EditInstruction(index, Instruction::Token(Token::MoveMouse(x, y, index_to_coordinate(coord))))
+                            move |coord: usize| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(x, y, index_to_coordinate(coord))))
                         ),
                     ].spacing(10).into()
                 }
-                Token::Scroll(amount, axis) => {
+                InputToken::Scroll(amount, axis) => {
                     let axis_idx = axis_to_index(&axis);
 
                     cosmic::widget::row![
                         widget::text::body("Scroll:".to_string()).align_y(Alignment::Center),
                         widget::text_input("Amount", format!("{}", amount))
-                            .on_input(move |new_amount| EditInstruction(index, Instruction::Token(Token::Scroll(new_amount.parse().unwrap_or(amount), axis.clone())))),
+                            .on_input(move |new_amount| EditInstruction(index, Instruction::Token(InputToken::Scroll(new_amount.parse().unwrap_or(amount), axis.clone())))),
                         widget::dropdown(
                             &["Vertical", "Horizontal"],
                             Some(axis_idx),
-                            move |new_axis: usize| EditInstruction(index, Instruction::Token(Token::Scroll(amount, index_to_axis(new_axis))))
+                            move |new_axis: usize| EditInstruction(index, Instruction::Token(InputToken::Scroll(amount, index_to_axis(new_axis))))
                         ),
                     ].spacing(10).into()
                 }
@@ -171,15 +171,13 @@ pub(crate) fn instruction_row<'a>(
 }
 
 pub(crate) fn add_instruction_at(index: usize, selected: usize) -> Message {
-    use enigo::{Axis, Button, Coordinate, Direction, Key};
-    use enigo::agent::Token;
     match selected {
         0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME, 0)),
-        1 => AddInstruction(index, Instruction::Token(Token::Text("text".into()))),
-        2 => AddInstruction(index, Instruction::Token(Token::Key(Key::Unicode('a'), Direction::Click))),
-        3 => AddInstruction(index, Instruction::Token(Token::Button(Button::Left, Direction::Click))),
-        4 => AddInstruction(index, Instruction::Token(Token::MoveMouse(0, 0, Coordinate::Rel))),
-        5 => AddInstruction(index, Instruction::Token(Token::Scroll(DEFAULT_SCROLL_AMOUNT, Axis::Vertical))),
+        1 => AddInstruction(index, Instruction::Token(InputToken::Text("text".into()))),
+        2 => AddInstruction(index, Instruction::Token(InputToken::Key(MacroKey::Unicode('a'), Direction::Click))),
+        3 => AddInstruction(index, Instruction::Token(InputToken::Button(MacroButton::Left, Direction::Click))),
+        4 => AddInstruction(index, Instruction::Token(InputToken::MoveMouse(0, 0, Coordinate::Rel))),
+        5 => AddInstruction(index, Instruction::Token(InputToken::Scroll(DEFAULT_SCROLL_AMOUNT, Axis::Vertical))),
         6 => AddInstruction(index, Instruction::Command("".into())),
         7 => AddInstruction(index, Instruction::Comment(String::new())),
         _ => unreachable!(),

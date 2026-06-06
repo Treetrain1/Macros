@@ -1,4 +1,4 @@
-use enigo::Button as EnigoButton;
+use crate::input::types::MacroButton;
 
 pub(crate) fn get_mouse_button_names() -> &'static [&'static str] {
     &[
@@ -14,31 +14,32 @@ pub(crate) fn get_mouse_button_names() -> &'static [&'static str] {
     ]
 }
 
-pub(crate) fn mouse_button_to_index(button: &EnigoButton) -> usize {
+pub(crate) fn mouse_button_to_index(button: &MacroButton) -> usize {
     match button {
-        EnigoButton::Left => 0,
-        EnigoButton::Right => 1,
-        EnigoButton::Middle => 2,
-        EnigoButton::Back => 3,
-        EnigoButton::Forward => 4,
-        EnigoButton::ScrollUp => 5,
-        EnigoButton::ScrollDown => 6,
-        EnigoButton::ScrollLeft => 7,
-        EnigoButton::ScrollRight => 8,
+        MacroButton::Left => 0,
+        MacroButton::Right => 1,
+        MacroButton::Middle => 2,
+        MacroButton::Back => 3,
+        MacroButton::Forward => 4,
+        MacroButton::ScrollUp => 5,
+        MacroButton::ScrollDown => 6,
+        MacroButton::ScrollLeft => 7,
+        MacroButton::ScrollRight => 8,
+        MacroButton::Other(_) => 0,
     }
 }
 
-pub(crate) fn index_to_mouse_button(index: usize) -> EnigoButton {
+pub(crate) fn index_to_mouse_button(index: usize) -> MacroButton {
     match index {
-        0 => EnigoButton::Left,
-        1 => EnigoButton::Right,
-        2 => EnigoButton::Middle,
-        3 => EnigoButton::Back,
-        4 => EnigoButton::Forward,
-        5 => EnigoButton::ScrollUp,
-        6 => EnigoButton::ScrollDown,
-        7 => EnigoButton::ScrollLeft,
-        8 => EnigoButton::ScrollRight,
-        _ => EnigoButton::Left,
+        0 => MacroButton::Left,
+        1 => MacroButton::Right,
+        2 => MacroButton::Middle,
+        3 => MacroButton::Back,
+        4 => MacroButton::Forward,
+        5 => MacroButton::ScrollUp,
+        6 => MacroButton::ScrollDown,
+        7 => MacroButton::ScrollLeft,
+        8 => MacroButton::ScrollRight,
+        _ => MacroButton::Left,
     }
 }

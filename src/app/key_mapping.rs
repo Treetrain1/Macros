@@ -1,89 +1,88 @@
 use crate::hotkey_types::{MOD_ALT, MOD_CTRL, MOD_META, MOD_SHIFT};
+use crate::input::types::MacroKey;
 use cosmic::iced::keyboard;
 use cosmic::iced::keyboard::key::Named;
-use enigo::Key;
 
-pub(crate) fn map_iced_key_to_enigo_key(key: keyboard::Key<&str>) -> Option<Key> {
+pub(crate) fn map_iced_key_to_macro_key(key: keyboard::Key<&str>) -> Option<MacroKey> {
     match key {
         keyboard::Key::Character(text) => {
             let mut chars = text.chars();
             let c = chars.next()?;
             if chars.next().is_none() {
-                Some(Key::Unicode(c))
+                Some(MacroKey::Unicode(c))
             } else {
                 None
             }
         }
         keyboard::Key::Named(named) => match named {
-            Named::Shift => Some(Key::Shift),
-            Named::Control => Some(Key::Control),
-            Named::Alt => Some(Key::Alt),
-            Named::Super => Some(Key::Meta),
-            Named::Meta => Some(Key::Meta),
-            Named::Enter => Some(Key::Return),
-            Named::Tab => Some(Key::Tab),
-            Named::Escape => Some(Key::Escape),
-            Named::Backspace => Some(Key::Backspace),
-            Named::ArrowLeft => Some(Key::LeftArrow),
-            Named::ArrowRight => Some(Key::RightArrow),
-            Named::ArrowUp => Some(Key::UpArrow),
-            Named::ArrowDown => Some(Key::DownArrow),
-            Named::Delete => Some(Key::Delete),
-            Named::Insert => Some(Key::Insert),
-            Named::Home => Some(Key::Home),
-            Named::End => Some(Key::End),
-            Named::PageUp => Some(Key::PageUp),
-            Named::PageDown => Some(Key::PageDown),
-            Named::CapsLock => Some(Key::CapsLock),
-            Named::NumLock => Some(Key::Numlock),
-            #[cfg(all(unix, not(target_os = "macos")))]
-            Named::ScrollLock => Some(Key::ScrollLock),
-            Named::F1 => Some(Key::F1),
-            Named::F2 => Some(Key::F2),
-            Named::F3 => Some(Key::F3),
-            Named::F4 => Some(Key::F4),
-            Named::F5 => Some(Key::F5),
-            Named::F6 => Some(Key::F6),
-            Named::F7 => Some(Key::F7),
-            Named::F8 => Some(Key::F8),
-            Named::F9 => Some(Key::F9),
-            Named::F10 => Some(Key::F10),
-            Named::F11 => Some(Key::F11),
-            Named::F12 => Some(Key::F12),
-            Named::F13 => Some(Key::F13),
-            Named::F14 => Some(Key::F14),
-            Named::F15 => Some(Key::F15),
-            Named::F16 => Some(Key::F16),
-            Named::F17 => Some(Key::F17),
-            Named::F18 => Some(Key::F18),
-            Named::F19 => Some(Key::F19),
-            Named::F20 => Some(Key::F20),
-            Named::F21 => Some(Key::F21),
-            Named::F22 => Some(Key::F22),
-            Named::F23 => Some(Key::F23),
-            Named::F24 => Some(Key::F24),
+            Named::Shift => Some(MacroKey::Shift),
+            Named::Control => Some(MacroKey::Control),
+            Named::Alt => Some(MacroKey::Alt),
+            Named::Super => Some(MacroKey::Meta),
+            Named::Meta => Some(MacroKey::Meta),
+            Named::Enter => Some(MacroKey::Return),
+            Named::Tab => Some(MacroKey::Tab),
+            Named::Escape => Some(MacroKey::Escape),
+            Named::Backspace => Some(MacroKey::Backspace),
+            Named::ArrowLeft => Some(MacroKey::LeftArrow),
+            Named::ArrowRight => Some(MacroKey::RightArrow),
+            Named::ArrowUp => Some(MacroKey::UpArrow),
+            Named::ArrowDown => Some(MacroKey::DownArrow),
+            Named::Delete => Some(MacroKey::Delete),
+            Named::Insert => Some(MacroKey::Insert),
+            Named::Home => Some(MacroKey::Home),
+            Named::End => Some(MacroKey::End),
+            Named::PageUp => Some(MacroKey::PageUp),
+            Named::PageDown => Some(MacroKey::PageDown),
+            Named::CapsLock => Some(MacroKey::CapsLock),
+            Named::NumLock => Some(MacroKey::NumLock),
+            Named::ScrollLock => Some(MacroKey::ScrollLock),
+            Named::F1 => Some(MacroKey::F1),
+            Named::F2 => Some(MacroKey::F2),
+            Named::F3 => Some(MacroKey::F3),
+            Named::F4 => Some(MacroKey::F4),
+            Named::F5 => Some(MacroKey::F5),
+            Named::F6 => Some(MacroKey::F6),
+            Named::F7 => Some(MacroKey::F7),
+            Named::F8 => Some(MacroKey::F8),
+            Named::F9 => Some(MacroKey::F9),
+            Named::F10 => Some(MacroKey::F10),
+            Named::F11 => Some(MacroKey::F11),
+            Named::F12 => Some(MacroKey::F12),
+            Named::F13 => Some(MacroKey::F13),
+            Named::F14 => Some(MacroKey::F14),
+            Named::F15 => Some(MacroKey::F15),
+            Named::F16 => Some(MacroKey::F16),
+            Named::F17 => Some(MacroKey::F17),
+            Named::F18 => Some(MacroKey::F18),
+            Named::F19 => Some(MacroKey::F19),
+            Named::F20 => Some(MacroKey::F20),
+            Named::F21 => Some(MacroKey::F21),
+            Named::F22 => Some(MacroKey::F22),
+            Named::F23 => Some(MacroKey::F23),
+            Named::F24 => Some(MacroKey::F24),
             _ => None,
         },
         keyboard::Key::Unidentified => None,
     }
 }
 
-pub(crate) fn map_iced_key_code_to_enigo_key(code: keyboard::key::Code) -> Option<Key> {
+pub(crate) fn map_iced_key_code_to_macro_key(code: keyboard::key::Code) -> Option<MacroKey> {
     match code {
-        keyboard::key::Code::Space => Some(Key::Space),
-        keyboard::key::Code::ShiftLeft => Some(Key::LShift),
-        keyboard::key::Code::ShiftRight => Some(Key::RShift),
-        keyboard::key::Code::ControlLeft => Some(Key::LControl),
-        keyboard::key::Code::ControlRight => Some(Key::RControl),
-        keyboard::key::Code::AltLeft => Some(Key::Option),
-        keyboard::key::Code::AltRight => Some(Key::Alt),
+        keyboard::key::Code::Space => Some(MacroKey::Space),
+        keyboard::key::Code::ShiftLeft => Some(MacroKey::LShift),
+        keyboard::key::Code::ShiftRight => Some(MacroKey::RShift),
+        keyboard::key::Code::ControlLeft => Some(MacroKey::LControl),
+        keyboard::key::Code::ControlRight => Some(MacroKey::RControl),
+        keyboard::key::Code::AltLeft => Some(MacroKey::Option),
+        keyboard::key::Code::AltRight => Some(MacroKey::Alt),
         _ => None,
     }
 }
 
-pub(crate) fn map_iced_physical_key_to_enigo_key(physical_key: keyboard::key::Physical) -> Option<Key> {
+pub(crate) fn map_iced_physical_key_to_macro_key(physical_key: keyboard::key::Physical) -> Option<MacroKey> {
     match physical_key {
-        keyboard::key::Physical::Code(code) => map_iced_key_code_to_enigo_key(code),
+        keyboard::key::Physical::Code(code) => map_iced_key_code_to_macro_key(code),
         _ => None,
     }
 }
@@ -121,7 +120,7 @@ pub(crate) fn is_modifier_code(physical_key: &keyboard::key::Physical) -> bool {
     )
 }
 
-/// Maps an iced physical key code to the rdev::Key debug string used in hotkey storage.
+/// Maps an iced physical key code to the hotkey name string used in hotkey storage.
 pub(crate) fn iced_code_to_rdev_key_name(physical_key: &keyboard::key::Physical) -> Option<String> {
     use keyboard::key::{Code, Physical};
     let code = match physical_key {

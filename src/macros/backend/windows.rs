@@ -1,0 +1,499 @@
+use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+use std::sync::OnceLock;
+
+use tracing::warn;
+use windows_sys::Win32::Foundation::POINT;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYBDINPUT_FLAGS,
+    MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
+    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, MOUSEINPUT_MOUSE_DATA,
+    SendInput, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
+    VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_LEFT, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
+    VK_NUMPAD4, VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9, VK_OEM_COMMA,
+    VK_OEM_MINUS, VK_OEM_PERIOD, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT,
+    VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
+    VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, GetCursorPos, SetWindowsHookExW, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
+    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
+};
+
+use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
+use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
+
+// ── Globals for the low-level hooks ──────────────────────────────────────────
+
+static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>>> =
+    OnceLock::new();
+// Track last absolute cursor position to compute relative deltas.
+static LAST_CURSOR_X: AtomicI32 = AtomicI32::new(i32::MIN);
+static LAST_CURSOR_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+
+use std::sync::Mutex;
+
+// ── Helper: send a raw INPUT ─────────────────────────────────────────────────
+
+unsafe fn send_input(input: INPUT) {
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+}
+
+fn vk_input(vk: VIRTUAL_KEY, flags: KEYBDINPUT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+fn mouse_input(flags: u32, dx: i32, dy: i32, data: u32) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: MOUSEINPUT_MOUSE_DATA(data),
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+// ── Key mapping ───────────────────────────────────────────────────────────────
+
+fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
+    Some(match key {
+        MacroKey::Return => (VK_RETURN, false),
+        MacroKey::Backspace => (VK_BACK, false),
+        MacroKey::Tab => (VK_TAB, false),
+        MacroKey::Space => (VIRTUAL_KEY(0x20), false),
+        MacroKey::Escape => (VK_ESCAPE, false),
+        MacroKey::Delete => (VK_DELETE, false),
+        MacroKey::Insert => (VK_INSERT, false),
+        MacroKey::Home => (VK_HOME, false),
+        MacroKey::End => (VK_END, false),
+        MacroKey::PageUp => (VK_PRIOR, false),
+        MacroKey::PageDown => (VK_NEXT, false),
+        MacroKey::UpArrow => (VK_UP, false),
+        MacroKey::DownArrow => (VK_DOWN, false),
+        MacroKey::LeftArrow => (VK_LEFT, false),
+        MacroKey::RightArrow => (VK_RIGHT, false),
+        MacroKey::Shift | MacroKey::LShift => (VK_LSHIFT, false),
+        MacroKey::RShift => (VK_RSHIFT, false),
+        MacroKey::Control | MacroKey::LControl => (VK_LCONTROL, false),
+        MacroKey::RControl => (VK_RCONTROL, false),
+        MacroKey::Alt | MacroKey::Option => (VK_LMENU, false),
+        MacroKey::AltGr => (VK_RMENU, false),
+        MacroKey::Meta | MacroKey::LMenu => (VK_LWIN, false),
+        MacroKey::CapsLock => (VK_CAPITAL, false),
+        MacroKey::NumLock => (VK_NUMLOCK, false),
+        MacroKey::ScrollLock => (VK_SCROLL, false),
+        MacroKey::Pause => (VK_PAUSE, false),
+        MacroKey::PrintScr => (VK_SNAPSHOT, false),
+        MacroKey::F1 => (VK_F1, false),
+        MacroKey::F2 => (VIRTUAL_KEY(0x71), false),
+        MacroKey::F3 => (VIRTUAL_KEY(0x72), false),
+        MacroKey::F4 => (VIRTUAL_KEY(0x73), false),
+        MacroKey::F5 => (VIRTUAL_KEY(0x74), false),
+        MacroKey::F6 => (VIRTUAL_KEY(0x75), false),
+        MacroKey::F7 => (VIRTUAL_KEY(0x76), false),
+        MacroKey::F8 => (VIRTUAL_KEY(0x77), false),
+        MacroKey::F9 => (VIRTUAL_KEY(0x78), false),
+        MacroKey::F10 => (VK_F10, false),
+        MacroKey::F11 => (VK_F11, false),
+        MacroKey::F12 => (VK_F12, false),
+        MacroKey::F13 => (VIRTUAL_KEY(0x7C), false),
+        MacroKey::F14 => (VIRTUAL_KEY(0x7D), false),
+        MacroKey::F15 => (VIRTUAL_KEY(0x7E), false),
+        MacroKey::F16 => (VIRTUAL_KEY(0x7F), false),
+        MacroKey::F17 => (VIRTUAL_KEY(0x80), false),
+        MacroKey::F18 => (VIRTUAL_KEY(0x81), false),
+        MacroKey::F19 => (VIRTUAL_KEY(0x82), false),
+        MacroKey::F20 => (VIRTUAL_KEY(0x83), false),
+        MacroKey::F21 => (VIRTUAL_KEY(0x84), false),
+        MacroKey::F22 => (VIRTUAL_KEY(0x85), false),
+        MacroKey::F23 => (VIRTUAL_KEY(0x86), false),
+        MacroKey::F24 => (VIRTUAL_KEY(0x87), false),
+        MacroKey::Numpad0 => (VK_NUMPAD0, false),
+        MacroKey::Numpad1 => (VK_NUMPAD1, false),
+        MacroKey::Numpad2 => (VK_NUMPAD2, false),
+        MacroKey::Numpad3 => (VK_NUMPAD3, false),
+        MacroKey::Numpad4 => (VK_NUMPAD4, false),
+        MacroKey::Numpad5 => (VK_NUMPAD5, false),
+        MacroKey::Numpad6 => (VK_NUMPAD6, false),
+        MacroKey::Numpad7 => (VK_NUMPAD7, false),
+        MacroKey::Numpad8 => (VK_NUMPAD8, false),
+        MacroKey::Numpad9 => (VK_NUMPAD9, false),
+        MacroKey::Add => (VIRTUAL_KEY(0x6B), false),
+        MacroKey::Subtract => (VIRTUAL_KEY(0x6D), false),
+        MacroKey::Multiply => (VIRTUAL_KEY(0x6A), false),
+        MacroKey::Divide => (VIRTUAL_KEY(0x6F), false),
+        MacroKey::Decimal => (VIRTUAL_KEY(0x6E), false),
+        MacroKey::VolumeDown => (VK_VOLUME_DOWN, false),
+        MacroKey::VolumeMute => (VK_VOLUME_MUTE, false),
+        MacroKey::VolumeUp => (VK_VOLUME_UP, false),
+        MacroKey::Select => (VIRTUAL_KEY(0x29), false),
+        MacroKey::Unicode(c) => {
+            let vk = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(*c as u16) };
+            if vk == -1i16 as u16 {
+                return None;
+            }
+            let vk_code = VIRTUAL_KEY(vk & 0xFF);
+            let needs_shift = (vk >> 8) & 0x01 != 0;
+            (vk_code, needs_shift)
+        }
+        MacroKey::Other(n) => (VIRTUAL_KEY(*n as u16), false),
+    })
+}
+
+// ── InputBackend impl ─────────────────────────────────────────────────────────
+
+pub struct WinApiBackend;
+
+impl WinApiBackend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl InputBackend for WinApiBackend {
+    fn key(&mut self, key: MacroKey, dir: Direction) -> Result<(), String> {
+        let (vk, needs_shift) =
+            macro_key_to_vk(&key).ok_or_else(|| format!("no VK mapping for {:?}", key))?;
+        unsafe {
+            match dir {
+                Direction::Press => {
+                    if needs_shift { send_input(vk_input(VK_LSHIFT, 0)); }
+                    send_input(vk_input(vk, 0));
+                }
+                Direction::Release => {
+                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
+                    if needs_shift { send_input(vk_input(VK_LSHIFT, KEYEVENTF_KEYUP)); }
+                }
+                Direction::Click => {
+                    if needs_shift { send_input(vk_input(VK_LSHIFT, 0)); }
+                    send_input(vk_input(vk, 0));
+                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
+                    if needs_shift { send_input(vk_input(VK_LSHIFT, KEYEVENTF_KEYUP)); }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn raw_keycode(&mut self, keycode: u16, dir: Direction) -> Result<(), String> {
+        let vk = VIRTUAL_KEY(keycode);
+        unsafe {
+            match dir {
+                Direction::Press => send_input(vk_input(vk, 0)),
+                Direction::Release => send_input(vk_input(vk, KEYEVENTF_KEYUP)),
+                Direction::Click => {
+                    send_input(vk_input(vk, 0));
+                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn button(&mut self, button: MacroButton, dir: Direction) -> Result<(), String> {
+        unsafe {
+            match button {
+                MacroButton::ScrollUp => {
+                    send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, 120));
+                }
+                MacroButton::ScrollDown => {
+                    send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, (-120i32) as u32));
+                }
+                MacroButton::ScrollLeft => {
+                    send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, (-120i32) as u32));
+                }
+                MacroButton::ScrollRight => {
+                    send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, 120));
+                }
+                MacroButton::Left => match dir {
+                    Direction::Press | Direction::Click => {
+                        send_input(mouse_input(MOUSEEVENTF_LEFTDOWN, 0, 0, 0));
+                        if matches!(dir, Direction::Click) {
+                            send_input(mouse_input(MOUSEEVENTF_LEFTUP, 0, 0, 0));
+                        }
+                    }
+                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_LEFTUP, 0, 0, 0)),
+                },
+                MacroButton::Right => match dir {
+                    Direction::Press | Direction::Click => {
+                        send_input(mouse_input(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0));
+                        if matches!(dir, Direction::Click) {
+                            send_input(mouse_input(MOUSEEVENTF_RIGHTUP, 0, 0, 0));
+                        }
+                    }
+                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_RIGHTUP, 0, 0, 0)),
+                },
+                MacroButton::Middle => match dir {
+                    Direction::Press | Direction::Click => {
+                        send_input(mouse_input(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0));
+                        if matches!(dir, Direction::Click) {
+                            send_input(mouse_input(MOUSEEVENTF_MIDDLEUP, 0, 0, 0));
+                        }
+                    }
+                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_MIDDLEUP, 0, 0, 0)),
+                },
+                MacroButton::Back => match dir {
+                    Direction::Press | Direction::Click => {
+                        send_input(mouse_input(MOUSEEVENTF_XDOWN, 0, 0, 1));
+                        if matches!(dir, Direction::Click) {
+                            send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 1));
+                        }
+                    }
+                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 1)),
+                },
+                MacroButton::Forward => match dir {
+                    Direction::Press | Direction::Click => {
+                        send_input(mouse_input(MOUSEEVENTF_XDOWN, 0, 0, 2));
+                        if matches!(dir, Direction::Click) {
+                            send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 2));
+                        }
+                    }
+                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 2)),
+                },
+                MacroButton::Other(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn move_mouse_rel(&mut self, dx: i32, dy: i32) -> Result<(), String> {
+        unsafe { send_input(mouse_input(MOUSEEVENTF_MOVE, dx, dy, 0)); }
+        Ok(())
+    }
+
+    fn move_mouse_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
+        // Compute delta from current position.
+        let cur = self.cursor_pos().unwrap_or((0, 0));
+        self.move_mouse_rel(x - cur.0, y - cur.1)
+    }
+
+    fn scroll(&mut self, amount: i32, axis: Axis) -> Result<(), String> {
+        unsafe {
+            match axis {
+                Axis::Vertical => send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, (amount * 120) as u32)),
+                Axis::Horizontal => send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, (amount * 120) as u32)),
+            }
+        }
+        Ok(())
+    }
+
+    fn text(&mut self, s: &str) -> Result<(), String> {
+        for c in s.chars() {
+            let _ = self.key(MacroKey::Unicode(c), Direction::Click);
+        }
+        Ok(())
+    }
+
+    fn cursor_pos(&self) -> Option<(i32, i32)> {
+        let mut pt = POINT { x: 0, y: 0 };
+        unsafe {
+            if GetCursorPos(&mut pt) != 0 {
+                Some((pt.x, pt.y))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// ── Capture ───────────────────────────────────────────────────────────────────
+
+pub(super) fn start_capture_thread(
+    callback: Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>,
+) {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        CALLBACK
+            .set(Mutex::new(callback))
+            .unwrap_or_else(|_| warn!("Capture callback already set"));
+
+        std::thread::Builder::new()
+            .name("winapi-hook".into())
+            .spawn(|| unsafe {
+                use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    GetMessageW, MSG, TranslateMessage, DispatchMessageW,
+                };
+
+                let hinstance = GetModuleHandleW(std::ptr::null());
+                let _kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), hinstance, 0);
+                let _ms_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hinstance, 0);
+
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, 0, 0, 0) != 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            })
+            .ok();
+    });
+}
+
+unsafe extern "system" fn keyboard_proc(
+    n_code: i32,
+    w_param: usize,
+    l_param: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::HC_ACTION;
+    if n_code == HC_ACTION as i32 {
+        let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
+        let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;
+        let vk = VIRTUAL_KEY(kb.vkCode as u16);
+        if let Some(macro_key) = vk_to_macro_key(vk) {
+            let capture_ev = if pressed {
+                CaptureEvent::KeyPress(macro_key)
+            } else {
+                CaptureEvent::KeyRelease(macro_key)
+            };
+            if let Some(cb) = CALLBACK.get() {
+                if let Ok(mut cb) = cb.lock() {
+                    if matches!(cb(capture_ev), CaptureDecision::Suppress) {
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    CallNextHookEx(0, n_code, w_param, l_param)
+}
+
+unsafe extern "system" fn mouse_proc(
+    n_code: i32,
+    w_param: usize,
+    l_param: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::HC_ACTION;
+    if n_code == HC_ACTION as i32 {
+        let ms = &*(l_param as *const MSLLHOOKSTRUCT);
+
+        let last_x = LAST_CURSOR_X.load(Ordering::Relaxed);
+        let last_y = LAST_CURSOR_Y.load(Ordering::Relaxed);
+        let cur_x = ms.pt.x;
+        let cur_y = ms.pt.y;
+        LAST_CURSOR_X.store(cur_x, Ordering::Relaxed);
+        LAST_CURSOR_Y.store(cur_y, Ordering::Relaxed);
+
+        let suppress = if let Some(cb) = CALLBACK.get() {
+            if let Ok(mut cb) = cb.lock() {
+                let decision = match w_param as u32 {
+                    WM_MOUSEMOVE => {
+                        if last_x != i32::MIN {
+                            let dx = cur_x - last_x;
+                            let dy = cur_y - last_y;
+                            if dx != 0 || dy != 0 {
+                                cb(CaptureEvent::MouseMoveRel(dx, dy))
+                            } else {
+                                CaptureDecision::Passthrough
+                            }
+                        } else {
+                            CaptureDecision::Passthrough
+                        }
+                    }
+                    WM_LBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Left)),
+                    WM_LBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Left)),
+                    WM_RBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Right)),
+                    WM_RBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Right)),
+                    WM_MBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Middle)),
+                    WM_MBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Middle)),
+                    WM_MOUSEWHEEL => {
+                        let delta = (ms.mouseData >> 16) as i16;
+                        let ticks = delta as i32 / 120;
+                        cb(CaptureEvent::Scroll(0, ticks))
+                    }
+                    _ => CaptureDecision::Passthrough,
+                };
+                matches!(decision, CaptureDecision::Suppress)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if suppress {
+            return 1;
+        }
+    }
+    CallNextHookEx(0, n_code, w_param, l_param)
+}
+
+fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
+    Some(match vk {
+        VK_RETURN => MacroKey::Return,
+        VK_BACK => MacroKey::Backspace,
+        VK_TAB => MacroKey::Tab,
+        VK_SPACE => MacroKey::Space,
+        VK_ESCAPE => MacroKey::Escape,
+        VK_DELETE => MacroKey::Delete,
+        VK_INSERT => MacroKey::Insert,
+        VK_HOME => MacroKey::Home,
+        VK_END => MacroKey::End,
+        VK_PRIOR => MacroKey::PageUp,
+        VK_NEXT => MacroKey::PageDown,
+        VK_UP => MacroKey::UpArrow,
+        VK_DOWN => MacroKey::DownArrow,
+        VK_LEFT => MacroKey::LeftArrow,
+        VK_RIGHT => MacroKey::RightArrow,
+        VK_LSHIFT => MacroKey::LShift,
+        VK_RSHIFT => MacroKey::RShift,
+        VK_LCONTROL => MacroKey::LControl,
+        VK_RCONTROL => MacroKey::RControl,
+        VK_LMENU => MacroKey::Alt,
+        VK_RMENU => MacroKey::AltGr,
+        VK_LWIN => MacroKey::Meta,
+        VK_RWIN => MacroKey::Meta,
+        VK_CAPITAL => MacroKey::CapsLock,
+        VK_NUMLOCK => MacroKey::NumLock,
+        VK_SCROLL => MacroKey::ScrollLock,
+        VK_PAUSE => MacroKey::Pause,
+        VK_SNAPSHOT => MacroKey::PrintScr,
+        VK_F1 => MacroKey::F1,
+        VIRTUAL_KEY(0x71) => MacroKey::F2,
+        VIRTUAL_KEY(0x72) => MacroKey::F3,
+        VIRTUAL_KEY(0x73) => MacroKey::F4,
+        VIRTUAL_KEY(0x74) => MacroKey::F5,
+        VIRTUAL_KEY(0x75) => MacroKey::F6,
+        VIRTUAL_KEY(0x76) => MacroKey::F7,
+        VIRTUAL_KEY(0x77) => MacroKey::F8,
+        VIRTUAL_KEY(0x78) => MacroKey::F9,
+        VK_F10 => MacroKey::F10,
+        VK_F11 => MacroKey::F11,
+        VK_F12 => MacroKey::F12,
+        VK_NUMPAD0 => MacroKey::Numpad0,
+        VK_NUMPAD1 => MacroKey::Numpad1,
+        VK_NUMPAD2 => MacroKey::Numpad2,
+        VK_NUMPAD3 => MacroKey::Numpad3,
+        VK_NUMPAD4 => MacroKey::Numpad4,
+        VK_NUMPAD5 => MacroKey::Numpad5,
+        VK_NUMPAD6 => MacroKey::Numpad6,
+        VK_NUMPAD7 => MacroKey::Numpad7,
+        VK_NUMPAD8 => MacroKey::Numpad8,
+        VK_NUMPAD9 => MacroKey::Numpad9,
+        VK_VOLUME_DOWN => MacroKey::VolumeDown,
+        VK_VOLUME_MUTE => MacroKey::VolumeMute,
+        VK_VOLUME_UP => MacroKey::VolumeUp,
+        VIRTUAL_KEY(code @ 0x41..=0x5A) => MacroKey::Unicode((code - 0x41 + b'a') as char),
+        VIRTUAL_KEY(code @ 0x30..=0x39) => MacroKey::Unicode((code - 0x30 + b'0') as char),
+        _ => MacroKey::Other(vk.0 as u32),
+    })
+}

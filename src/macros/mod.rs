@@ -1,13 +1,12 @@
-use enigo::agent::Token;
+use crate::input::types::InputToken;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) mod backend;
 pub(crate) mod runner;
 pub(crate) mod thread_pool;
 pub(crate) mod thread;
 pub(crate) mod loop_control;
-pub(crate) mod key_mapping;
-pub(crate) mod uinput_emulator;
 
 fn default_macro_id() -> String {
     Uuid::new_v4().simple().to_string()
@@ -17,8 +16,8 @@ fn default_macro_id() -> String {
 pub(crate) struct Macro {
     #[serde(default = "default_macro_id")]
     pub(crate) id: String,
-    pub(crate) name: String, /// displayed in GUI
-    pub(crate) description: String, /// displayed in GUI, TODO: add the description display
+    pub(crate) name: String,
+    pub(crate) description: String,
     pub(crate) code: Vec<Instruction>,
 }
 
@@ -42,7 +41,7 @@ impl Macro {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "InstructionDe")]
 pub(crate) enum Instruction {
-    Token(Token),
+    Token(InputToken),
     Wait(u64, u64),
     Command(String),
     Comment(String),
@@ -50,7 +49,7 @@ pub(crate) enum Instruction {
 
 #[derive(Deserialize)]
 enum InstructionDe {
-    Token(Token),
+    Token(InputToken),
     Wait(WaitDe),
     Command(String),
     Comment(String),

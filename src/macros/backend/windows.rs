@@ -1,26 +1,26 @@
-use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::OnceLock;
 
 use tracing::warn;
 use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYBDINPUT_FLAGS,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
     MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, MOUSEINPUT_MOUSE_DATA,
+    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
     SendInput, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
     VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
-    VK_LEFT, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
-    VK_NUMPAD4, VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9, VK_OEM_COMMA,
-    VK_OEM_MINUS, VK_OEM_PERIOD, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT,
+    VK_LEFT, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
+    VK_NUMPAD4, VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9,
+    VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT,
     VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
     VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetCursorPos, SetWindowsHookExW, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
-    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+    CallNextHookEx, GetCursorPos, SetWindowsHookExW, KBDLLHOOKSTRUCT,
+    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
+    WM_RBUTTONUP, WM_SYSKEYDOWN,
 };
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
@@ -39,10 +39,10 @@ use std::sync::Mutex;
 // ── Helper: send a raw INPUT ─────────────────────────────────────────────────
 
 unsafe fn send_input(input: INPUT) {
-    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32); }
 }
 
-fn vk_input(vk: VIRTUAL_KEY, flags: KEYBDINPUT_FLAGS) -> INPUT {
+fn vk_input(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
@@ -64,7 +64,7 @@ fn mouse_input(flags: u32, dx: i32, dy: i32, data: u32) -> INPUT {
             mi: MOUSEINPUT {
                 dx,
                 dy,
-                mouseData: MOUSEINPUT_MOUSE_DATA(data),
+                mouseData: data,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
@@ -80,7 +80,7 @@ fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
         MacroKey::Return => (VK_RETURN, false),
         MacroKey::Backspace => (VK_BACK, false),
         MacroKey::Tab => (VK_TAB, false),
-        MacroKey::Space => (VIRTUAL_KEY(0x20), false),
+        MacroKey::Space => (VK_SPACE, false),
         MacroKey::Escape => (VK_ESCAPE, false),
         MacroKey::Delete => (VK_DELETE, false),
         MacroKey::Insert => (VK_INSERT, false),
@@ -105,29 +105,29 @@ fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
         MacroKey::Pause => (VK_PAUSE, false),
         MacroKey::PrintScr => (VK_SNAPSHOT, false),
         MacroKey::F1 => (VK_F1, false),
-        MacroKey::F2 => (VIRTUAL_KEY(0x71), false),
-        MacroKey::F3 => (VIRTUAL_KEY(0x72), false),
-        MacroKey::F4 => (VIRTUAL_KEY(0x73), false),
-        MacroKey::F5 => (VIRTUAL_KEY(0x74), false),
-        MacroKey::F6 => (VIRTUAL_KEY(0x75), false),
-        MacroKey::F7 => (VIRTUAL_KEY(0x76), false),
-        MacroKey::F8 => (VIRTUAL_KEY(0x77), false),
-        MacroKey::F9 => (VIRTUAL_KEY(0x78), false),
+        MacroKey::F2 => (0x71u16, false),
+        MacroKey::F3 => (0x72u16, false),
+        MacroKey::F4 => (0x73u16, false),
+        MacroKey::F5 => (0x74u16, false),
+        MacroKey::F6 => (0x75u16, false),
+        MacroKey::F7 => (0x76u16, false),
+        MacroKey::F8 => (0x77u16, false),
+        MacroKey::F9 => (0x78u16, false),
         MacroKey::F10 => (VK_F10, false),
         MacroKey::F11 => (VK_F11, false),
         MacroKey::F12 => (VK_F12, false),
-        MacroKey::F13 => (VIRTUAL_KEY(0x7C), false),
-        MacroKey::F14 => (VIRTUAL_KEY(0x7D), false),
-        MacroKey::F15 => (VIRTUAL_KEY(0x7E), false),
-        MacroKey::F16 => (VIRTUAL_KEY(0x7F), false),
-        MacroKey::F17 => (VIRTUAL_KEY(0x80), false),
-        MacroKey::F18 => (VIRTUAL_KEY(0x81), false),
-        MacroKey::F19 => (VIRTUAL_KEY(0x82), false),
-        MacroKey::F20 => (VIRTUAL_KEY(0x83), false),
-        MacroKey::F21 => (VIRTUAL_KEY(0x84), false),
-        MacroKey::F22 => (VIRTUAL_KEY(0x85), false),
-        MacroKey::F23 => (VIRTUAL_KEY(0x86), false),
-        MacroKey::F24 => (VIRTUAL_KEY(0x87), false),
+        MacroKey::F13 => (0x7Cu16, false),
+        MacroKey::F14 => (0x7Du16, false),
+        MacroKey::F15 => (0x7Eu16, false),
+        MacroKey::F16 => (0x7Fu16, false),
+        MacroKey::F17 => (0x80u16, false),
+        MacroKey::F18 => (0x81u16, false),
+        MacroKey::F19 => (0x82u16, false),
+        MacroKey::F20 => (0x83u16, false),
+        MacroKey::F21 => (0x84u16, false),
+        MacroKey::F22 => (0x85u16, false),
+        MacroKey::F23 => (0x86u16, false),
+        MacroKey::F24 => (0x87u16, false),
         MacroKey::Numpad0 => (VK_NUMPAD0, false),
         MacroKey::Numpad1 => (VK_NUMPAD1, false),
         MacroKey::Numpad2 => (VK_NUMPAD2, false),
@@ -138,25 +138,25 @@ fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
         MacroKey::Numpad7 => (VK_NUMPAD7, false),
         MacroKey::Numpad8 => (VK_NUMPAD8, false),
         MacroKey::Numpad9 => (VK_NUMPAD9, false),
-        MacroKey::Add => (VIRTUAL_KEY(0x6B), false),
-        MacroKey::Subtract => (VIRTUAL_KEY(0x6D), false),
-        MacroKey::Multiply => (VIRTUAL_KEY(0x6A), false),
-        MacroKey::Divide => (VIRTUAL_KEY(0x6F), false),
-        MacroKey::Decimal => (VIRTUAL_KEY(0x6E), false),
+        MacroKey::Add => (0x6Bu16, false),
+        MacroKey::Subtract => (0x6Du16, false),
+        MacroKey::Multiply => (0x6Au16, false),
+        MacroKey::Divide => (0x6Fu16, false),
+        MacroKey::Decimal => (0x6Eu16, false),
         MacroKey::VolumeDown => (VK_VOLUME_DOWN, false),
         MacroKey::VolumeMute => (VK_VOLUME_MUTE, false),
         MacroKey::VolumeUp => (VK_VOLUME_UP, false),
-        MacroKey::Select => (VIRTUAL_KEY(0x29), false),
+        MacroKey::Select => (0x29u16, false),
         MacroKey::Unicode(c) => {
             let vk = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(*c as u16) };
-            if vk == -1i16 as u16 {
+            if vk == -1 {
                 return None;
             }
-            let vk_code = VIRTUAL_KEY(vk & 0xFF);
+            let vk_code = (vk & 0xFF) as u16;
             let needs_shift = (vk >> 8) & 0x01 != 0;
             (vk_code, needs_shift)
         }
-        MacroKey::Other(n) => (VIRTUAL_KEY(*n as u16), false),
+        MacroKey::Other(n) => (*n as u16, false),
     })
 }
 
@@ -196,7 +196,7 @@ impl InputBackend for WinApiBackend {
     }
 
     fn raw_keycode(&mut self, keycode: u16, dir: Direction) -> Result<(), String> {
-        let vk = VIRTUAL_KEY(keycode);
+        let vk = keycode;
         unsafe {
             match dir {
                 Direction::Press => send_input(vk_input(vk, 0)),
@@ -356,9 +356,9 @@ unsafe extern "system" fn keyboard_proc(
 ) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::HC_ACTION;
     if n_code == HC_ACTION as i32 {
-        let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
+        let kb = unsafe { &*(l_param as *const KBDLLHOOKSTRUCT) };
         let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;
-        let vk = VIRTUAL_KEY(kb.vkCode as u16);
+        let vk = kb.vkCode as u16;
         if let Some(macro_key) = vk_to_macro_key(vk) {
             let capture_ev = if pressed {
                 CaptureEvent::KeyPress(macro_key)
@@ -374,7 +374,7 @@ unsafe extern "system" fn keyboard_proc(
             }
         }
     }
-    CallNextHookEx(0, n_code, w_param, l_param)
+    unsafe { CallNextHookEx(0, n_code, w_param, l_param) }
 }
 
 unsafe extern "system" fn mouse_proc(
@@ -384,7 +384,7 @@ unsafe extern "system" fn mouse_proc(
 ) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::HC_ACTION;
     if n_code == HC_ACTION as i32 {
-        let ms = &*(l_param as *const MSLLHOOKSTRUCT);
+        let ms = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
 
         let last_x = LAST_CURSOR_X.load(Ordering::Relaxed);
         let last_y = LAST_CURSOR_Y.load(Ordering::Relaxed);
@@ -434,7 +434,7 @@ unsafe extern "system" fn mouse_proc(
             return 1;
         }
     }
-    CallNextHookEx(0, n_code, w_param, l_param)
+    unsafe { CallNextHookEx(0, n_code, w_param, l_param) }
 }
 
 fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
@@ -468,14 +468,14 @@ fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
         VK_PAUSE => MacroKey::Pause,
         VK_SNAPSHOT => MacroKey::PrintScr,
         VK_F1 => MacroKey::F1,
-        VIRTUAL_KEY(0x71) => MacroKey::F2,
-        VIRTUAL_KEY(0x72) => MacroKey::F3,
-        VIRTUAL_KEY(0x73) => MacroKey::F4,
-        VIRTUAL_KEY(0x74) => MacroKey::F5,
-        VIRTUAL_KEY(0x75) => MacroKey::F6,
-        VIRTUAL_KEY(0x76) => MacroKey::F7,
-        VIRTUAL_KEY(0x77) => MacroKey::F8,
-        VIRTUAL_KEY(0x78) => MacroKey::F9,
+        0x71 => MacroKey::F2,
+        0x72 => MacroKey::F3,
+        0x73 => MacroKey::F4,
+        0x74 => MacroKey::F5,
+        0x75 => MacroKey::F6,
+        0x76 => MacroKey::F7,
+        0x77 => MacroKey::F8,
+        0x78 => MacroKey::F9,
         VK_F10 => MacroKey::F10,
         VK_F11 => MacroKey::F11,
         VK_F12 => MacroKey::F12,
@@ -492,8 +492,8 @@ fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
         VK_VOLUME_DOWN => MacroKey::VolumeDown,
         VK_VOLUME_MUTE => MacroKey::VolumeMute,
         VK_VOLUME_UP => MacroKey::VolumeUp,
-        VIRTUAL_KEY(code @ 0x41..=0x5A) => MacroKey::Unicode((code - 0x41 + b'a') as char),
-        VIRTUAL_KEY(code @ 0x30..=0x39) => MacroKey::Unicode((code - 0x30 + b'0') as char),
-        _ => MacroKey::Other(vk.0 as u32),
+        code @ 0x41..=0x5A => MacroKey::Unicode((code as u8 - 0x41 + b'a') as char),
+        code @ 0x30..=0x39 => MacroKey::Unicode((code as u8 - 0x30 + b'0') as char),
+        _ => MacroKey::Other(vk as u32),
     })
 }

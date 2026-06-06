@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::OnceLock;
 
@@ -19,8 +20,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, SetWindowsHookExW, KBDLLHOOKSTRUCT,
     MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
@@ -30,6 +31,8 @@ use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
 
 static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>>> =
     OnceLock::new();
+// VK codes whose key-down was suppressed; used to also suppress the matching key-up.
+static SUPPRESSED_KEYS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
 // Track last absolute cursor position to compute relative deltas.
 static LAST_CURSOR_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_CURSOR_Y: AtomicI32 = AtomicI32::new(i32::MIN);
@@ -326,6 +329,7 @@ pub(super) fn start_capture_thread(
         CALLBACK
             .set(Mutex::new(callback))
             .unwrap_or_else(|_| warn!("Capture callback already set"));
+        SUPPRESSED_KEYS.get_or_init(|| Mutex::new(HashSet::new()));
 
         std::thread::Builder::new()
             .name("winapi-hook".into())
@@ -357,21 +361,41 @@ unsafe extern "system" fn keyboard_proc(
     use windows_sys::Win32::UI::WindowsAndMessaging::HC_ACTION;
     if n_code == HC_ACTION as i32 {
         let kb = unsafe { &*(l_param as *const KBDLLHOOKSTRUCT) };
+        // 0x10 = LLKHF_INJECTED: skip events injected by SendInput so macro
+        // playback doesn't feed back into the recording / hotkey system.
+        if kb.flags & 0x10 != 0 {
+            return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
+        }
         let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;
         let vk = kb.vkCode as u16;
         if let Some(macro_key) = vk_to_macro_key(vk) {
-            let capture_ev = if pressed {
-                CaptureEvent::KeyPress(macro_key)
-            } else {
-                CaptureEvent::KeyRelease(macro_key)
-            };
-            if let Some(cb) = CALLBACK.get() {
-                if let Ok(mut cb) = cb.lock() {
-                    if matches!(cb(capture_ev), CaptureDecision::Suppress) {
-                        return 1;
+                let suppress = if pressed {
+                let decision = CALLBACK.get()
+                    .and_then(|cb| cb.lock().ok())
+                    .map(|mut cb| cb(CaptureEvent::KeyPress(macro_key)))
+                    .unwrap_or(CaptureDecision::Passthrough);
+                if matches!(decision, CaptureDecision::Suppress) {
+                    if let Some(set) = SUPPRESSED_KEYS.get() {
+                        if let Ok(mut s) = set.lock() { s.insert(vk); }
                     }
+                    true
+                } else {
+                    false
                 }
-            }
+            } else {
+                // If the press was suppressed, suppress the release too so apps
+                // don't see a key-up without a prior key-down.
+                let was_suppressed = SUPPRESSED_KEYS.get()
+                    .and_then(|s| s.lock().ok())
+                    .map(|mut s| s.remove(&vk))
+                    .unwrap_or(false);
+                let cb_suppress = CALLBACK.get()
+                    .and_then(|cb| cb.lock().ok())
+                    .map(|mut cb| matches!(cb(CaptureEvent::KeyRelease(macro_key)), CaptureDecision::Suppress))
+                    .unwrap_or(false);
+                was_suppressed || cb_suppress
+            };
+            if suppress { return 1; }
         }
     }
     unsafe { CallNextHookEx(0, n_code, w_param, l_param) }
@@ -386,12 +410,19 @@ unsafe extern "system" fn mouse_proc(
     if n_code == HC_ACTION as i32 {
         let ms = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
 
+        // Always update cursor tracking (valid even for injected events).
         let last_x = LAST_CURSOR_X.load(Ordering::Relaxed);
         let last_y = LAST_CURSOR_Y.load(Ordering::Relaxed);
         let cur_x = ms.pt.x;
         let cur_y = ms.pt.y;
         LAST_CURSOR_X.store(cur_x, Ordering::Relaxed);
         LAST_CURSOR_Y.store(cur_y, Ordering::Relaxed);
+
+        // 0x01 = LLMHF_INJECTED: skip SendInput events so macro playback
+        // doesn't feed back into the recording / hotkey system.
+        if ms.flags & 0x01 != 0 {
+            return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
+        }
 
         let suppress = if let Some(cb) = CALLBACK.get() {
             if let Ok(mut cb) = cb.lock() {
@@ -415,10 +446,25 @@ unsafe extern "system" fn mouse_proc(
                     WM_RBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Right)),
                     WM_MBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Middle)),
                     WM_MBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Middle)),
+                    WM_XBUTTONDOWN => match (ms.mouseData >> 16) as u16 {
+                        1 => cb(CaptureEvent::ButtonPress(MacroButton::Back)),
+                        2 => cb(CaptureEvent::ButtonPress(MacroButton::Forward)),
+                        _ => CaptureDecision::Passthrough,
+                    },
+                    WM_XBUTTONUP => match (ms.mouseData >> 16) as u16 {
+                        1 => cb(CaptureEvent::ButtonRelease(MacroButton::Back)),
+                        2 => cb(CaptureEvent::ButtonRelease(MacroButton::Forward)),
+                        _ => CaptureDecision::Passthrough,
+                    },
                     WM_MOUSEWHEEL => {
                         let delta = (ms.mouseData >> 16) as i16;
                         let ticks = delta as i32 / 120;
                         cb(CaptureEvent::Scroll(0, ticks))
+                    }
+                    WM_MOUSEHWHEEL => {
+                        let delta = (ms.mouseData >> 16) as i16;
+                        let ticks = delta as i32 / 120;
+                        cb(CaptureEvent::Scroll(ticks, 0))
                     }
                     _ => CaptureDecision::Passthrough,
                 };

@@ -1,15 +1,17 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicIsize, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use tracing::warn;
-use windows_sys::Win32::Foundation::POINT;
+use windows_sys::Win32::Foundation::{HWND, POINT};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
     MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
     MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
     MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
-    SendInput, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
+    GetAsyncKeyState, RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY,
+    VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
     VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
     VK_LEFT, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
     VK_NUMPAD4, VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9,
@@ -18,16 +20,22 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetCursorPos, SetWindowsHookExW, KBDLLHOOKSTRUCT,
-    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP,
+    CallNextHookEx, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+    IsIconic, IsWindowVisible, PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW,
+    GW_HWNDNEXT, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
+use crate::hotkey_types::{
+    HotkeyAction, HotkeyBinding, MOD_ALT as MALT, MOD_CTRL as MCTRL, MOD_META as MMETA,
+    MOD_SHIFT as MSHIFT,
+};
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
 use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
 
-// ── Globals for the low-level hooks ──────────────────────────────────────────
+// ── Globals ───────────────────────────────────────────────────────────────────
 
 static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>>> =
     OnceLock::new();
@@ -36,6 +44,17 @@ static SUPPRESSED_KEYS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
 // Track last absolute cursor position to compute relative deltas.
 static LAST_CURSOR_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_CURSOR_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+// Foreground window (HWND as isize) at the moment a hotkey fires.
+static HOTKEY_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
+
+// ── RegisterHotKey state ──────────────────────────────────────────────────────
+
+// Windows thread ID of the hook message loop thread.
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+// Maps hotkey ID → HotkeyAction for currently registered hotkeys.
+static REGISTERED_HOTKEYS: OnceLock<Mutex<Vec<(i32, HotkeyAction)>>> = OnceLock::new();
+// Pending bindings written by signal_hotkey_update, read by the hook thread.
+static PENDING_BINDINGS: OnceLock<Mutex<Option<Vec<HotkeyBinding>>>> = OnceLock::new();
 
 use std::sync::Mutex;
 
@@ -163,6 +182,125 @@ fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
     })
 }
 
+/// Maps the hotkey name strings produced by `MacroKey::hotkey_name()` to Win32 VK codes.
+fn hotkey_name_to_vk(name: &str) -> Option<VIRTUAL_KEY> {
+    if let Some(rest) = name.strip_prefix("Key") {
+        let c = rest.chars().next()?;
+        if c.is_ascii_uppercase() {
+            return Some(0x41 + (c as u16 - b'A' as u16));
+        }
+    }
+    if let Some(rest) = name.strip_prefix("Num") {
+        let c = rest.chars().next()?;
+        if c.is_ascii_digit() {
+            return Some(0x30 + (c as u16 - b'0' as u16));
+        }
+    }
+    Some(match name {
+        "Return" => VK_RETURN,
+        "Backspace" => VK_BACK,
+        "Tab" => VK_TAB,
+        "Space" => VK_SPACE,
+        "Escape" => VK_ESCAPE,
+        "Delete" => VK_DELETE,
+        "Insert" => VK_INSERT,
+        "Home" => VK_HOME,
+        "End" => VK_END,
+        "PageUp" => VK_PRIOR,
+        "PageDown" => VK_NEXT,
+        "UpArrow" => VK_UP,
+        "DownArrow" => VK_DOWN,
+        "LeftArrow" => VK_LEFT,
+        "RightArrow" => VK_RIGHT,
+        "F1" => VK_F1,
+        "F2" => 0x71,
+        "F3" => 0x72,
+        "F4" => 0x73,
+        "F5" => 0x74,
+        "F6" => 0x75,
+        "F7" => 0x76,
+        "F8" => 0x77,
+        "F9" => 0x78,
+        "F10" => VK_F10,
+        "F11" => VK_F11,
+        "F12" => VK_F12,
+        "CapsLock" => VK_CAPITAL,
+        "NumLock" => VK_NUMLOCK,
+        "ScrollLock" => VK_SCROLL,
+        "Pause" => VK_PAUSE,
+        "PrintScreen" => VK_SNAPSHOT,
+        "Minus" => 0xBD,
+        "Equal" => 0xBB,
+        "LeftBracket" => 0xDB,
+        "RightBracket" => 0xDD,
+        "BackSlash" => 0xDC,
+        "SemiColon" => 0xBA,
+        "Quote" => 0xDE,
+        "BackQuote" => 0xC0,
+        "Comma" => 0xBC,
+        "Dot" => 0xBE,
+        "Slash" => 0xBF,
+        _ => return None,
+    })
+}
+
+/// Converts the app's modifier bitmask (MOD_CTRL/SHIFT/ALT/META) to Win32 RegisterHotKey flags.
+fn combo_mods_to_winapi(mods: u8) -> u32 {
+    let mut r = 0u32;
+    if mods & MCTRL != 0 {
+        r |= MOD_CONTROL as u32;
+    }
+    if mods & MSHIFT != 0 {
+        r |= MOD_SHIFT as u32;
+    }
+    if mods & MALT != 0 {
+        r |= MOD_ALT as u32;
+    }
+    if mods & MMETA != 0 {
+        r |= MOD_WIN as u32;
+    }
+    r
+}
+
+/// (Un)registers hotkeys via the Win32 RegisterHotKey API. Must be called from the hook thread.
+fn register_hotkeys_on_hook_thread(bindings: &[HotkeyBinding]) {
+    let reg = REGISTERED_HOTKEYS.get_or_init(|| Mutex::new(vec![]));
+    if let Ok(mut hotkeys) = reg.lock() {
+        for (id, _) in &*hotkeys {
+            unsafe { UnregisterHotKey(0, *id); }
+        }
+        hotkeys.clear();
+        for (idx, binding) in bindings.iter().enumerate() {
+            let id = (idx as i32) + 1;
+            let Some(vk) = hotkey_name_to_vk(&binding.combo.key) else {
+                warn!("No VK mapping for hotkey key {:?}", binding.combo.key);
+                continue;
+            };
+            let mods = combo_mods_to_winapi(binding.combo.modifiers) | MOD_NOREPEAT as u32;
+            if unsafe { RegisterHotKey(0, id, mods, vk as u32) } != 0 {
+                hotkeys.push((id, binding.action.clone()));
+            } else {
+                warn!("RegisterHotKey failed for {:?}", binding.combo.key);
+            }
+        }
+    }
+}
+
+/// Called from any thread when the hotkey binding table changes.
+/// Stores the new bindings and wakes up the hook thread to re-register them.
+pub(crate) fn signal_hotkey_update(bindings: Vec<HotkeyBinding>) {
+    let pending = PENDING_BINDINGS.get_or_init(|| Mutex::new(None));
+    if let Ok(mut g) = pending.lock() {
+        *g = Some(bindings);
+    }
+    let tid = HOOK_THREAD_ID.load(Ordering::Relaxed);
+    if tid != 0 {
+        unsafe { PostThreadMessageW(tid, WM_APP, 0, 0); }
+    }
+    // If tid == 0, the hook thread hasn't started yet; it will pick up
+    // PENDING_BINDINGS immediately after startup.
+}
+
 // ── InputBackend impl ─────────────────────────────────────────────────────────
 
 pub struct WinApiBackend;
@@ -285,7 +423,6 @@ impl InputBackend for WinApiBackend {
     }
 
     fn move_mouse_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
-        // Compute delta from current position.
         let cur = self.cursor_pos().unwrap_or((0, 0));
         self.move_mouse_rel(x - cur.0, y - cur.1)
     }
@@ -335,18 +472,59 @@ pub(super) fn start_capture_thread(
             .name("winapi-hook".into())
             .spawn(|| unsafe {
                 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+                use windows_sys::Win32::System::Threading::GetCurrentThreadId;
                 use windows_sys::Win32::UI::WindowsAndMessaging::{
-                    GetMessageW, MSG, TranslateMessage, DispatchMessageW,
+                    DispatchMessageW, GetMessageW, MSG, TranslateMessage,
                 };
+
+                HOOK_THREAD_ID.store(GetCurrentThreadId(), Ordering::Relaxed);
 
                 let hinstance = GetModuleHandleW(std::ptr::null());
                 let _kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), hinstance, 0);
                 let _ms_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hinstance, 0);
 
+                // Register any bindings that arrived before this thread started.
+                if let Some(p) = PENDING_BINDINGS.get() {
+                    if let Ok(mut g) = p.lock() {
+                        if let Some(bindings) = g.take() {
+                            register_hotkeys_on_hook_thread(&bindings);
+                        }
+                    }
+                }
+
                 let mut msg: MSG = std::mem::zeroed();
                 while GetMessageW(&mut msg, 0, 0, 0) != 0 {
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
+                    if msg.message == WM_HOTKEY {
+                        let id = msg.wParam as i32;
+                        let hwnd = GetForegroundWindow();
+                        HOTKEY_FOREGROUND_HWND.store(hwnd, Ordering::Relaxed);
+                        if !crate::recording::RECORDING_ACTIVE.load(Ordering::Relaxed) {
+                            if let Some(reg) = REGISTERED_HOTKEYS.get() {
+                                if let Ok(hotkeys) = reg.lock() {
+                                    if let Some((_, action)) =
+                                        hotkeys.iter().find(|(hid, _)| *hid == id)
+                                    {
+                                        if let Ok(mut q) =
+                                            crate::recording::get_hotkey_action_queue().lock()
+                                        {
+                                            q.push_back(action.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if msg.message == WM_APP {
+                        if let Some(p) = PENDING_BINDINGS.get() {
+                            if let Ok(mut g) = p.lock() {
+                                if let Some(bindings) = g.take() {
+                                    register_hotkeys_on_hook_thread(&bindings);
+                                }
+                            }
+                        }
+                    } else {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
                 }
             })
             .ok();
@@ -362,14 +540,14 @@ unsafe extern "system" fn keyboard_proc(
     if n_code == HC_ACTION as i32 {
         let kb = unsafe { &*(l_param as *const KBDLLHOOKSTRUCT) };
         // 0x10 = LLKHF_INJECTED: skip events injected by SendInput so macro
-        // playback doesn't feed back into the recording / hotkey system.
+        // playback doesn't feed back into the recording system.
         if kb.flags & 0x10 != 0 {
             return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
         }
         let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;
         let vk = kb.vkCode as u16;
         if let Some(macro_key) = vk_to_macro_key(vk) {
-                let suppress = if pressed {
+            let suppress = if pressed {
                 let decision = CALLBACK.get()
                     .and_then(|cb| cb.lock().ok())
                     .map(|mut cb| cb(CaptureEvent::KeyPress(macro_key)))
@@ -383,8 +561,6 @@ unsafe extern "system" fn keyboard_proc(
                     false
                 }
             } else {
-                // If the press was suppressed, suppress the release too so apps
-                // don't see a key-up without a prior key-down.
                 let was_suppressed = SUPPRESSED_KEYS.get()
                     .and_then(|s| s.lock().ok())
                     .map(|mut s| s.remove(&vk))
@@ -410,7 +586,6 @@ unsafe extern "system" fn mouse_proc(
     if n_code == HC_ACTION as i32 {
         let ms = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
 
-        // Always update cursor tracking (valid even for injected events).
         let last_x = LAST_CURSOR_X.load(Ordering::Relaxed);
         let last_y = LAST_CURSOR_Y.load(Ordering::Relaxed);
         let cur_x = ms.pt.x;
@@ -419,7 +594,7 @@ unsafe extern "system" fn mouse_proc(
         LAST_CURSOR_Y.store(cur_y, Ordering::Relaxed);
 
         // 0x01 = LLMHF_INJECTED: skip SendInput events so macro playback
-        // doesn't feed back into the recording / hotkey system.
+        // doesn't feed back into the recording system.
         if ms.flags & 0x01 != 0 {
             return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
         }
@@ -542,4 +717,55 @@ fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
         code @ 0x30..=0x39 => MacroKey::Unicode((code as u8 - 0x30 + b'0') as char),
         _ => MacroKey::Other(vk as u32),
     })
+}
+
+// ── Pre-macro focus + modifier cleanup ───────────────────────────────────────
+
+/// Call before executing a hotkey-triggered macro. Restores focus to the window
+/// that was active when the hotkey fired and releases any held modifier keys.
+pub(crate) fn prepare_for_macro_execution() {
+    let stored: HWND = HOTKEY_FOREGROUND_HWND.load(Ordering::Relaxed);
+
+    if stored != 0 {
+        unsafe {
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(stored, &mut pid);
+
+            if pid == std::process::id() {
+                // The macro app was foreground — find the first visible,
+                // non-minimised window owned by another process.
+                let mut candidate = GetWindow(stored, GW_HWNDNEXT);
+                while candidate != 0 {
+                    let mut cpid: u32 = 0;
+                    GetWindowThreadProcessId(candidate, &mut cpid);
+                    if cpid != std::process::id()
+                        && IsWindowVisible(candidate) != 0
+                        && IsIconic(candidate) == 0
+                    {
+                        SetForegroundWindow(candidate);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        break;
+                    }
+                    candidate = GetWindow(candidate, GW_HWNDNEXT);
+                }
+            } else {
+                SetForegroundWindow(stored);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+
+    // Release any physically-held modifier keys.
+    unsafe {
+        for &vk in &[
+            VK_LCONTROL, VK_RCONTROL,
+            VK_LSHIFT, VK_RSHIFT,
+            VK_LMENU, VK_RMENU,
+            VK_LWIN, VK_RWIN,
+        ] {
+            if GetAsyncKeyState(vk as i32) < 0 {
+                send_input(vk_input(vk, KEYEVENTF_KEYUP));
+            }
+        }
+    }
 }

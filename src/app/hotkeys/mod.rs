@@ -92,20 +92,26 @@ fn run_macro_task(
             *state = true;
         }
         let loop_flag = Arc::clone(is_looping);
-        tokio::task::spawn_blocking(move || loop {
-            if let Ok(should_continue) = loop_flag.lock() {
-                if !*should_continue {
+        tokio::task::spawn_blocking(move || {
+            #[cfg(windows)]
+            crate::macros::backend::windows::prepare_for_macro_execution();
+            loop {
+                if let Ok(should_continue) = loop_flag.lock() {
+                    if !*should_continue {
+                        break;
+                    }
+                } else {
+                    warn!("Failed to lock loop flag, stopping");
                     break;
                 }
-            } else {
-                warn!("Failed to lock loop flag, stopping");
-                break;
+                mac.clone().run(Arc::clone(&emulator));
+                std::thread::sleep(std::time::Duration::from_millis(LOOP_ITERATION_DELAY_MS));
             }
-            mac.clone().run(Arc::clone(&emulator));
-            std::thread::sleep(std::time::Duration::from_millis(LOOP_ITERATION_DELAY_MS));
         });
     } else {
         tokio::task::spawn_blocking(move || {
+            #[cfg(windows)]
+            crate::macros::backend::windows::prepare_for_macro_execution();
             mac.run(emulator);
         });
     }

@@ -43,8 +43,10 @@ libcosmic = {
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
 ] }
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",

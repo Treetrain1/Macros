@@ -48,9 +48,17 @@ pub(crate) fn get_hotkey_action_queue() -> &'static Mutex<VecDeque<HotkeyAction>
 }
 
 pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
-    let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
-    if let Ok(mut t) = table.write() {
-        *t = bindings;
+    #[cfg(windows)]
+    {
+        crate::macros::backend::windows::signal_hotkey_update(bindings);
+        return;
+    }
+    #[allow(unreachable_code)]
+    {
+        let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
+        if let Ok(mut t) = table.write() {
+            *t = bindings;
+        }
     }
 }
 
@@ -155,6 +163,8 @@ pub(crate) fn start_grab_thread() {
             }
 
             // Hotkey detection (only when not recording).
+            // On Windows, RegisterHotKey/WM_HOTKEY handles this instead.
+            #[cfg(not(windows))]
             if let CaptureEvent::KeyPress(key) = &event {
                 if !key.is_modifier() {
                     if let Some(name) = key.hotkey_name() {

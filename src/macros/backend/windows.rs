@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI32, AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use tracing::warn;
@@ -45,7 +45,7 @@ static SUPPRESSED_KEYS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
 static LAST_CURSOR_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_CURSOR_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 // Foreground window (HWND as isize) at the moment a hotkey fires.
-static HOTKEY_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
+static HOTKEY_FOREGROUND_HWND: AtomicUsize = AtomicUsize::new(0);
 
 // ── RegisterHotKey state ──────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ fn register_hotkeys_on_hook_thread(bindings: &[HotkeyBinding]) {
     let reg = REGISTERED_HOTKEYS.get_or_init(|| Mutex::new(vec![]));
     if let Ok(mut hotkeys) = reg.lock() {
         for (id, _) in &*hotkeys {
-            unsafe { UnregisterHotKey(0, *id); }
+            unsafe { UnregisterHotKey(std::ptr::null_mut(), *id); }
         }
         hotkeys.clear();
         for (idx, binding) in bindings.iter().enumerate() {
@@ -277,7 +277,7 @@ fn register_hotkeys_on_hook_thread(bindings: &[HotkeyBinding]) {
                 continue;
             };
             let mods = combo_mods_to_winapi(binding.combo.modifiers) | MOD_NOREPEAT as u32;
-            if unsafe { RegisterHotKey(0, id, mods, vk as u32) } != 0 {
+            if unsafe { RegisterHotKey(std::ptr::null_mut(), id, mods, vk as u32) } != 0 {
                 hotkeys.push((id, binding.action.clone()));
             } else {
                 warn!("RegisterHotKey failed for {:?}", binding.combo.key);
@@ -493,11 +493,11 @@ pub(super) fn start_capture_thread(
                 }
 
                 let mut msg: MSG = std::mem::zeroed();
-                while GetMessageW(&mut msg, 0, 0, 0) != 0 {
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
                     if msg.message == WM_HOTKEY {
                         let id = msg.wParam as i32;
                         let hwnd = GetForegroundWindow();
-                        HOTKEY_FOREGROUND_HWND.store(hwnd, Ordering::Relaxed);
+                        HOTKEY_FOREGROUND_HWND.store(hwnd as usize, Ordering::Relaxed);
                         if !crate::recording::RECORDING_ACTIVE.load(Ordering::Relaxed) {
                             if let Some(reg) = REGISTERED_HOTKEYS.get() {
                                 if let Ok(hotkeys) = reg.lock() {
@@ -542,7 +542,7 @@ unsafe extern "system" fn keyboard_proc(
         // 0x10 = LLKHF_INJECTED: skip events injected by SendInput so macro
         // playback doesn't feed back into the recording system.
         if kb.flags & 0x10 != 0 {
-            return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
+            return unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) };
         }
         let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;
         let vk = kb.vkCode as u16;
@@ -574,7 +574,7 @@ unsafe extern "system" fn keyboard_proc(
             if suppress { return 1; }
         }
     }
-    unsafe { CallNextHookEx(0, n_code, w_param, l_param) }
+    unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) }
 }
 
 unsafe extern "system" fn mouse_proc(
@@ -596,7 +596,7 @@ unsafe extern "system" fn mouse_proc(
         // 0x01 = LLMHF_INJECTED: skip SendInput events so macro playback
         // doesn't feed back into the recording system.
         if ms.flags & 0x01 != 0 {
-            return unsafe { CallNextHookEx(0, n_code, w_param, l_param) };
+            return unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) };
         }
 
         let suppress = if let Some(cb) = CALLBACK.get() {
@@ -655,7 +655,7 @@ unsafe extern "system" fn mouse_proc(
             return 1;
         }
     }
-    unsafe { CallNextHookEx(0, n_code, w_param, l_param) }
+    unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) }
 }
 
 fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
@@ -724,9 +724,9 @@ fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
 /// Call before executing a hotkey-triggered macro. Restores focus to the window
 /// that was active when the hotkey fired and releases any held modifier keys.
 pub(crate) fn prepare_for_macro_execution() {
-    let stored: HWND = HOTKEY_FOREGROUND_HWND.load(Ordering::Relaxed);
+    let stored: HWND = HOTKEY_FOREGROUND_HWND.load(Ordering::Relaxed) as HWND;
 
-    if stored != 0 {
+    if !stored.is_null() {
         unsafe {
             let mut pid: u32 = 0;
             GetWindowThreadProcessId(stored, &mut pid);
@@ -735,7 +735,7 @@ pub(crate) fn prepare_for_macro_execution() {
                 // The macro app was foreground — find the first visible,
                 // non-minimised window owned by another process.
                 let mut candidate = GetWindow(stored, GW_HWNDNEXT);
-                while candidate != 0 {
+                while !candidate.is_null() {
                     let mut cpid: u32 = 0;
                     GetWindowThreadProcessId(candidate, &mut cpid);
                     if cpid != std::process::id()

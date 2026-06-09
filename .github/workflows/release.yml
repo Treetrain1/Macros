@@ -155,6 +155,3 @@ jobs:
             | Windows x86_64 | `macros-windows-x86_64.exe` |
             | Linux x86_64 | `macros-linux-x86_64` |
             | Linux arm64 | `macros-linux-arm64` |
-            | macOS arm64 (experimental) | `macros-macos-arm64` |
-
-            > **Note**: macOS builds are experimental and may be absent if compilation failed.

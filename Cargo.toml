@@ -22,7 +22,7 @@ version = "1.0.0"
 default-features = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
-evdev = "0.12"
+evdev = "0.13.2"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "f0f6893",
@@ -41,7 +41,7 @@ libcosmic = {
 }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = [
+windows-sys = { version = "0.61.2", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",

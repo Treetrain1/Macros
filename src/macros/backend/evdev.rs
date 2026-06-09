@@ -3,7 +3,7 @@ use std::io;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use evdev::{AbsoluteAxisType, AttributeSet, EventType, InputEvent, Key, PropType, RelativeAxisType, uinput::VirtualDevice, uinput::VirtualDeviceBuilder};
+use evdev::{AbsoluteAxisCode, AttributeSet, EventType, InputEvent, KeyCode, PropType, RelativeAxisCode, uinput::VirtualDevice, uinput::VirtualDeviceBuilder};
 use tracing::warn;
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
@@ -19,7 +19,7 @@ static CURSOR_X: AtomicI32 = AtomicI32::new(0);
 static CURSOR_Y: AtomicI32 = AtomicI32::new(0);
 
 fn syn_event() -> InputEvent {
-    InputEvent::new(EventType::SYNCHRONIZATION, 0, 0)
+    InputEvent::new(EventType::SYNCHRONIZATION.0, 0, 0)
 }
 
 fn get_or_init_virtual_device() -> Result<&'static Mutex<VirtualDevice>, io::Error> {
@@ -33,54 +33,54 @@ fn get_or_init_virtual_device() -> Result<&'static Mutex<VirtualDevice>, io::Err
 }
 
 fn build_virtual_device() -> io::Result<VirtualDevice> {
-    let mut keys = AttributeSet::<Key>::new();
+    let mut keys = AttributeSet::<KeyCode>::new();
     for k in [
-        Key::KEY_A, Key::KEY_B, Key::KEY_C, Key::KEY_D, Key::KEY_E,
-        Key::KEY_F, Key::KEY_G, Key::KEY_H, Key::KEY_I, Key::KEY_J,
-        Key::KEY_K, Key::KEY_L, Key::KEY_M, Key::KEY_N, Key::KEY_O,
-        Key::KEY_P, Key::KEY_Q, Key::KEY_R, Key::KEY_S, Key::KEY_T,
-        Key::KEY_U, Key::KEY_V, Key::KEY_W, Key::KEY_X, Key::KEY_Y,
-        Key::KEY_Z,
-        Key::KEY_1, Key::KEY_2, Key::KEY_3, Key::KEY_4, Key::KEY_5,
-        Key::KEY_6, Key::KEY_7, Key::KEY_8, Key::KEY_9, Key::KEY_0,
-        Key::KEY_MINUS, Key::KEY_EQUAL, Key::KEY_LEFTBRACE, Key::KEY_RIGHTBRACE,
-        Key::KEY_BACKSLASH, Key::KEY_SEMICOLON, Key::KEY_APOSTROPHE, Key::KEY_GRAVE,
-        Key::KEY_COMMA, Key::KEY_DOT, Key::KEY_SLASH,
-        Key::KEY_ENTER, Key::KEY_BACKSPACE, Key::KEY_TAB, Key::KEY_SPACE,
-        Key::KEY_ESC, Key::KEY_DELETE, Key::KEY_INSERT,
-        Key::KEY_HOME, Key::KEY_END, Key::KEY_PAGEUP, Key::KEY_PAGEDOWN,
-        Key::KEY_UP, Key::KEY_DOWN, Key::KEY_LEFT, Key::KEY_RIGHT,
-        Key::KEY_LEFTSHIFT, Key::KEY_RIGHTSHIFT,
-        Key::KEY_LEFTCTRL, Key::KEY_RIGHTCTRL,
-        Key::KEY_LEFTALT, Key::KEY_RIGHTALT,
-        Key::KEY_LEFTMETA, Key::KEY_RIGHTMETA,
-        Key::KEY_CAPSLOCK, Key::KEY_NUMLOCK, Key::KEY_SCROLLLOCK,
-        Key::KEY_PAUSE, Key::KEY_SYSRQ,
-        Key::KEY_F1, Key::KEY_F2, Key::KEY_F3, Key::KEY_F4,
-        Key::KEY_F5, Key::KEY_F6, Key::KEY_F7, Key::KEY_F8,
-        Key::KEY_F9, Key::KEY_F10, Key::KEY_F11, Key::KEY_F12,
-        Key::KEY_F13, Key::KEY_F14, Key::KEY_F15, Key::KEY_F16,
-        Key::KEY_F17, Key::KEY_F18, Key::KEY_F19, Key::KEY_F20,
-        Key::KEY_F21, Key::KEY_F22, Key::KEY_F23, Key::KEY_F24,
-        Key::KEY_KP0, Key::KEY_KP1, Key::KEY_KP2, Key::KEY_KP3,
-        Key::KEY_KP4, Key::KEY_KP5, Key::KEY_KP6, Key::KEY_KP7,
-        Key::KEY_KP8, Key::KEY_KP9,
-        Key::KEY_KPPLUS, Key::KEY_KPMINUS, Key::KEY_KPASTERISK,
-        Key::KEY_KPSLASH, Key::KEY_KPDOT, Key::KEY_KPENTER,
-        Key::KEY_VOLUMEDOWN, Key::KEY_MUTE, Key::KEY_VOLUMEUP,
-        Key::KEY_SELECT,
-        Key::BTN_LEFT, Key::BTN_RIGHT, Key::BTN_MIDDLE,
-        Key::BTN_BACK, Key::BTN_FORWARD,
+        KeyCode::KEY_A, KeyCode::KEY_B, KeyCode::KEY_C, KeyCode::KEY_D, KeyCode::KEY_E,
+        KeyCode::KEY_F, KeyCode::KEY_G, KeyCode::KEY_H, KeyCode::KEY_I, KeyCode::KEY_J,
+        KeyCode::KEY_K, KeyCode::KEY_L, KeyCode::KEY_M, KeyCode::KEY_N, KeyCode::KEY_O,
+        KeyCode::KEY_P, KeyCode::KEY_Q, KeyCode::KEY_R, KeyCode::KEY_S, KeyCode::KEY_T,
+        KeyCode::KEY_U, KeyCode::KEY_V, KeyCode::KEY_W, KeyCode::KEY_X, KeyCode::KEY_Y,
+        KeyCode::KEY_Z,
+        KeyCode::KEY_1, KeyCode::KEY_2, KeyCode::KEY_3, KeyCode::KEY_4, KeyCode::KEY_5,
+        KeyCode::KEY_6, KeyCode::KEY_7, KeyCode::KEY_8, KeyCode::KEY_9, KeyCode::KEY_0,
+        KeyCode::KEY_MINUS, KeyCode::KEY_EQUAL, KeyCode::KEY_LEFTBRACE, KeyCode::KEY_RIGHTBRACE,
+        KeyCode::KEY_BACKSLASH, KeyCode::KEY_SEMICOLON, KeyCode::KEY_APOSTROPHE, KeyCode::KEY_GRAVE,
+        KeyCode::KEY_COMMA, KeyCode::KEY_DOT, KeyCode::KEY_SLASH,
+        KeyCode::KEY_ENTER, KeyCode::KEY_BACKSPACE, KeyCode::KEY_TAB, KeyCode::KEY_SPACE,
+        KeyCode::KEY_ESC, KeyCode::KEY_DELETE, KeyCode::KEY_INSERT,
+        KeyCode::KEY_HOME, KeyCode::KEY_END, KeyCode::KEY_PAGEUP, KeyCode::KEY_PAGEDOWN,
+        KeyCode::KEY_UP, KeyCode::KEY_DOWN, KeyCode::KEY_LEFT, KeyCode::KEY_RIGHT,
+        KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_RIGHTSHIFT,
+        KeyCode::KEY_LEFTCTRL, KeyCode::KEY_RIGHTCTRL,
+        KeyCode::KEY_LEFTALT, KeyCode::KEY_RIGHTALT,
+        KeyCode::KEY_LEFTMETA, KeyCode::KEY_RIGHTMETA,
+        KeyCode::KEY_CAPSLOCK, KeyCode::KEY_NUMLOCK, KeyCode::KEY_SCROLLLOCK,
+        KeyCode::KEY_PAUSE, KeyCode::KEY_SYSRQ,
+        KeyCode::KEY_F1, KeyCode::KEY_F2, KeyCode::KEY_F3, KeyCode::KEY_F4,
+        KeyCode::KEY_F5, KeyCode::KEY_F6, KeyCode::KEY_F7, KeyCode::KEY_F8,
+        KeyCode::KEY_F9, KeyCode::KEY_F10, KeyCode::KEY_F11, KeyCode::KEY_F12,
+        KeyCode::KEY_F13, KeyCode::KEY_F14, KeyCode::KEY_F15, KeyCode::KEY_F16,
+        KeyCode::KEY_F17, KeyCode::KEY_F18, KeyCode::KEY_F19, KeyCode::KEY_F20,
+        KeyCode::KEY_F21, KeyCode::KEY_F22, KeyCode::KEY_F23, KeyCode::KEY_F24,
+        KeyCode::KEY_KP0, KeyCode::KEY_KP1, KeyCode::KEY_KP2, KeyCode::KEY_KP3,
+        KeyCode::KEY_KP4, KeyCode::KEY_KP5, KeyCode::KEY_KP6, KeyCode::KEY_KP7,
+        KeyCode::KEY_KP8, KeyCode::KEY_KP9,
+        KeyCode::KEY_KPPLUS, KeyCode::KEY_KPMINUS, KeyCode::KEY_KPASTERISK,
+        KeyCode::KEY_KPSLASH, KeyCode::KEY_KPDOT, KeyCode::KEY_KPENTER,
+        KeyCode::KEY_VOLUMEDOWN, KeyCode::KEY_MUTE, KeyCode::KEY_VOLUMEUP,
+        KeyCode::KEY_SELECT,
+        KeyCode::BTN_LEFT, KeyCode::BTN_RIGHT, KeyCode::BTN_MIDDLE,
+        KeyCode::BTN_BACK, KeyCode::BTN_FORWARD,
     ] {
         keys.insert(k);
     }
 
-    let mut rel_axes = AttributeSet::<RelativeAxisType>::new();
+    let mut rel_axes = AttributeSet::<RelativeAxisCode>::new();
     for ax in [
-        RelativeAxisType::REL_X,
-        RelativeAxisType::REL_Y,
-        RelativeAxisType::REL_WHEEL,
-        RelativeAxisType::REL_HWHEEL,
+        RelativeAxisCode::REL_X,
+        RelativeAxisCode::REL_Y,
+        RelativeAxisCode::REL_WHEEL,
+        RelativeAxisCode::REL_HWHEEL,
     ] {
         rel_axes.insert(ax);
     }
@@ -94,27 +94,27 @@ fn build_virtual_device() -> io::Result<VirtualDevice> {
 
 // ── Emission ──────────────────────────────────────────────────────────────────
 
-fn emit_key(key: Key, pressed: bool) -> Result<(), String> {
+fn emit_key(key: KeyCode, pressed: bool) -> Result<(), String> {
     let vd = get_or_init_virtual_device().map_err(|e| e.to_string())?;
     let mut vd = vd.lock().unwrap();
     vd.emit(&[
-        InputEvent::new(EventType::KEY, key.0, if pressed { 1 } else { 0 }),
+        InputEvent::new(EventType::KEY.0, key.0, if pressed { 1 } else { 0 }),
         syn_event(),
     ])
     .map_err(|e| e.to_string())
 }
 
-fn emit_key_click(key: Key, needs_shift: bool) -> Result<(), String> {
+fn emit_key_click(key: KeyCode, needs_shift: bool) -> Result<(), String> {
     let vd = get_or_init_virtual_device().map_err(|e| e.to_string())?;
     let mut vd = vd.lock().unwrap();
     let mut events: Vec<InputEvent> = Vec::with_capacity(6);
     if needs_shift {
-        events.push(InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 1));
+        events.push(InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTSHIFT.0, 1));
     }
-    events.push(InputEvent::new(EventType::KEY, key.0, 1));
-    events.push(InputEvent::new(EventType::KEY, key.0, 0));
+    events.push(InputEvent::new(EventType::KEY.0, key.0, 1));
+    events.push(InputEvent::new(EventType::KEY.0, key.0, 0));
     if needs_shift {
-        events.push(InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 0));
+        events.push(InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTSHIFT.0, 0));
     }
     events.push(syn_event());
     vd.emit(&events).map_err(|e| e.to_string())
@@ -136,14 +136,14 @@ impl InputBackend for EvdevBackend {
         match dir {
             Direction::Press => {
                 if needs_shift {
-                    emit_key(Key::KEY_LEFTSHIFT, true)?;
+                    emit_key(KeyCode::KEY_LEFTSHIFT, true)?;
                 }
                 emit_key(evdev_key, true)
             }
             Direction::Release => {
                 let r = emit_key(evdev_key, false);
                 if needs_shift {
-                    emit_key(Key::KEY_LEFTSHIFT, false)?;
+                    emit_key(KeyCode::KEY_LEFTSHIFT, false)?;
                 }
                 r
             }
@@ -152,7 +152,7 @@ impl InputBackend for EvdevBackend {
     }
 
     fn raw_keycode(&mut self, keycode: u16, dir: Direction) -> Result<(), String> {
-        let key = Key(keycode);
+        let key = KeyCode(keycode);
         match dir {
             Direction::Press => emit_key(key, true),
             Direction::Release => emit_key(key, false),
@@ -162,18 +162,18 @@ impl InputBackend for EvdevBackend {
 
     fn button(&mut self, button: MacroButton, dir: Direction) -> Result<(), String> {
         // Scroll variants become REL_WHEEL / REL_HWHEEL
-        let (rel_axis, amount): (Option<RelativeAxisType>, i32) = match button {
-            MacroButton::ScrollUp => (Some(RelativeAxisType::REL_WHEEL), 1),
-            MacroButton::ScrollDown => (Some(RelativeAxisType::REL_WHEEL), -1),
-            MacroButton::ScrollLeft => (Some(RelativeAxisType::REL_HWHEEL), -1),
-            MacroButton::ScrollRight => (Some(RelativeAxisType::REL_HWHEEL), 1),
+        let (rel_axis, amount): (Option<RelativeAxisCode>, i32) = match button {
+            MacroButton::ScrollUp => (Some(RelativeAxisCode::REL_WHEEL), 1),
+            MacroButton::ScrollDown => (Some(RelativeAxisCode::REL_WHEEL), -1),
+            MacroButton::ScrollLeft => (Some(RelativeAxisCode::REL_HWHEEL), -1),
+            MacroButton::ScrollRight => (Some(RelativeAxisCode::REL_HWHEEL), 1),
             _ => (None, 0),
         };
         if let Some(axis) = rel_axis {
             let vd = get_or_init_virtual_device().map_err(|e| e.to_string())?;
             let mut vd = vd.lock().unwrap();
             return vd
-                .emit(&[InputEvent::new(EventType::RELATIVE, axis.0, amount), syn_event()])
+                .emit(&[InputEvent::new(EventType::RELATIVE.0, axis.0, amount), syn_event()])
                 .map_err(|e| e.to_string());
         }
 
@@ -192,8 +192,8 @@ impl InputBackend for EvdevBackend {
         let vd = get_or_init_virtual_device().map_err(|e| e.to_string())?;
         let mut vd = vd.lock().unwrap();
         vd.emit(&[
-            InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_X.0, dx),
-            InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_Y.0, dy),
+            InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_X.0, dx),
+            InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_Y.0, dy),
             syn_event(),
         ])
         .map_err(|e| e.to_string())
@@ -210,12 +210,12 @@ impl InputBackend for EvdevBackend {
 
     fn scroll(&mut self, amount: i32, axis: Axis) -> Result<(), String> {
         let (rel, val) = match axis {
-            Axis::Vertical => (RelativeAxisType::REL_WHEEL, amount),
-            Axis::Horizontal => (RelativeAxisType::REL_HWHEEL, amount),
+            Axis::Vertical => (RelativeAxisCode::REL_WHEEL, amount),
+            Axis::Horizontal => (RelativeAxisCode::REL_HWHEEL, amount),
         };
         let vd = get_or_init_virtual_device().map_err(|e| e.to_string())?;
         let mut vd = vd.lock().unwrap();
-        vd.emit(&[InputEvent::new(EventType::RELATIVE, rel.0, val), syn_event()])
+        vd.emit(&[InputEvent::new(EventType::RELATIVE.0, rel.0, val), syn_event()])
             .map_err(|e| e.to_string())
     }
 
@@ -240,10 +240,10 @@ impl InputBackend for EvdevBackend {
 // ── Capture ───────────────────────────────────────────────────────────────────
 
 enum DeviceMsg {
-    KeyPress { key: Key, raw: InputEvent },
-    KeyRelease { key: Key, raw: InputEvent },
-    ButtonPress { key: Key, raw: InputEvent },
-    ButtonRelease { key: Key, raw: InputEvent },
+    KeyPress { key: KeyCode, raw: InputEvent },
+    KeyRelease { key: KeyCode, raw: InputEvent },
+    ButtonPress { key: KeyCode, raw: InputEvent },
+    ButtonRelease { key: KeyCode, raw: InputEvent },
     MouseMove { dx: i32, dy: i32, raw_x: Option<InputEvent>, raw_y: Option<InputEvent> },
     Scroll { v: i32, h: i32, raw_v: Option<InputEvent>, raw_h: Option<InputEvent> },
     OtherBatch(Vec<InputEvent>),
@@ -277,18 +277,18 @@ pub(super) fn start_capture_thread(
                 let is_buttonpad = device.properties().contains(PropType::BUTTONPAD);
                 let has_abs = device
                     .supported_absolute_axes()
-                    .map(|s| s.contains(AbsoluteAxisType::ABS_X))
+                    .map(|s| s.contains(AbsoluteAxisCode::ABS_X))
                     .unwrap_or(false);
                 if is_buttonpad || has_abs {
                     return None;
                 }
                 let has_keys = device
                     .supported_keys()
-                    .map(|s| s.contains(Key::KEY_A) || s.contains(Key::BTN_LEFT))
+                    .map(|s| s.contains(KeyCode::KEY_A) || s.contains(KeyCode::BTN_LEFT))
                     .unwrap_or(false);
                 let has_rel = device
                     .supported_relative_axes()
-                    .map(|s| s.contains(RelativeAxisType::REL_X))
+                    .map(|s| s.contains(RelativeAxisCode::REL_X))
                     .unwrap_or(false);
                 if !has_keys && !has_rel {
                     return None;
@@ -340,7 +340,7 @@ pub(super) fn start_capture_thread(
                                             std::mem::take(&mut other_batch),
                                         ));
                                     }
-                                    let key = Key(event.code());
+                                    let key = KeyCode(event.code());
                                     let value = event.value();
                                     if value == 2 {
                                         // Autorepeat: pass through silently
@@ -363,20 +363,20 @@ pub(super) fn start_capture_thread(
                                     let _ = tx.send(msg);
                                 }
                                 EventType::RELATIVE => {
-                                    match RelativeAxisType(event.code()) {
-                                        RelativeAxisType::REL_X => {
+                                    match RelativeAxisCode(event.code()) {
+                                        RelativeAxisCode::REL_X => {
                                             pending_dx += event.value();
                                             raw_x = Some(event);
                                         }
-                                        RelativeAxisType::REL_Y => {
+                                        RelativeAxisCode::REL_Y => {
                                             pending_dy += event.value();
                                             raw_y = Some(event);
                                         }
-                                        RelativeAxisType::REL_WHEEL => {
+                                        RelativeAxisCode::REL_WHEEL => {
                                             pending_wv += event.value();
                                             raw_wv = Some(event);
                                         }
-                                        RelativeAxisType::REL_HWHEEL => {
+                                        RelativeAxisCode::REL_HWHEEL => {
                                             pending_wh += event.value();
                                             raw_wh = Some(event);
                                         }

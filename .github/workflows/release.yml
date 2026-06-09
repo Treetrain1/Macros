@@ -3,18 +3,18 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.3.0)'
+        description: "Release tag (e.g. 0.3.0)"
         required: true
         type: string
       release_name:
-        description: 'Release title (leave blank to use tag as title)'
+        description: "Release title (leave blank to use tag as title)"
         required: false
         type: string
-        default: ''
+        default: ""
 
 jobs:
   build:

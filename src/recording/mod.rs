@@ -19,7 +19,6 @@ pub(crate) fn grab_failed() -> bool {
 static RECORDING_QUEUE: OnceLock<Mutex<VecDeque<Instruction>>> = OnceLock::new();
 static STOP_SIGNAL: OnceLock<Mutex<VecDeque<()>>> = OnceLock::new();
 static LAST_EVENT_TIME: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-static TIMING_REMAINDER_US: OnceLock<Mutex<u64>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
@@ -65,9 +64,6 @@ pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
 pub(crate) fn reset_timing() {
     if let Ok(mut t) = LAST_EVENT_TIME.get_or_init(|| Mutex::new(None)).lock() {
         *t = None;
-    }
-    if let Ok(mut r) = TIMING_REMAINDER_US.get_or_init(|| Mutex::new(0)).lock() {
-        *r = 0;
     }
     if let Ok(mut p) = LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock() {
         *p = None;
@@ -128,17 +124,9 @@ pub(crate) fn start_grab_thread() {
                         if let Ok(mut q) = get_recording_queue().lock() {
                             if let Some(prev_time) = prev {
                                 let elapsed_us = now.duration_since(prev_time).as_micros() as u64;
-                                let remainder = TIMING_REMAINDER_US
-                                    .get_or_init(|| Mutex::new(0))
-                                    .lock()
-                                    .ok();
-                                if let Some(mut rem) = remainder {
-                                    let total_us = elapsed_us + *rem;
-                                    let elapsed_ms = total_us / 1000;
-                                    *rem = total_us % 1000;
-                                    if elapsed_ms > 0 {
-                                        q.push_back(Instruction::Wait(elapsed_ms, 0));
-                                    }
+                                let elapsed_ms = elapsed_us as f64 / 1000.0;
+                                if elapsed_ms > 0.0 {
+                                    q.push_back(Instruction::Wait(elapsed_ms, 0.0));
                                 }
                             }
                             q.push_back(instr);

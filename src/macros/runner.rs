@@ -35,17 +35,17 @@ impl Macro {
             match ins {
                 Instruction::Comment(_) => {}
                 Instruction::Wait(duration, randomness) => {
-                    let actual = if randomness > 0 {
-                        let offset = rand::rng().random_range(0..=randomness);
+                    let actual = if randomness > 0.0 {
+                        let offset = rand::rng().random_range(0.0..=randomness);
                         if rand::random::<bool>() {
-                            duration.saturating_add(offset)
+                            duration + offset
                         } else {
-                            duration.saturating_sub(offset)
+                            (duration - offset).max(0.0)
                         }
                     } else {
                         duration
                     };
-                    sleep(std::time::Duration::from_millis(actual));
+                    sleep(std::time::Duration::from_secs_f64(actual / 1000.0));
                 }
                 Instruction::Command(command) => {
                     println!("Running command: {command}");

@@ -11,7 +11,7 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
 use editor::macro_editor;
 
-pub(crate) const DEFAULT_WAIT_TIME: u64 = 1000;
+pub(crate) const DEFAULT_WAIT_TIME: f64 = 1000.0;
 pub(crate) const DEFAULT_SCROLL_AMOUNT: i32 = 4;
 pub(crate) const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
 

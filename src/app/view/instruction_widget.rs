@@ -172,7 +172,7 @@ pub(crate) fn instruction_row<'a>(
 
 pub(crate) fn add_instruction_at(index: usize, selected: usize) -> Message {
     match selected {
-        0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME, 0)),
+        0 => AddInstruction(index, Instruction::Wait(DEFAULT_WAIT_TIME, 0.0)),
         1 => AddInstruction(index, Instruction::Token(InputToken::Text("text".into()))),
         2 => AddInstruction(index, Instruction::Token(InputToken::Key(MacroKey::Unicode('a'), Direction::Click))),
         3 => AddInstruction(index, Instruction::Token(InputToken::Button(MacroButton::Left, Direction::Click))),

@@ -3,7 +3,7 @@ use crate::macros::Instruction;
 
 pub(crate) fn create_default_instruction(instruction_type: usize) -> Option<Instruction> {
     match instruction_type {
-        0 => Some(Instruction::Wait(1000, 0)),
+        0 => Some(Instruction::Wait(1000.0, 0.0)),
         1 => Some(Instruction::Token(InputToken::Text("text".into()))),
         2 => Some(Instruction::Token(InputToken::Key(MacroKey::Unicode('a'), Direction::Click))),
         3 => Some(Instruction::Token(InputToken::Button(MacroButton::Left, Direction::Click))),

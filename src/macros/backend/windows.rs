@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use tracing::warn;
 use windows_sys::Win32::Foundation::{HWND, POINT};
@@ -46,6 +47,9 @@ static LAST_CURSOR_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_CURSOR_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 // Foreground window (HWND as isize) at the moment a hotkey fires.
 static HOTKEY_FOREGROUND_HWND: AtomicUsize = AtomicUsize::new(0);
+// VK code + time of the most recent SendInput-injected key-down; used to tell
+// WM_HOTKEY apart from macro playback pressing its own hotkey combo.
+static LAST_INJECTED_KEYDOWN: OnceLock<Mutex<Option<(u16, Instant)>>> = OnceLock::new();
 
 // ── RegisterHotKey state ──────────────────────────────────────────────────────
 
@@ -496,9 +500,19 @@ pub(super) fn start_capture_thread(
                 while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
                     if msg.message == WM_HOTKEY {
                         let id = msg.wParam as i32;
+                        // HIWORD(lParam) = triggering VK code. If macro playback just
+                        // injected this same key, this WM_HOTKEY is the app reacting to
+                        // its own output rather than a real user keypress — ignore it.
+                        let vk = ((msg.lParam as usize >> 16) & 0xFFFF) as u16;
+                        let was_injected = LAST_INJECTED_KEYDOWN.get_or_init(|| Mutex::new(None))
+                            .lock()
+                            .ok()
+                            .and_then(|g| *g)
+                            .map(|(last_vk, t)| last_vk == vk && t.elapsed() < Duration::from_millis(100))
+                            .unwrap_or(false);
                         let hwnd = GetForegroundWindow();
                         HOTKEY_FOREGROUND_HWND.store(hwnd as usize, Ordering::Relaxed);
-                        if !crate::recording::RECORDING_ACTIVE.load(Ordering::Relaxed) {
+                        if !was_injected && !crate::recording::RECORDING_ACTIVE.load(Ordering::Relaxed) {
                             if let Some(reg) = REGISTERED_HOTKEYS.get() {
                                 if let Ok(hotkeys) = reg.lock() {
                                     if let Some((_, action)) =
@@ -542,6 +556,11 @@ unsafe extern "system" fn keyboard_proc(
         // 0x10 = LLKHF_INJECTED: skip events injected by SendInput so macro
         // playback doesn't feed back into the recording system.
         if kb.flags & 0x10 != 0 {
+            if w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize {
+                if let Ok(mut g) = LAST_INJECTED_KEYDOWN.get_or_init(|| Mutex::new(None)).lock() {
+                    *g = Some((kb.vkCode as u16, Instant::now()));
+                }
+            }
             return unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) };
         }
         let pressed = w_param == WM_KEYDOWN as usize || w_param == WM_SYSKEYDOWN as usize;

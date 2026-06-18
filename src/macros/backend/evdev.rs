@@ -7,7 +7,7 @@ use evdev::{AbsoluteAxisCode, AttributeSet, EventType, InputEvent, KeyCode, Prop
 use tracing::warn;
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
-use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
+use crate::macros::backend::{CaptureDecision, CaptureEvent, CaptureTimestamp, InputBackend};
 
 use super::evdev_mapping::{
     char_to_evdev, evdev_button_from_code, evdev_key_to_macro_key, macro_button_to_evdev,
@@ -250,7 +250,7 @@ enum DeviceMsg {
 }
 
 pub(super) fn start_capture_thread(
-    mut callback: Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>,
+    mut callback: Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>,
 ) {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
@@ -430,7 +430,7 @@ pub(super) fn start_capture_thread(
                                     continue;
                                 }
                             };
-                            match callback(CaptureEvent::KeyPress(macro_key)) {
+                            match callback(CaptureEvent::KeyPress(macro_key), CaptureTimestamp::Hardware(raw.timestamp())) {
                                 CaptureDecision::Passthrough => {
                                     suppressed_keys.remove(&key.0);
                                     reemit(vd, &[raw]);
@@ -449,7 +449,7 @@ pub(super) fn start_capture_thread(
                                 }
                             };
                             let was_suppressed = suppressed_keys.remove(&key.0);
-                            match callback(CaptureEvent::KeyRelease(macro_key)) {
+                            match callback(CaptureEvent::KeyRelease(macro_key), CaptureTimestamp::Hardware(raw.timestamp())) {
                                 CaptureDecision::Passthrough if !was_suppressed => {
                                     reemit(vd, &[raw]);
                                 }
@@ -464,7 +464,7 @@ pub(super) fn start_capture_thread(
                                     continue;
                                 }
                             };
-                            match callback(CaptureEvent::ButtonPress(btn)) {
+                            match callback(CaptureEvent::ButtonPress(btn), CaptureTimestamp::Hardware(raw.timestamp())) {
                                 CaptureDecision::Passthrough => reemit(vd, &[raw]),
                                 CaptureDecision::Suppress => {}
                             }
@@ -477,15 +477,20 @@ pub(super) fn start_capture_thread(
                                     continue;
                                 }
                             };
-                            match callback(CaptureEvent::ButtonRelease(btn)) {
+                            match callback(CaptureEvent::ButtonRelease(btn), CaptureTimestamp::Hardware(raw.timestamp())) {
                                 CaptureDecision::Passthrough => reemit(vd, &[raw]),
                                 CaptureDecision::Suppress => {}
                             }
                         }
                         DeviceMsg::MouseMove { dx, dy, raw_x, raw_y } => {
+                            let ts = CaptureTimestamp::Hardware(
+                                raw_x.as_ref().or(raw_y.as_ref())
+                                    .map(|e| e.timestamp())
+                                    .unwrap_or_else(std::time::SystemTime::now),
+                            );
                             CURSOR_X.fetch_add(dx, Ordering::Relaxed);
                             CURSOR_Y.fetch_add(dy, Ordering::Relaxed);
-                            match callback(CaptureEvent::MouseMoveRel(dx, dy)) {
+                            match callback(CaptureEvent::MouseMoveRel(dx, dy), ts) {
                                 CaptureDecision::Passthrough => {
                                     let mut events: Vec<InputEvent> = Vec::with_capacity(3);
                                     if let Some(e) = raw_x { events.push(e); }
@@ -498,8 +503,13 @@ pub(super) fn start_capture_thread(
                             }
                         }
                         DeviceMsg::Scroll { v, h, raw_v, raw_h } => {
+                            let ts = CaptureTimestamp::Hardware(
+                                raw_v.as_ref().or(raw_h.as_ref())
+                                    .map(|e| e.timestamp())
+                                    .unwrap_or_else(std::time::SystemTime::now),
+                            );
                             if v != 0 {
-                                match callback(CaptureEvent::Scroll(0, v)) {
+                                match callback(CaptureEvent::Scroll(0, v), ts) {
                                     CaptureDecision::Passthrough => {
                                         if let Some(e) = raw_v { reemit(vd, &[e]); }
                                     }
@@ -507,7 +517,7 @@ pub(super) fn start_capture_thread(
                                 }
                             }
                             if h != 0 {
-                                match callback(CaptureEvent::Scroll(h, 0)) {
+                                match callback(CaptureEvent::Scroll(h, 0), ts) {
                                     CaptureDecision::Passthrough => {
                                         if let Some(e) = raw_h { reemit(vd, &[e]); }
                                     }

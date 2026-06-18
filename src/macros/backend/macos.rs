@@ -10,7 +10,7 @@ use core_graphics::geometry::CGPoint;
 use tracing::warn;
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
-use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
+use crate::macros::backend::{CaptureDecision, CaptureEvent, CaptureTimestamp, InputBackend};
 
 // ── Key mapping ───────────────────────────────────────────────────────────────
 
@@ -290,7 +290,7 @@ impl InputBackend for MacosBackend {
 // ── Capture ───────────────────────────────────────────────────────────────────
 
 pub(super) fn start_capture_thread(
-    callback: Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>,
+    callback: Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>,
 ) {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
@@ -345,7 +345,7 @@ pub(super) fn start_capture_thread(
 
                         if let Some(ev) = capture_ev {
                             if let Ok(mut cb) = callback.lock() {
-                                if matches!(cb(ev), CaptureDecision::Suppress) {
+                                if matches!(cb(ev, CaptureTimestamp::Now), CaptureDecision::Suppress) {
                                     return None;
                                 }
                             }

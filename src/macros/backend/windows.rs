@@ -34,11 +34,11 @@ use crate::hotkey_types::{
     MOD_SHIFT as MSHIFT,
 };
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
-use crate::macros::backend::{CaptureDecision, CaptureEvent, InputBackend};
+use crate::macros::backend::{CaptureDecision, CaptureEvent, CaptureTimestamp, InputBackend};
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 
-static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>>> =
+static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>>> =
     OnceLock::new();
 // VK codes whose key-down was suppressed; used to also suppress the matching key-up.
 static SUPPRESSED_KEYS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
@@ -463,7 +463,7 @@ impl InputBackend for WinApiBackend {
 // ── Capture ───────────────────────────────────────────────────────────────────
 
 pub(super) fn start_capture_thread(
-    callback: Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>,
+    callback: Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>,
 ) {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
@@ -569,7 +569,7 @@ unsafe extern "system" fn keyboard_proc(
             let suppress = if pressed {
                 let decision = CALLBACK.get()
                     .and_then(|cb| cb.lock().ok())
-                    .map(|mut cb| cb(CaptureEvent::KeyPress(macro_key)))
+                    .map(|mut cb| cb(CaptureEvent::KeyPress(macro_key), CaptureTimestamp::Now))
                     .unwrap_or(CaptureDecision::Passthrough);
                 if matches!(decision, CaptureDecision::Suppress) {
                     if let Some(set) = SUPPRESSED_KEYS.get() {
@@ -586,7 +586,7 @@ unsafe extern "system" fn keyboard_proc(
                     .unwrap_or(false);
                 let cb_suppress = CALLBACK.get()
                     .and_then(|cb| cb.lock().ok())
-                    .map(|mut cb| matches!(cb(CaptureEvent::KeyRelease(macro_key)), CaptureDecision::Suppress))
+                    .map(|mut cb| matches!(cb(CaptureEvent::KeyRelease(macro_key), CaptureTimestamp::Now), CaptureDecision::Suppress))
                     .unwrap_or(false);
                 was_suppressed || cb_suppress
             };
@@ -626,7 +626,7 @@ unsafe extern "system" fn mouse_proc(
                             let dx = cur_x - last_x;
                             let dy = cur_y - last_y;
                             if dx != 0 || dy != 0 {
-                                cb(CaptureEvent::MouseMoveRel(dx, dy))
+                                cb(CaptureEvent::MouseMoveRel(dx, dy), CaptureTimestamp::Now)
                             } else {
                                 CaptureDecision::Passthrough
                             }
@@ -634,31 +634,31 @@ unsafe extern "system" fn mouse_proc(
                             CaptureDecision::Passthrough
                         }
                     }
-                    WM_LBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Left)),
-                    WM_LBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Left)),
-                    WM_RBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Right)),
-                    WM_RBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Right)),
-                    WM_MBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Middle)),
-                    WM_MBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Middle)),
+                    WM_LBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Left), CaptureTimestamp::Now),
+                    WM_LBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Left), CaptureTimestamp::Now),
+                    WM_RBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Right), CaptureTimestamp::Now),
+                    WM_RBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Right), CaptureTimestamp::Now),
+                    WM_MBUTTONDOWN => cb(CaptureEvent::ButtonPress(MacroButton::Middle), CaptureTimestamp::Now),
+                    WM_MBUTTONUP => cb(CaptureEvent::ButtonRelease(MacroButton::Middle), CaptureTimestamp::Now),
                     WM_XBUTTONDOWN => match (ms.mouseData >> 16) as u16 {
-                        1 => cb(CaptureEvent::ButtonPress(MacroButton::Back)),
-                        2 => cb(CaptureEvent::ButtonPress(MacroButton::Forward)),
+                        1 => cb(CaptureEvent::ButtonPress(MacroButton::Back), CaptureTimestamp::Now),
+                        2 => cb(CaptureEvent::ButtonPress(MacroButton::Forward), CaptureTimestamp::Now),
                         _ => CaptureDecision::Passthrough,
                     },
                     WM_XBUTTONUP => match (ms.mouseData >> 16) as u16 {
-                        1 => cb(CaptureEvent::ButtonRelease(MacroButton::Back)),
-                        2 => cb(CaptureEvent::ButtonRelease(MacroButton::Forward)),
+                        1 => cb(CaptureEvent::ButtonRelease(MacroButton::Back), CaptureTimestamp::Now),
+                        2 => cb(CaptureEvent::ButtonRelease(MacroButton::Forward), CaptureTimestamp::Now),
                         _ => CaptureDecision::Passthrough,
                     },
                     WM_MOUSEWHEEL => {
                         let delta = (ms.mouseData >> 16) as i16;
                         let ticks = delta as i32 / 120;
-                        cb(CaptureEvent::Scroll(0, ticks))
+                        cb(CaptureEvent::Scroll(0, ticks), CaptureTimestamp::Now)
                     }
                     WM_MOUSEHWHEEL => {
                         let delta = (ms.mouseData >> 16) as i16;
                         let ticks = delta as i32 / 120;
-                        cb(CaptureEvent::Scroll(ticks, 0))
+                        cb(CaptureEvent::Scroll(ticks, 0), CaptureTimestamp::Now)
                     }
                     _ => CaptureDecision::Passthrough,
                 };

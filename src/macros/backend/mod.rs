@@ -6,6 +6,15 @@ pub enum CaptureDecision {
     Suppress,
 }
 
+#[derive(Clone, Copy)]
+pub enum CaptureTimestamp {
+    /// No better timestamp available than "right now" (Windows/macOS —
+    /// already synchronous/immediate, nothing to gain).
+    Now,
+    /// Kernel-supplied hardware timestamp (Linux evdev).
+    Hardware(std::time::SystemTime),
+}
+
 pub enum CaptureEvent {
     KeyPress(MacroKey),
     KeyRelease(MacroKey),
@@ -33,7 +42,7 @@ pub trait InputBackend: Send + 'static {
 /// Start the global input capture thread for the current platform.
 /// The callback is called for each input event and returns whether to suppress it.
 pub fn start_capture(
-    callback: Box<dyn FnMut(CaptureEvent) -> CaptureDecision + Send + 'static>,
+    callback: Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>,
 ) {
     #[cfg(target_os = "linux")]
     evdev::start_capture_thread(callback);

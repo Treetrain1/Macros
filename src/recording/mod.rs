@@ -1,11 +1,11 @@
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding};
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroKey};
-use crate::macros::backend::{self, CaptureDecision, CaptureEvent};
+use crate::macros::backend::{self, CaptureDecision, CaptureEvent, CaptureTimestamp};
 use crate::macros::Instruction;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 use tracing::warn;
 
 pub(crate) static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -18,7 +18,13 @@ pub(crate) fn grab_failed() -> bool {
 
 static RECORDING_QUEUE: OnceLock<Mutex<VecDeque<Instruction>>> = OnceLock::new();
 static STOP_SIGNAL: OnceLock<Mutex<VecDeque<()>>> = OnceLock::new();
-static LAST_EVENT_TIME: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+// Anchors for whichever `CaptureTimestamp` variant a session's backend produces
+// (Linux evdev always reports `Hardware`; Windows/macOS always report `Now`),
+// so timing is measured against the backend's own clock instead of the time
+// the event happens to reach this callback.
+static BASELINE_NOW: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+static BASELINE_HW: OnceLock<Mutex<Option<SystemTime>>> = OnceLock::new();
+static LAST_ELAPSED: OnceLock<Mutex<Option<Duration>>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
@@ -62,11 +68,46 @@ pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
 }
 
 pub(crate) fn reset_timing() {
-    if let Ok(mut t) = LAST_EVENT_TIME.get_or_init(|| Mutex::new(None)).lock() {
+    if let Ok(mut t) = BASELINE_NOW.get_or_init(|| Mutex::new(None)).lock() {
+        *t = None;
+    }
+    if let Ok(mut t) = BASELINE_HW.get_or_init(|| Mutex::new(None)).lock() {
+        *t = None;
+    }
+    if let Ok(mut t) = LAST_ELAPSED.get_or_init(|| Mutex::new(None)).lock() {
         *t = None;
     }
     if let Ok(mut p) = LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock() {
         *p = None;
+    }
+}
+
+/// Elapsed time since this recording session's first event, measured on
+/// whichever clock the backend reported `ts` against. Negative deltas
+/// (e.g. a `SystemTime` clock step, or two evdev devices' messages arriving
+/// at the dispatch channel out of hardware-timestamp order) clamp to zero
+/// rather than corrupting the recording.
+fn elapsed_since_session_start(ts: CaptureTimestamp) -> Duration {
+    match ts {
+        CaptureTimestamp::Now => {
+            let now = Instant::now();
+            let baseline = BASELINE_NOW.get_or_init(|| Mutex::new(None));
+            let mut baseline = match baseline.lock() {
+                Ok(g) => g,
+                Err(_) => return Duration::ZERO,
+            };
+            let start = *baseline.get_or_insert(now);
+            now.saturating_duration_since(start)
+        }
+        CaptureTimestamp::Hardware(now) => {
+            let baseline = BASELINE_HW.get_or_init(|| Mutex::new(None));
+            let mut baseline = match baseline.lock() {
+                Ok(g) => g,
+                Err(_) => return Duration::ZERO,
+            };
+            let start = *baseline.get_or_insert(now);
+            now.duration_since(start).unwrap_or(Duration::ZERO)
+        }
     }
 }
 
@@ -87,7 +128,7 @@ pub(crate) fn start_grab_thread() {
     STARTED.get_or_init(|| {
         let held_mods = AtomicU8::new(0);
 
-        backend::start_capture(Box::new(move |event: CaptureEvent| {
+        backend::start_capture(Box::new(move |event: CaptureEvent, ts: CaptureTimestamp| {
             match &event {
                 CaptureEvent::KeyPress(key) => {
                     let bit = key.modifier_bit();
@@ -114,17 +155,16 @@ pub(crate) fn start_grab_thread() {
                     return CaptureDecision::Suppress;
                 }
 
-                let last_time = LAST_EVENT_TIME.get_or_init(|| Mutex::new(None));
-                let now = Instant::now();
+                let elapsed = elapsed_since_session_start(ts);
                 let instr = capture_event_to_instruction(&event);
                 if let Some(instr) = instr {
-                    if let Ok(mut last) = last_time.lock() {
+                    let last_elapsed = LAST_ELAPSED.get_or_init(|| Mutex::new(None));
+                    if let Ok(mut last) = last_elapsed.lock() {
                         let prev = *last;
-                        *last = Some(now);
+                        *last = Some(elapsed);
                         if let Ok(mut q) = get_recording_queue().lock() {
-                            if let Some(prev_time) = prev {
-                                let elapsed_us = now.duration_since(prev_time).as_micros() as u64;
-                                let elapsed_ms = elapsed_us as f64 / 1000.0;
+                            if let Some(prev_elapsed) = prev {
+                                let elapsed_ms = elapsed.saturating_sub(prev_elapsed).as_secs_f64() * 1000.0;
                                 if elapsed_ms > 0.0 {
                                     q.push_back(Instruction::Wait(elapsed_ms, 0.0));
                                 }

@@ -5,8 +5,20 @@ use crate::macros::backend::InputBackend;
 use crate::macros::{Instruction, Macro};
 use cosmic::cosmic_config::{Config, ConfigGet};
 use slotmap::{DefaultKey, SecondaryMap, SlotMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
+
+/// Identifies a numeric text field within an instruction row, for tracking
+/// in-progress invalid text that hasn't been committed/saved yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum FieldId {
+    WaitDuration,
+    WaitRandomness,
+    MoveMouseX,
+    MoveMouseY,
+    ScrollAmount,
+}
 
 pub(crate) struct MacroLibraryState {
     pub(crate) macro_selected: Option<usize>,
@@ -123,6 +135,10 @@ pub(crate) struct EditorUiState {
     pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
     pub(crate) scroll_offset_y: f32,
     pub(crate) scroll_viewport_height: f32,
+    /// Per-field text typed but not yet successfully parsed/committed.
+    /// Keyed by (instruction index, field). Cleared on commit or whenever the
+    /// instruction list is restructured (indices may no longer line up).
+    pub(crate) invalid_field_buffers: HashMap<(usize, FieldId), String>,
 }
 
 impl EditorUiState {
@@ -143,6 +159,7 @@ impl EditorUiState {
             pending_macro_hotkey: None,
             scroll_offset_y: 0.0,
             scroll_viewport_height: 600.0,
+            invalid_field_buffers: HashMap::new(),
         }
     }
 

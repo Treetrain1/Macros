@@ -2,10 +2,12 @@ use super::instruction_widget::{add_instruction_at, instruction_row};
 use super::{icon_label_button, icon_path};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+use crate::app::state::FieldId;
 use crate::macros::Macro;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
+use std::collections::HashMap;
 
 /// Estimated pixel height per instruction row including column spacing.
 const ESTIMATED_ROW_HEIGHT: f32 = 60.0;
@@ -21,6 +23,7 @@ pub(crate) fn macro_editor<'a>(
     spacing: &cosmic::cosmic_theme::Spacing,
     scroll_offset_y: f32,
     scroll_viewport_height: f32,
+    invalid_field_buffers: &'a HashMap<(usize, FieldId), String>,
 ) -> Element<'a, Message> {
     let clear_instructions_label = if confirm_clear_instructions {
         "Confirm clear (5s)"
@@ -67,7 +70,7 @@ pub(crate) fn macro_editor<'a>(
     }
 
     for (index, ins) in mac.code.iter().cloned().enumerate().skip(start_idx).take(end_idx - start_idx) {
-        instructions.push(instruction_row(index, ins, key_capture_index, spacing));
+        instructions.push(instruction_row(index, ins, key_capture_index, spacing, invalid_field_buffers));
     }
 
     if bottom_height > 0.0 {

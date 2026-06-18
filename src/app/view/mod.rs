@@ -97,6 +97,7 @@ fn build_main_view(app: &App) -> Element<'_, Message> {
             &spacing,
             app.editor_ui.scroll_offset_y,
             app.editor_ui.scroll_viewport_height,
+            &app.editor_ui.invalid_field_buffers,
         ));
     }
 

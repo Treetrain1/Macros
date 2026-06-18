@@ -5,7 +5,7 @@ use crate::app::key_mapping::{
 };
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-use crate::app::state::{ComboCapture, Page, RecordingPhase};
+use crate::app::state::{ComboCapture, FieldId, Page, RecordingPhase};
 use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
 use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
@@ -58,6 +58,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             app.macro_lib.update_macro(&config, Some(selected));
             app.editor_ui.undo_stack.clear();
             app.editor_ui.redo_stack.clear();
+            app.editor_ui.invalid_field_buffers.clear();
         }
         Undo => {
             if let Some(prev_code) = app.editor_ui.undo_stack.pop() {
@@ -68,6 +69,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 if let Some(mac) = &mut app.macro_lib.current_macro {
                     mac.code = prev_code;
                 }
+                app.editor_ui.invalid_field_buffers.clear();
                 auto_save_current_macro(app);
             }
         }
@@ -80,6 +82,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 if let Some(mac) = &mut app.macro_lib.current_macro {
                     mac.code = next_code;
                 }
+                app.editor_ui.invalid_field_buffers.clear();
                 auto_save_current_macro(app);
             }
         }
@@ -125,6 +128,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             if let Some(mac) = &mut app.macro_lib.current_macro {
                 let is_append = index == mac.code.len();
                 mac.code.insert(index, instruction);
+                app.editor_ui.invalid_field_buffers.clear();
                 auto_save_current_macro(app);
                 if is_append {
                     return scroll_editor_to_end();
@@ -136,6 +140,68 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 if !mac.code.is_empty() {
                     mac.code[index] = instruction;
                     auto_save_current_macro(app);
+                }
+            }
+        }
+        EditInstructionField(index, field, text) => {
+            if let Some(mac) = &mut app.macro_lib.current_macro {
+                if let Some(current) = mac.code.get(index).cloned() {
+                    let parsed_ok = match (&current, field) {
+                        (Instruction::Wait(_, randomness), FieldId::WaitDuration) => {
+                            match text.parse::<f64>() {
+                                Ok(v) => {
+                                    mac.code[index] = Instruction::Wait(v, *randomness);
+                                    true
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        (Instruction::Wait(duration, _), FieldId::WaitRandomness) => {
+                            match text.parse::<f64>() {
+                                Ok(v) => {
+                                    mac.code[index] = Instruction::Wait(*duration, v);
+                                    true
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        (Instruction::Token(InputToken::MoveMouse(_, y, coord)), FieldId::MoveMouseX) => {
+                            match text.parse::<i32>() {
+                                Ok(v) => {
+                                    mac.code[index] = Instruction::Token(InputToken::MoveMouse(v, *y, coord.clone()));
+                                    true
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        (Instruction::Token(InputToken::MoveMouse(x, _, coord)), FieldId::MoveMouseY) => {
+                            match text.parse::<i32>() {
+                                Ok(v) => {
+                                    mac.code[index] = Instruction::Token(InputToken::MoveMouse(*x, v, coord.clone()));
+                                    true
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        (Instruction::Token(InputToken::Scroll(_, axis)), FieldId::ScrollAmount) => {
+                            match text.parse::<i32>() {
+                                Ok(v) => {
+                                    mac.code[index] = Instruction::Token(InputToken::Scroll(v, axis.clone()));
+                                    true
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        _ => false,
+                    };
+
+                    // Always keep the literally-typed text on screen (even once it parses
+                    // successfully) so reformatting the committed value doesn't make
+                    // characters like a trailing "." appear to vanish while typing.
+                    app.editor_ui.invalid_field_buffers.insert((index, field), text);
+                    if parsed_ok {
+                        auto_save_current_macro(app);
+                    }
                 }
             }
         }
@@ -184,6 +250,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     push_undo(app);
                     if let Some(mac) = &mut app.macro_lib.current_macro {
                         mac.code.remove(index as usize);
+                        app.editor_ui.invalid_field_buffers.clear();
                         auto_save_current_macro(app);
                     }
                 }
@@ -202,6 +269,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                         push_undo(app);
                         if let Some(mac) = &mut app.macro_lib.current_macro {
                             mac.code.swap(index, new_index);
+                            app.editor_ui.invalid_field_buffers.clear();
                             auto_save_current_macro(app);
                         }
                     }
@@ -228,6 +296,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 push_undo(app);
                 if let Some(mac) = &mut app.macro_lib.current_macro {
                     mac.code.clear();
+                    app.editor_ui.invalid_field_buffers.clear();
                     auto_save_current_macro(app);
                     app.editor_ui.confirm_clear_instructions = false;
                 }
@@ -265,6 +334,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 let config = app.config.clone();
                 app.macro_lib.update_macro(&config, Some(index));
             }
+            app.editor_ui.invalid_field_buffers.clear();
         }
         RemoveMacro => {
             if !app.editor_ui.confirm_remove_macro {
@@ -281,6 +351,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
                 app.editor_ui.confirm_remove_macro = false;
+                app.editor_ui.invalid_field_buffers.clear();
             }
         }
         ToggleLoopMode(enabled) => {

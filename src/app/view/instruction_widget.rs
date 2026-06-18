@@ -1,6 +1,7 @@
-use super::{icon_path, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME};
+use super::{icon_path, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME, ICON_RED};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
+use crate::app::state::FieldId;
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
 use crate::input::ui_utils::{axis_to_index, coordinate_to_index, direction_to_index, index_to_axis, index_to_coordinate, index_to_direction};
 use crate::input::{get_mouse_button_names, index_to_mouse_button, key_to_string, mouse_button_to_index};
@@ -8,14 +9,58 @@ use crate::macros::Instruction;
 use cosmic::iced::widget::button;
 use cosmic::iced::Alignment;
 use cosmic::{widget, Element};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Returns (display_text, is_invalid) for a numeric field. While the field has
+/// been typed into, the literal typed text is shown (even once it parses
+/// successfully) so reformatting the committed value can't make characters
+/// like a trailing "." appear to vanish mid-edit; `T` is used only to check
+/// whether that text currently parses, for the error indicator.
+fn field_display<T: std::str::FromStr + std::fmt::Display>(
+    buffers: &HashMap<(usize, FieldId), String>,
+    index: usize,
+    field: FieldId,
+    committed: T,
+) -> (String, bool) {
+    match buffers.get(&(index, field)) {
+        Some(text) => {
+            let invalid = text.parse::<T>().is_err();
+            (text.clone(), invalid)
+        }
+        None => (committed.to_string(), false),
+    }
+}
+
+fn invalid_field_warning<'a>() -> Element<'a, Message> {
+    widget::text("Invalid number")
+        .class(cosmic::theme::Text::Color(ICON_RED))
+        .size(12)
+        .into()
+}
+
+/// Zero-size filler used in place of a warning when a field is valid, so the
+/// row/column shape around a numeric field never changes between renders.
+/// Toggling between two different widget tree shapes (e.g. returning a bare
+/// row vs. wrapping it in a column) breaks iced's diffing and silently drops
+/// keyboard focus from whatever text input the user was just typing into.
+fn empty_field_warning<'a>() -> Element<'a, Message> {
+    widget::Space::new()
+        .width(cosmic::iced::Length::Fixed(0.0))
+        .height(cosmic::iced::Length::Fixed(0.0))
+        .into()
+}
+
+fn field_warning<'a>(invalid: bool) -> Element<'a, Message> {
+    if invalid { invalid_field_warning() } else { empty_field_warning() }
+}
 
 pub(crate) fn instruction_row<'a>(
     index: usize,
     ins: Instruction,
     key_capture_index: Option<usize>,
     spacing: &cosmic::cosmic_theme::Spacing,
+    invalid_field_buffers: &HashMap<(usize, FieldId), String>,
 ) -> Element<'a, Message> {
     let compact_icon_button = |path: PathBuf| {
         widget::button::icon(widget::icon::from_path(path)).padding(8)
@@ -74,34 +119,60 @@ pub(crate) fn instruction_row<'a>(
                 }
                 InputToken::MoveMouse(x, y, coordinate) => {
                     let coord_idx = coordinate_to_index(&coordinate);
-                    let coord2 = coordinate.clone();
+                    let (x_text, x_invalid) = field_display(invalid_field_buffers, index, FieldId::MoveMouseX, x);
+                    let (y_text, y_invalid) = field_display(invalid_field_buffers, index, FieldId::MoveMouseY, y);
 
-                    cosmic::widget::row![
+                    let mut x_input = widget::text_input("X", x_text)
+                        .on_input(move |new_x| EditInstructionField(index, FieldId::MoveMouseX, new_x));
+                    if x_invalid {
+                        x_input = x_input.error("Invalid number");
+                    }
+                    let mut y_input = widget::text_input("Y", y_text)
+                        .on_input(move |new_y| EditInstructionField(index, FieldId::MoveMouseY, new_y));
+                    if y_invalid {
+                        y_input = y_input.error("Invalid number");
+                    }
+
+                    let main_row = cosmic::widget::row![
                         widget::text::body("Move mouse:".to_string()).align_y(Alignment::Center),
-                        widget::text_input("X", format!("{}", x))
-                            .on_input(move |new_x| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(new_x.parse().unwrap_or(x), y, coordinate.clone())))),
-                        widget::text_input("Y", format!("{}", y))
-                            .on_input(move |new_y| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(x, new_y.parse().unwrap_or(y), coord2.clone())))),
+                        x_input,
+                        y_input,
                         widget::dropdown(
                             &["Absolute", "Relative"],
                             Some(coord_idx),
                             move |coord: usize| EditInstruction(index, Instruction::Token(InputToken::MoveMouse(x, y, index_to_coordinate(coord))))
                         ),
-                    ].spacing(10).into()
+                    ].spacing(10);
+
+                    cosmic::widget::column![
+                        main_row,
+                        cosmic::widget::row![field_warning(x_invalid), field_warning(y_invalid)].spacing(10),
+                    ].spacing(2).into()
                 }
                 InputToken::Scroll(amount, axis) => {
                     let axis_idx = axis_to_index(&axis);
+                    let (amount_text, amount_invalid) = field_display(invalid_field_buffers, index, FieldId::ScrollAmount, amount);
 
-                    cosmic::widget::row![
+                    let mut amount_input = widget::text_input("Amount", amount_text)
+                        .on_input(move |new_amount| EditInstructionField(index, FieldId::ScrollAmount, new_amount));
+                    if amount_invalid {
+                        amount_input = amount_input.error("Invalid number");
+                    }
+
+                    let main_row = cosmic::widget::row![
                         widget::text::body("Scroll:".to_string()).align_y(Alignment::Center),
-                        widget::text_input("Amount", format!("{}", amount))
-                            .on_input(move |new_amount| EditInstruction(index, Instruction::Token(InputToken::Scroll(new_amount.parse().unwrap_or(amount), axis.clone())))),
+                        amount_input,
                         widget::dropdown(
                             &["Vertical", "Horizontal"],
                             Some(axis_idx),
                             move |new_axis: usize| EditInstruction(index, Instruction::Token(InputToken::Scroll(amount, index_to_axis(new_axis))))
                         ),
-                    ].spacing(10).into()
+                    ].spacing(10);
+
+                    cosmic::widget::column![
+                        main_row,
+                        cosmic::widget::row![field_warning(amount_invalid)].spacing(10),
+                    ].spacing(2).into()
                 }
                 _ => {
                     widget::text::body("Token not implemented").into()
@@ -109,14 +180,31 @@ pub(crate) fn instruction_row<'a>(
             }
         }
         Instruction::Wait(duration, randomness) => {
-            cosmic::widget::row![
+            let (duration_text, duration_invalid) = field_display(invalid_field_buffers, index, FieldId::WaitDuration, duration);
+            let (randomness_text, randomness_invalid) = field_display(invalid_field_buffers, index, FieldId::WaitRandomness, randomness);
+
+            let mut duration_input = widget::text_input("", duration_text)
+                .on_input(move |x| EditInstructionField(index, FieldId::WaitDuration, x));
+            if duration_invalid {
+                duration_input = duration_input.error("Invalid number");
+            }
+            let mut randomness_input = widget::text_input("0", randomness_text)
+                .on_input(move |x| EditInstructionField(index, FieldId::WaitRandomness, x));
+            if randomness_invalid {
+                randomness_input = randomness_input.error("Invalid number");
+            }
+
+            let main_row = cosmic::widget::row![
                 widget::text::body("Wait (ms):".to_string()).align_y(Alignment::Center),
-                widget::text_input("", duration.to_string())
-                    .on_input(move |x| EditInstruction(index, Instruction::Wait(x.parse().unwrap_or(duration), randomness))),
+                duration_input,
                 widget::text::body("Random ±".to_string()).align_y(Alignment::Center),
-                widget::text_input("0", randomness.to_string())
-                    .on_input(move |x| EditInstruction(index, Instruction::Wait(duration, x.parse().unwrap_or(randomness)))),
-            ].spacing(10).into()
+                randomness_input,
+            ].spacing(10);
+
+            cosmic::widget::column![
+                main_row,
+                cosmic::widget::row![field_warning(duration_invalid), field_warning(randomness_invalid)].spacing(10),
+            ].spacing(2).into()
         }
         Instruction::Command(command) => {
             cosmic::widget::row![

@@ -1,3 +1,4 @@
+use crate::app::state::FieldId;
 use crate::hotkey_types::{HotkeyAction, KeyCombo};
 use crate::macros::Instruction;
 use cosmic::iced::keyboard;
@@ -11,6 +12,11 @@ pub(crate) enum Message {
     SetDescription(String),
     AddInstruction(usize, Instruction),
     EditInstruction(usize, Instruction),
+    /// Raw text typed into a numeric instruction field. The update handler
+    /// attempts to parse it; on success it commits into the instruction and
+    /// auto-saves, on failure it stores the raw text for display, leaving
+    /// the instruction unchanged.
+    EditInstructionField(usize, FieldId, String),
     StartKeyCapture(usize),
     KeyCaptureEvent(keyboard::Event),
     RemoveInstruction(isize),

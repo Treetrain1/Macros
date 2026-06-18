@@ -5,7 +5,6 @@ use rand::RngExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tracing::warn;
 
@@ -50,7 +49,7 @@ impl Macro {
                     deadline += Duration::from_secs_f64(actual / 1000.0);
                     let now = Instant::now();
                     match deadline.checked_duration_since(now) {
-                        Some(remaining) => sleep(remaining),
+                        Some(remaining) => spin_sleep::sleep(remaining),
                         None => deadline = now, // fell behind; re-anchor instead of catching up
                     }
                 }

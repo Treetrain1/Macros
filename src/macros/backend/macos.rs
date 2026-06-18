@@ -7,6 +7,7 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
+use foreign_types::ForeignType;
 use tracing::warn;
 
 use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
@@ -287,6 +288,29 @@ impl InputBackend for MacosBackend {
     }
 }
 
+// ── Hardware event timestamp ────────────────────────────────────────────────
+
+// `core-graphics` 0.23 does not bind `CGEventGetTimestamp`; declare it
+// ourselves. Linking is already satisfied by core-graphics's own
+// `link(name = "CoreGraphics", ...)` extern block since we use it with
+// default features; repeated here defensively.
+#[cfg_attr(feature = "link", link(name = "CoreGraphics", kind = "framework"))]
+extern "C" {
+    fn CGEventGetTimestamp(event: core_graphics::sys::CGEventRef) -> u64;
+}
+
+/// OS-assigned timestamp (mach_absolute_time-based ns since boot, NOT
+/// Unix time) for when CoreGraphics generated this event — not when our
+/// CFRunLoop callback happened to run. Stuffed into a `SystemTime` purely
+/// as an opaque carrier for `CaptureTimestamp::Hardware`: the recorder
+/// only ever diffs two `Hardware` values from the same session via
+/// `duration_since`, never reads it as real wall-clock time (same
+/// convention evdev's hardware timestamps already rely on).
+fn cgevent_hardware_timestamp(event: &CGEvent) -> std::time::SystemTime {
+    let ns = unsafe { CGEventGetTimestamp(event.as_ptr()) };
+    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(ns)
+}
+
 // ── Capture ───────────────────────────────────────────────────────────────────
 
 pub(super) fn start_capture_thread(
@@ -345,7 +369,8 @@ pub(super) fn start_capture_thread(
 
                         if let Some(ev) = capture_ev {
                             if let Ok(mut cb) = callback.lock() {
-                                if matches!(cb(ev, CaptureTimestamp::Now), CaptureDecision::Suppress) {
+                                let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
+                                if matches!(cb(ev, ts), CaptureDecision::Suppress) {
                                     return None;
                                 }
                             }

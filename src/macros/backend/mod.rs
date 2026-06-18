@@ -8,10 +8,13 @@ pub enum CaptureDecision {
 
 #[derive(Clone, Copy)]
 pub enum CaptureTimestamp {
-    /// No better timestamp available than "right now" (Windows/macOS —
-    /// already synchronous/immediate, nothing to gain).
+    /// No better timestamp available than "right now" (Windows — low-level
+    /// hooks are delivered synchronously enough, and the hook's own `time`
+    /// field is lower-resolution than `Instant::now()`/QPC anyway).
     Now,
-    /// Kernel-supplied hardware timestamp (Linux evdev).
+    /// Kernel/OS-supplied hardware timestamp (Linux evdev; macOS CGEvent).
+    /// Not guaranteed to be wall-clock/Unix time — only meaningful as a
+    /// relative delta between two values from the same backend/session.
     Hardware(std::time::SystemTime),
 }
 

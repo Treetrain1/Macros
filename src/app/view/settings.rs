@@ -117,6 +117,8 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
         .padding([10, 18])
         .on_press(CloseSettings);
 
+    let tcp_rows = build_tcp_server_rows(app, &spacing);
+
     let settings_col = widget::settings::view_column(vec![
         widget::settings::section()
             .title("Global Hotkeys")
@@ -134,27 +136,42 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
                     .padding([0, 15, 0, 15]),
             )
             .into(),
+        widget::settings::section()
+            .title("TCP Server")
+            .add(
+                widget::column::with_children(tcp_rows)
+                    .spacing(spacing.space_xs)
+                    .padding([0, 15, 0, 15]),
+            )
+            .into(),
     ])
     .width(Length::Fill);
 
-    let mut content_children: Vec<Element<Message>> = vec![
-        widget::row![back_btn].spacing(spacing.space_s).into(),
-    ];
+    let mut scrollable_children: Vec<Element<Message>> = vec![];
     if let Some(w) = grab_warning {
-        content_children.push(w);
+        scrollable_children.push(w);
     }
     if let Some(w) = emulator_warning {
-        content_children.push(w);
+        scrollable_children.push(w);
     }
-    content_children.push(settings_col.into());
+    scrollable_children.push(settings_col.into());
 
-    let content = widget::column::with_children(content_children)
-        .spacing(spacing.space_s)
-        .padding(spacing.space_s);
+    let scrollable = widget::scrollable(
+        widget::column::with_children(scrollable_children).spacing(spacing.space_s),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    let content = widget::column![
+        widget::row![back_btn].spacing(spacing.space_s),
+        scrollable,
+    ]
+    .spacing(spacing.space_s)
+    .padding(spacing.space_s);
 
     widget::container(content)
         .width(Length::Fill)
-        .height(Length::Shrink)
+        .height(Length::Fill)
         .into()
 }
 
@@ -213,6 +230,64 @@ fn named_hotkey_row<'a>(
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center)
     .into()
+}
+
+fn build_tcp_server_rows<'a>(
+    app: &'a App,
+    spacing: &cosmic::cosmic_theme::Spacing,
+) -> Vec<Element<'a, Message>> {
+    let mut port_input = widget::text_input("Port", &app.editor_ui.ipc_port_text)
+        .on_input(SetIpcPortText);
+    if app.editor_ui.ipc_port_invalid {
+        port_input = port_input.error("Invalid port");
+    }
+
+    let is_running = app.execution.ipc_server.is_some();
+    let toggle_btn = if is_running {
+        button(widget::text("Stop Server"))
+            .padding([6, 12])
+            .on_press(StopIpcServer)
+    } else {
+        let btn = button(widget::text("Start Server")).padding([6, 12]);
+        if app.editor_ui.ipc_port_invalid {
+            btn
+        } else {
+            btn.on_press(StartIpcServer)
+        }
+    };
+
+    let status_text = match app.execution.ipc_active_port {
+        Some(port) => format!("Listening on 127.0.0.1:{port}"),
+        None => "Stopped".to_string(),
+    };
+
+    vec![
+        widget::row![
+            widget::text("Port").width(Length::Fill).align_x(Alignment::Start),
+            port_input,
+        ]
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center)
+        .into(),
+        widget::row![
+            widget::text(status_text)
+                .width(Length::Fill)
+                .align_x(Alignment::Start),
+            toggle_btn,
+        ]
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center)
+        .into(),
+        widget::row![
+            widget::text("Automatically start server on app launch")
+                .width(Length::Fill)
+                .align_x(Alignment::Start),
+            widget::checkbox(app.execution.ipc_auto_start).on_toggle(SetIpcAutoStart),
+        ]
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center)
+        .into(),
+    ]
 }
 
 fn build_add_form<'a>(

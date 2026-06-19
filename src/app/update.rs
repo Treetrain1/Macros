@@ -367,6 +367,40 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 warn!("Failed to save loop mode setting: {}", err);
             }
         }
+        SetIpcPortText(text) => {
+            match text.trim().parse::<u16>() {
+                Ok(port) => {
+                    app.editor_ui.ipc_port_invalid = false;
+                    if let Err(err) = config::save_config_value(&app.config, "ipc_port", port) {
+                        warn!("Failed to save IPC port setting: {}", err);
+                    }
+                }
+                Err(_) => {
+                    app.editor_ui.ipc_port_invalid = true;
+                }
+            }
+            app.editor_ui.ipc_port_text = text;
+        }
+        StartIpcServer => {
+            if app.execution.ipc_server.is_none() {
+                if let Ok(port) = app.editor_ui.ipc_port_text.trim().parse::<u16>() {
+                    app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port)));
+                    app.execution.ipc_active_port = Some(port);
+                }
+            }
+        }
+        StopIpcServer => {
+            if let Some(handle) = app.execution.ipc_server.take() {
+                handle.abort();
+            }
+            app.execution.ipc_active_port = None;
+        }
+        SetIpcAutoStart(enabled) => {
+            app.execution.ipc_auto_start = enabled;
+            if let Err(err) = config::save_config_value(&app.config, "ipc_enabled", enabled) {
+                warn!("Failed to save IPC auto-start setting: {}", err);
+            }
+        }
         StartRecording => {
             if app.macro_lib.current_macro.is_none() {
                 return Task::none();

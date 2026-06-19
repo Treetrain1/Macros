@@ -48,5 +48,9 @@ pub(crate) enum Message {
     ExecuteHotkeyAction(HotkeyAction),
     /// (scroll_offset_y, viewport_height) from the instructions scrollable
     EditorScrolled(f32, f32),
+    SetIpcPortText(String),
+    StartIpcServer,
+    StopIpcServer,
+    SetIpcAutoStart(bool),
     NoOp,
 }

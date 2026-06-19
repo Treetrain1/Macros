@@ -72,7 +72,7 @@ pub(crate) fn macro_selector_row<'a>(
                 ),
                 cosmic::widget::tooltip(
                     settings_button,
-                    cosmic::widget::container("Open hotkey settings"),
+                    cosmic::widget::container("Open Settings"),
                     cosmic::widget::tooltip::Position::Left
                 ),
             ]

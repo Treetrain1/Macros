@@ -94,6 +94,9 @@ pub(crate) struct ExecutionState {
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,
+    pub(crate) ipc_server: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) ipc_active_port: Option<u16>,
+    pub(crate) ipc_auto_start: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +142,9 @@ pub(crate) struct EditorUiState {
     /// Keyed by (instruction index, field). Cleared on commit or whenever the
     /// instruction list is restructured (indices may no longer line up).
     pub(crate) invalid_field_buffers: HashMap<(usize, FieldId), String>,
+    /// Raw text typed into the IPC server port field, kept even when invalid.
+    pub(crate) ipc_port_text: String,
+    pub(crate) ipc_port_invalid: bool,
 }
 
 impl EditorUiState {
@@ -160,6 +166,8 @@ impl EditorUiState {
             scroll_offset_y: 0.0,
             scroll_viewport_height: 600.0,
             invalid_field_buffers: HashMap::new(),
+            ipc_port_text: String::new(),
+            ipc_port_invalid: false,
         }
     }
 

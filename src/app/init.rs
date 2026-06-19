@@ -22,6 +22,9 @@ pub(crate) fn build_app(core: Core) -> App {
             thread_pool: ThreadPool::new(),
             is_looping: Arc::new(Mutex::new(false)),
             loop_mode_enabled: false,
+            ipc_server: None,
+            ipc_active_port: None,
+            ipc_auto_start: false,
         },
         editor_ui: EditorUiState::new(),
     }
@@ -49,9 +52,13 @@ pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
 
     // Start the loopback IPC listener so external processes (e.g. a Geode mod
     // running Geometry Dash under Proton) can trigger recording/playback.
-    if app.config.get::<bool>("ipc_enabled").unwrap_or(true) {
-        let port = app.config.get::<u16>("ipc_port").unwrap_or(47821);
-        tokio::spawn(crate::ipc::run_server(port));
+    // Disabled by default; the user opts in via the TCP Server settings section.
+    let port = app.config.get::<u16>("ipc_port").unwrap_or(47821);
+    app.editor_ui.ipc_port_text = port.to_string();
+    app.execution.ipc_auto_start = app.config.get::<bool>("ipc_enabled").unwrap_or(false);
+    if app.execution.ipc_auto_start {
+        app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port)));
+        app.execution.ipc_active_port = Some(port);
     }
 
     // Load and apply saved hotkey bindings.

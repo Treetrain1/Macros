@@ -125,15 +125,20 @@ pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
     }
 }
 
+/// Anchors both clocks to the moment recording actually starts (right after
+/// the countdown), rather than lazily to whichever event happens to arrive
+/// first. This way the gap between "recording started" and the first
+/// captured input is itself measured and turned into a leading `Wait`,
+/// instead of being silently dropped.
 pub(crate) fn reset_timing() {
     if let Ok(mut t) = BASELINE_NOW.get_or_init(|| Mutex::new(None)).lock() {
-        *t = None;
+        *t = Some(Instant::now());
     }
     if let Ok(mut t) = BASELINE_HW.get_or_init(|| Mutex::new(None)).lock() {
-        *t = None;
+        *t = Some(SystemTime::now());
     }
     if let Ok(mut t) = LAST_ELAPSED.get_or_init(|| Mutex::new(None)).lock() {
-        *t = None;
+        *t = Some(Duration::ZERO);
     }
     if let Ok(mut p) = LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock() {
         *p = None;

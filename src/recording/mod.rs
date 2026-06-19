@@ -38,6 +38,39 @@ static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
 
+/// Armed when a `StartRecordingImmediate` hotkey combo is pressed, so recording
+/// can be deferred until every key in the combo has been released — otherwise
+/// the combo's own key-up events would be captured as the first recorded steps.
+struct PendingRecordStart {
+    mods_mask: u8,
+    trigger_key: MacroKey,
+    trigger_released: bool,
+}
+static PENDING_RECORD_START: OnceLock<Mutex<Option<PendingRecordStart>>> = OnceLock::new();
+
+/// Called when a `StartRecordingImmediate` combo is pressed (from the in-closure
+/// detection on Linux/macOS, or from the `WM_HOTKEY` handler on Windows).
+pub(crate) fn arm_pending_record_start(mods_mask: u8, trigger_key: MacroKey) {
+    if let Ok(mut g) = PENDING_RECORD_START.get_or_init(|| Mutex::new(None)).lock() {
+        *g = Some(PendingRecordStart { mods_mask, trigger_key, trigger_released: false });
+    }
+}
+
+/// Called on every KeyRelease (all platforms) to check whether an armed
+/// `StartRecordingImmediate` combo has now been fully released.
+fn check_pending_record_start(key: &MacroKey, held_mods: u8) {
+    let cell = PENDING_RECORD_START.get_or_init(|| Mutex::new(None));
+    let Ok(mut guard) = cell.lock() else { return };
+    let Some(pending) = guard.as_mut() else { return };
+    if key == &pending.trigger_key {
+        pending.trigger_released = true;
+    }
+    if pending.trigger_released && (held_mods & pending.mods_mask) == 0 {
+        push_queue_signal(QueueSignal::Hotkey(HotkeyAction::StartRecordingImmediate));
+        *guard = None;
+    }
+}
+
 type QueueChannel = (UnboundedSender<QueueSignal>, Mutex<Option<UnboundedReceiver<QueueSignal>>>);
 
 fn queue_channel() -> &'static QueueChannel {
@@ -166,6 +199,7 @@ pub(crate) fn start_grab_thread() {
                     if bit != 0 {
                         held_mods.fetch_and(!bit, Ordering::Relaxed);
                     }
+                    check_pending_record_start(key, held_mods.load(Ordering::Relaxed));
                 }
                 _ => {}
             }
@@ -221,7 +255,11 @@ pub(crate) fn start_grab_thread() {
                     if let Some(name) = key.hotkey_name() {
                         let mods = held_mods.load(Ordering::Relaxed);
                         if let Some(action) = check_hotkey(mods, &name) {
-                            push_queue_signal(QueueSignal::Hotkey(action));
+                            if matches!(action, HotkeyAction::StartRecordingImmediate) {
+                                arm_pending_record_start(mods, key.clone());
+                            } else {
+                                push_queue_signal(QueueSignal::Hotkey(action));
+                            }
                             return CaptureDecision::Suppress;
                         }
                     }

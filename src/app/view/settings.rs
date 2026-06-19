@@ -56,6 +56,7 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
         ("Next Macro", HotkeyAction::NextMacro),
         ("Previous Macro", HotkeyAction::PrevMacro),
         ("Toggle Loop", HotkeyAction::ToggleLoop),
+        ("Start Recording (No Countdown)", HotkeyAction::StartRecordingImmediate),
     ];
 
     let mut named_rows: Vec<Element<Message>> = vec![];

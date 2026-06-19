@@ -65,6 +65,7 @@ pub(crate) enum HotkeyAction {
     PrevMacro,
     ToggleLoop,
     RunSpecificMacro(String),
+    StartRecordingImmediate,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

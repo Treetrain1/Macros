@@ -266,6 +266,25 @@ fn combo_mods_to_winapi(mods: u8) -> u32 {
     r
 }
 
+/// Converts Win32 RegisterHotKey modifier flags (as delivered in a WM_HOTKEY
+/// message's lParam LOWORD) back to the app's MOD_CTRL/SHIFT/ALT/META bitmask.
+fn winapi_mods_to_combo(mods: u32) -> u8 {
+    let mut r = 0u8;
+    if mods & MOD_CONTROL as u32 != 0 {
+        r |= MCTRL;
+    }
+    if mods & MOD_SHIFT as u32 != 0 {
+        r |= MSHIFT;
+    }
+    if mods & MOD_ALT as u32 != 0 {
+        r |= MALT;
+    }
+    if mods & MOD_WIN as u32 != 0 {
+        r |= MMETA;
+    }
+    r
+}
+
 /// (Un)registers hotkeys via the Win32 RegisterHotKey API. Must be called from the hook thread.
 fn register_hotkeys_on_hook_thread(bindings: &[HotkeyBinding]) {
     let reg = REGISTERED_HOTKEYS.get_or_init(|| Mutex::new(vec![]));
@@ -519,9 +538,24 @@ pub(super) fn start_capture_thread(
                                     if let Some((_, action)) =
                                         hotkeys.iter().find(|(hid, _)| *hid == id)
                                     {
-                                        crate::recording::push_queue_signal(
-                                            crate::recording::QueueSignal::Hotkey(action.clone()),
-                                        );
+                                        if matches!(action, HotkeyAction::StartRecordingImmediate) {
+                                            // LOWORD(lParam) = the MOD_* flags held when the
+                                            // hotkey fired. RegisterHotKey fires once on
+                                            // press only, so defer the actual start until
+                                            // these keys (tracked via the regular keyboard
+                                            // hook) are all released.
+                                            let win_mods = (msg.lParam as usize & 0xFFFF) as u32;
+                                            let app_mods = winapi_mods_to_combo(win_mods);
+                                            if let Some(macro_key) = vk_to_macro_key(vk) {
+                                                crate::recording::arm_pending_record_start(
+                                                    app_mods, macro_key,
+                                                );
+                                            }
+                                        } else {
+                                            crate::recording::push_queue_signal(
+                                                crate::recording::QueueSignal::Hotkey(action.clone()),
+                                            );
+                                        }
                                     }
                                 }
                             }

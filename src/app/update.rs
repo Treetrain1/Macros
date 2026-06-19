@@ -553,6 +553,15 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     let new_val = !app.execution.loop_mode_enabled;
                     return handle_update(app, ToggleLoopMode(new_val));
                 }
+                HotkeyAction::StartRecordingImmediate => {
+                    if app.macro_lib.current_macro.is_some() {
+                        app.editor_ui.recording_countdown_generation =
+                            app.editor_ui.recording_countdown_generation.wrapping_add(1);
+                        app.editor_ui.recording_phase = RecordingPhase::Active;
+                        recording::reset_timing();
+                        recording::RECORDING_ACTIVE.store(true, Ordering::Relaxed);
+                    }
+                }
             }
         }
     }

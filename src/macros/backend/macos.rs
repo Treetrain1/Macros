@@ -321,6 +321,7 @@ pub(super) fn start_capture_thread(
         std::thread::Builder::new()
             .name("cgeventtap".into())
             .spawn(move || {
+                crate::macros::priority::raise_current_thread_priority();
                 use std::sync::Mutex;
                 let callback = Mutex::new(callback);
 

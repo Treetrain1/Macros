@@ -1,10 +1,12 @@
 use crate::input::types::{Coordinate, Direction, InputToken, MacroKey};
 use crate::macros::backend::{create_backend, InputBackend};
+use crate::macros::priority::raise_current_thread_priority;
 use crate::macros::{Instruction, Macro};
 use rand::RngExt;
+use spin_sleep::{SpinSleeper, SpinStrategy};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
@@ -14,8 +16,14 @@ pub(crate) fn emulator_failed() -> bool {
     EMULATOR_FAILED.load(Ordering::Relaxed)
 }
 
+fn spin_sleeper() -> &'static SpinSleeper {
+    static SLEEPER: OnceLock<SpinSleeper> = OnceLock::new();
+    SLEEPER.get_or_init(|| SpinSleeper::default().with_spin_strategy(SpinStrategy::SpinLoopHint))
+}
+
 impl Macro {
     pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>) {
+        raise_current_thread_priority();
         let mut deadline = Instant::now();
         let mut pressed_keys: Vec<MacroKey> = Vec::new();
 
@@ -48,9 +56,10 @@ impl Macro {
                     };
                     deadline += Duration::from_secs_f64(actual / 1000.0);
                     let now = Instant::now();
-                    match deadline.checked_duration_since(now) {
-                        Some(remaining) => spin_sleep::sleep(remaining),
-                        None => deadline = now, // fell behind; re-anchor instead of catching up
+                    if now >= deadline {
+                        deadline = now; // fell behind; re-anchor instead of catching up
+                    } else {
+                        spin_sleeper().sleep_until(deadline);
                     }
                 }
                 Instruction::Command(command) => {

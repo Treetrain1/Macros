@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub(crate) mod backend;
+pub(crate) mod priority;
 pub(crate) mod runner;
 pub(crate) mod thread_pool;
 pub(crate) mod thread;

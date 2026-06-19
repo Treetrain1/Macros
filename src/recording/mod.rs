@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tracing::warn;
 
 pub(crate) static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -16,8 +17,16 @@ pub(crate) fn grab_failed() -> bool {
     GRAB_FAILED.load(Ordering::Relaxed)
 }
 
+/// A signal pushed from a synchronous capture callback (OS hook/evdev thread)
+/// to the GUI's async subscription. Delivered over an unbounded channel
+/// instead of a polled queue so the GUI reacts as soon as it's sent, not on
+/// the next fixed-interval poll tick.
+pub(crate) enum QueueSignal {
+    Hotkey(HotkeyAction),
+    Stop,
+}
+
 static RECORDING_QUEUE: OnceLock<Mutex<VecDeque<Instruction>>> = OnceLock::new();
-static STOP_SIGNAL: OnceLock<Mutex<VecDeque<()>>> = OnceLock::new();
 // Anchors for whichever `CaptureTimestamp` variant a session's backend produces
 // (Linux evdev always reports `Hardware`; Windows/macOS always report `Now`),
 // so timing is measured against the backend's own clock instead of the time
@@ -28,7 +37,31 @@ static LAST_ELAPSED: OnceLock<Mutex<Option<Duration>>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
-static HOTKEY_ACTION_QUEUE: OnceLock<Mutex<VecDeque<HotkeyAction>>> = OnceLock::new();
+
+type QueueChannel = (UnboundedSender<QueueSignal>, Mutex<Option<UnboundedReceiver<QueueSignal>>>);
+
+fn queue_channel() -> &'static QueueChannel {
+    static CHANNEL: OnceLock<QueueChannel> = OnceLock::new();
+    CHANNEL.get_or_init(|| {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (tx, Mutex::new(Some(rx)))
+    })
+}
+
+pub(crate) fn push_queue_signal(signal: QueueSignal) {
+    let _ = queue_channel().0.send(signal);
+}
+
+/// Takes the receiver end of the queue channel. Must be called exactly once
+/// (by the GUI subscription that owns dispatching these signals as messages).
+pub(crate) fn take_queue_receiver() -> UnboundedReceiver<QueueSignal> {
+    queue_channel()
+        .1
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take())
+        .expect("queue receiver already taken")
+}
 
 pub(crate) fn get_last_mouse_pos() -> Option<(f64, f64)> {
     LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock().ok().and_then(|g| *g)
@@ -42,14 +75,6 @@ pub(crate) fn set_last_mouse_pos(x: f64, y: f64) {
 
 pub(crate) fn get_recording_queue() -> &'static Mutex<VecDeque<Instruction>> {
     RECORDING_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
-}
-
-pub(crate) fn get_stop_signal() -> &'static Mutex<VecDeque<()>> {
-    STOP_SIGNAL.get_or_init(|| Mutex::new(VecDeque::new()))
-}
-
-pub(crate) fn get_hotkey_action_queue() -> &'static Mutex<VecDeque<HotkeyAction>> {
-    HOTKEY_ACTION_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
 pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
@@ -149,9 +174,7 @@ pub(crate) fn start_grab_thread() {
                 // Escape stops recording
                 if matches!(&event, CaptureEvent::KeyPress(MacroKey::Escape)) {
                     RECORDING_ACTIVE.store(false, Ordering::Relaxed);
-                    if let Ok(mut q) = get_stop_signal().lock() {
-                        q.push_back(());
-                    }
+                    push_queue_signal(QueueSignal::Stop);
                     return CaptureDecision::Suppress;
                 }
 
@@ -198,9 +221,7 @@ pub(crate) fn start_grab_thread() {
                     if let Some(name) = key.hotkey_name() {
                         let mods = held_mods.load(Ordering::Relaxed);
                         if let Some(action) = check_hotkey(mods, &name) {
-                            if let Ok(mut q) = get_hotkey_action_queue().lock() {
-                                q.push_back(action);
-                            }
+                            push_queue_signal(QueueSignal::Hotkey(action));
                             return CaptureDecision::Suppress;
                         }
                     }

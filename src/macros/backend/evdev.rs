@@ -313,6 +313,7 @@ pub(super) fn start_capture_thread(
             std::thread::Builder::new()
                 .name("evdev-reader".into())
                 .spawn(move || {
+                    crate::macros::priority::raise_current_thread_priority();
                     let mut pending_dx = 0i32;
                     let mut pending_dy = 0i32;
                     let mut pending_wv = 0i32;
@@ -418,6 +419,7 @@ pub(super) fn start_capture_thread(
         std::thread::Builder::new()
             .name("evdev-dispatch".into())
             .spawn(move || {
+                crate::macros::priority::raise_current_thread_priority();
                 let mut suppressed_keys: HashSet<u16> = HashSet::new();
 
                 while let Ok(msg) = rx.recv() {

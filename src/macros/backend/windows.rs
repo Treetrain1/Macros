@@ -481,6 +481,7 @@ pub(super) fn start_capture_thread(
                     DispatchMessageW, GetMessageW, MSG, TranslateMessage,
                 };
 
+                crate::macros::priority::raise_current_thread_priority();
                 HOOK_THREAD_ID.store(GetCurrentThreadId(), Ordering::Relaxed);
 
                 let hinstance = GetModuleHandleW(std::ptr::null());
@@ -518,11 +519,9 @@ pub(super) fn start_capture_thread(
                                     if let Some((_, action)) =
                                         hotkeys.iter().find(|(hid, _)| *hid == id)
                                     {
-                                        if let Ok(mut q) =
-                                            crate::recording::get_hotkey_action_queue().lock()
-                                        {
-                                            q.push_back(action.clone());
-                                        }
+                                        crate::recording::push_queue_signal(
+                                            crate::recording::QueueSignal::Hotkey(action.clone()),
+                                        );
                                     }
                                 }
                             }

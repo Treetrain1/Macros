@@ -6,6 +6,7 @@ mod hotkey_types;
 mod input;
 mod app;
 mod recording;
+mod ipc;
 
 use app::App;
 use cosmic::app::Settings;

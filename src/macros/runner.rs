@@ -21,11 +21,25 @@ fn spin_sleeper() -> &'static SpinSleeper {
     SLEEPER.get_or_init(|| SpinSleeper::default().with_spin_strategy(SpinStrategy::SpinLoopHint))
 }
 
+/// Polling granularity while waiting for a `Wait` instruction to elapse during
+/// a stoppable (loop-mode) run, so a stop signal lands quickly instead of
+/// only being noticed once the full wait has elapsed.
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(15);
+
 impl Macro {
-    pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>) {
+    /// `stop_flag`, when present, is checked between every instruction (and
+    /// while a `Wait` is elapsing) so the run can be aborted early — e.g. when
+    /// the "Stop Loop" hotkey is pressed mid-iteration. Either way, any keys
+    /// pressed by the macro so far are released before returning, whether the
+    /// run finished naturally or was aborted.
+    pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>, stop_flag: Option<Arc<Mutex<bool>>>) {
         raise_current_thread_priority();
         let mut deadline = Instant::now();
         let mut pressed_keys: Vec<MacroKey> = Vec::new();
+
+        let stop_requested = |flag: &Arc<Mutex<bool>>| -> bool {
+            !flag.lock().map(|g| *g).unwrap_or(false)
+        };
 
         let normalize_modifier_key = |key: MacroKey| -> MacroKey {
             match key {
@@ -40,6 +54,12 @@ impl Macro {
         };
 
         for ins in self.code {
+            if let Some(flag) = &stop_flag {
+                if stop_requested(flag) {
+                    break;
+                }
+            }
+
             #[allow(unreachable_patterns)]
             match ins {
                 Instruction::Comment(_) => {}
@@ -55,11 +75,36 @@ impl Macro {
                         duration
                     };
                     deadline += Duration::from_secs_f64(actual / 1000.0);
-                    let now = Instant::now();
-                    if now >= deadline {
-                        deadline = now; // fell behind; re-anchor instead of catching up
+
+                    if let Some(flag) = &stop_flag {
+                        let mut stopped = false;
+                        loop {
+                            if stop_requested(flag) {
+                                stopped = true;
+                                break;
+                            }
+                            let now = Instant::now();
+                            if now >= deadline {
+                                break;
+                            }
+                            let remaining = deadline - now;
+                            if remaining > STOP_POLL_INTERVAL {
+                                std::thread::sleep(STOP_POLL_INTERVAL);
+                            } else {
+                                spin_sleeper().sleep_until(deadline);
+                                break;
+                            }
+                        }
+                        if stopped {
+                            break;
+                        }
                     } else {
-                        spin_sleeper().sleep_until(deadline);
+                        let now = Instant::now();
+                        if now >= deadline {
+                            deadline = now; // fell behind; re-anchor instead of catching up
+                        } else {
+                            spin_sleeper().sleep_until(deadline);
+                        }
                     }
                 }
                 Instruction::Command(command) => {

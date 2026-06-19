@@ -23,7 +23,7 @@ impl Macro {
                     break;
                 }
 
-                self.clone().run(Arc::clone(&emulator));
+                self.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)));
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -34,10 +34,14 @@ impl Macro {
     pub(crate) fn into_single_run_task(
         self,
         emulator: Arc<Mutex<dyn InputBackend>>,
+        stop_flag: Arc<Mutex<bool>>,
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Running macro: {}", self.name);
-            self.run(emulator);
+            self.run(emulator, Some(Arc::clone(&stop_flag)));
+            if let Ok(mut state) = stop_flag.lock() {
+                *state = false;
+            }
             println!("Macro complete.");
         }
     }

@@ -111,7 +111,11 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                         let _ = loop_control::stop_loop(&app.execution.is_looping);
                     }
                 } else {
-                    let single_task = mac.clone().into_single_run_task(Arc::clone(emulator));
+                    let _ = loop_control::set_loop_state(&app.execution.is_looping, true);
+                    let single_task = mac.clone().into_single_run_task(
+                        Arc::clone(emulator),
+                        Arc::clone(&app.execution.is_looping),
+                    );
 
                     if let Err(err) = thread::spawn_macro_thread(
                         &mut app.execution.thread_pool,
@@ -119,6 +123,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                         single_task,
                     ) {
                         warn!("Failed to spawn single run thread: {}", err);
+                        let _ = loop_control::set_loop_state(&app.execution.is_looping, false);
                     }
                 }
             }

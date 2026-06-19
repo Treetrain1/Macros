@@ -104,15 +104,22 @@ fn run_macro_task(
                     warn!("Failed to lock loop flag, stopping");
                     break;
                 }
-                mac.clone().run(Arc::clone(&emulator));
+                mac.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)));
                 std::thread::sleep(std::time::Duration::from_millis(LOOP_ITERATION_DELAY_MS));
             }
         });
     } else {
+        if let Ok(mut state) = is_looping.lock() {
+            *state = true;
+        }
+        let stop_flag = Arc::clone(is_looping);
         tokio::task::spawn_blocking(move || {
             #[cfg(windows)]
             crate::macros::backend::windows::prepare_for_macro_execution();
-            mac.run(emulator);
+            mac.run(emulator, Some(Arc::clone(&stop_flag)));
+            if let Ok(mut state) = stop_flag.lock() {
+                *state = false;
+            }
         });
     }
 }

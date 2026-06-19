@@ -23,6 +23,7 @@ pub(crate) fn build_app(core: Core) -> App {
             is_looping: Arc::new(Mutex::new(false)),
             loop_mode_enabled: false,
             ipc_server: None,
+            ipc_shutdown_tx: None,
             ipc_active_port: None,
             ipc_auto_start: false,
         },
@@ -57,7 +58,9 @@ pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
     app.editor_ui.ipc_port_text = port.to_string();
     app.execution.ipc_auto_start = app.config.get::<bool>("ipc_enabled").unwrap_or(false);
     if app.execution.ipc_auto_start {
-        app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port)));
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port, rx)));
+        app.execution.ipc_shutdown_tx = Some(tx);
         app.execution.ipc_active_port = Some(port);
     }
 

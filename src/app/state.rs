@@ -95,6 +95,9 @@ pub(crate) struct ExecutionState {
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,
     pub(crate) ipc_server: Option<tokio::task::JoinHandle<()>>,
+    /// Sending `true` tells the running server's accept loop and every
+    /// connection it has spawned to close and return.
+    pub(crate) ipc_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub(crate) ipc_active_port: Option<u16>,
     pub(crate) ipc_auto_start: bool,
 }

@@ -384,12 +384,22 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         StartIpcServer => {
             if app.execution.ipc_server.is_none() {
                 if let Ok(port) = app.editor_ui.ipc_port_text.trim().parse::<u16>() {
-                    app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port)));
+                    let (tx, rx) = tokio::sync::watch::channel(false);
+                    app.execution.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port, rx)));
+                    app.execution.ipc_shutdown_tx = Some(tx);
                     app.execution.ipc_active_port = Some(port);
                 }
             }
         }
         StopIpcServer => {
+            // Tell the accept loop and every connection it has spawned (e.g.
+            // a persistent client like the Geode mod) to close. Aborting just
+            // the accept loop's JoinHandle would only stop new connections —
+            // already-accepted ones run as independent spawned tasks and
+            // would keep being serviced forever.
+            if let Some(tx) = app.execution.ipc_shutdown_tx.take() {
+                let _ = tx.send(true);
+            }
             if let Some(handle) = app.execution.ipc_server.take() {
                 handle.abort();
             }

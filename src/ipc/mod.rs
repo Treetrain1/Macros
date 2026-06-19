@@ -10,6 +10,7 @@ use crate::recording::{self, QueueSignal};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
 use tracing::{info, warn};
 
 #[derive(Deserialize)]
@@ -47,11 +48,18 @@ impl IpcResponse {
     }
 }
 
-/// Binds a loopback-only listener and serves connections until the process
-/// exits. Never binds beyond 127.0.0.1 — this interface trusts any local
-/// process, matching the trust level already implied by the global-hotkey
-/// grab (anything that can synthesize input locally can already trigger it).
-pub(crate) async fn run_server(port: u16) {
+/// Binds a loopback-only listener and serves connections until `shutdown`
+/// is set to `true`. Never binds beyond 127.0.0.1 — this interface trusts any
+/// local process, matching the trust level already implied by the
+/// global-hotkey grab (anything that can synthesize input locally can already
+/// trigger it).
+///
+/// Each accepted connection is handled in its own spawned task, so `shutdown`
+/// is also forwarded into those tasks (and not just the accept loop) —
+/// otherwise stopping the server would only stop accepting *new* connections
+/// while any already-connected client (e.g. a persistent IPC client) kept
+/// being serviced indefinitely.
+pub(crate) async fn run_server(port: u16, mut shutdown: watch::Receiver<bool>) {
     let listener = match TcpListener::bind(("127.0.0.1", port)).await {
         Ok(listener) => listener,
         Err(err) => {
@@ -62,36 +70,93 @@ pub(crate) async fn run_server(port: u16) {
     info!("IPC: listening on 127.0.0.1:{port}");
 
     loop {
-        match listener.accept().await {
-            Ok((socket, _addr)) => {
-                tokio::spawn(handle_connection(socket));
+        tokio::select! {
+            accept_result = listener.accept() => {
+                match accept_result {
+                    Ok((socket, _addr)) => {
+                        tokio::spawn(handle_connection(socket, shutdown.clone()));
+                    }
+                    Err(err) => warn!("IPC: accept error: {err}"),
+                }
             }
-            Err(err) => warn!("IPC: accept error: {err}"),
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    info!("IPC: server stopping");
+                    return;
+                }
+            }
         }
     }
 }
 
-async fn handle_connection(socket: TcpStream) {
+async fn handle_connection(socket: TcpStream, mut shutdown: watch::Receiver<bool>) {
     let (read_half, mut write_half) = socket.into_split();
     let mut lines = BufReader::new(read_half).lines();
 
     loop {
-        let line = match lines.next_line().await {
-            Ok(Some(line)) => line,
-            Ok(None) => return,
-            Err(err) => {
-                warn!("IPC: read error: {err}");
-                return;
-            }
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
+        tokio::select! {
+            line_result = lines.next_line() => {
+                let line = match line_result {
+                    Ok(Some(line)) => line,
+                    Ok(None) => return,
+                    Err(err) => {
+                        warn!("IPC: read error: {err}");
+                        return;
+                    }
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
 
-        let response = handle_request(&line);
-        if write_half.write_all(response.to_line().as_bytes()).await.is_err() {
-            return;
+                let response = handle_request(&line);
+                if write_half.write_all(response.to_line().as_bytes()).await.is_err() {
+                    return;
+                }
+            }
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    return;
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    /// Regression test for the bug where "Stop Server" left already-connected
+    /// clients (like the Geode mod's persistent connection) running forever,
+    /// because aborting the accept loop's task doesn't touch the separately
+    /// spawned per-connection tasks.
+    #[tokio::test]
+    async fn shutdown_closes_already_connected_clients() {
+        let port = 58231;
+        let (tx, rx) = watch::channel(false);
+        let server = tokio::spawn(run_server(port, rx));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stream.write_all(b"{\"cmd\":\"ping\"}\n").await.unwrap();
+        let mut buf = [0u8; 64];
+        let n = stream.read(&mut buf).await.unwrap();
+        assert!(n > 0, "expected a pong response before shutdown");
+
+        tx.send(true).unwrap();
+
+        let mut buf2 = [0u8; 64];
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            stream.read(&mut buf2),
+        )
+        .await
+        .expect("connection was not closed after shutdown")
+        .unwrap();
+        assert_eq!(read, 0, "connection should be closed (EOF) after shutdown");
+
+        server.abort();
     }
 }
 

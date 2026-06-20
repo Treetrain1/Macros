@@ -21,7 +21,7 @@ libc = "0.2"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "f0f6893"
+rev = "8df1858"
 version = "1.0.0"
 default-features = false
 
@@ -29,7 +29,7 @@ default-features = false
 evdev = "0.13.2"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "f0f6893",
+    rev = "8df1858",
     version = "1.0.0",
     default-features = false,
     features = [
@@ -54,7 +54,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "f0f6893",
+    rev = "8df1858",
     version = "1.0.0",
     default-features = false,
     features = [

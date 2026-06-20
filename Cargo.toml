@@ -54,6 +54,9 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 enigo = "0.6"
 self_update = { version = "0.44", default-features = false, features = ["reqwest", "rustls"] }
+# Needed to set the Accept header self_update's GitHub asset download requires (see updater.rs);
+# pinned to match the version self_update/reqwest already resolve to so the types line up.
+http = "1"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "8df1858",

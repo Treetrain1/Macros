@@ -19,6 +19,10 @@ DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline dialog
 DisableProgramGroupPage=yes
+; Lets a silent re-install (used for in-app updates, see src/updater.rs) close the running
+; app via Restart Manager if it's still holding macros.exe open, and relaunch it afterwards.
+CloseApplications=yes
+RestartApplications=yes
 OutputDir=..\dist
 OutputBaseFilename=macros-windows-x86_64-setup
 SetupIconFile=..\res\icons\macros.ico

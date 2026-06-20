@@ -455,22 +455,21 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         #[cfg(not(windows))]
         ApplyUpdate => {}
         UpdateApplyResult(result) => {
-            match result {
-                #[cfg(windows)]
-                Ok(exe_path) => {
-                    if let Err(err) = crate::updater::relaunch(&exe_path) {
-                        app.editor_ui.update_check_state = UpdateCheckState::Error(err);
-                    } else {
-                        std::process::exit(0);
-                    }
-                }
-                #[cfg(not(windows))]
-                Ok(_) => {}
-                Err(err) => {
-                    app.editor_ui.update_check_state = UpdateCheckState::Error(err);
-                }
-            }
-        }
+             match result {
+                 #[cfg(windows)]
+                 Ok(_) => {
+                     // The silent installer has been launched and will close us (if we haven't
+                     // already exited), replace the install, and relaunch us. Exit immediately
+                     // rather than waiting to be closed.
+                     std::process::exit(0);
+                 }
+                 #[cfg(not(windows))]
+                 Ok(_) => {}
+                 Err(err) => {
+                     app.editor_ui.update_check_state = UpdateCheckState::Error(err);
+                 }
+             }
+         }
         StartRecording => {
             if app.macro_lib.current_macro.is_none() {
                 return Task::none();

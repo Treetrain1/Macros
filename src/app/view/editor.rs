@@ -1,5 +1,5 @@
 use super::instruction_widget::{add_instruction_at, instruction_row};
-use super::{icon_label_button, icon_path};
+use super::icon_label_button;
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::app::state::FieldId;

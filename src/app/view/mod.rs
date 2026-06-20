@@ -27,12 +27,19 @@ pub(crate) fn colored_icon<'a>(name: &str, size: u16, color: cosmic::iced::Color
         .into()
 }
 
-pub(crate) fn icon_path(name: &str) -> std::path::PathBuf {
-    let installed = std::path::PathBuf::from("/usr/share/macros/icons").join(name);
-    if installed.exists() {
-        return installed;
-    }
-    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/res/icons/")).join(name)
+/// Custom (non-theme) icons used by the app, embedded into the binary at
+/// compile time so they keep working when the built executable is moved or
+/// distributed without its source tree (the previous implementation loaded
+/// these from a path under `CARGO_MANIFEST_DIR`, which only existed on the
+/// machine that built the binary).
+pub(crate) fn custom_icon(name: &str) -> widget::icon::Handle {
+    let bytes: &'static [u8] = match name {
+        "up.svg" => include_bytes!("../../../res/icons/up.svg"),
+        "down.svg" => include_bytes!("../../../res/icons/down.svg"),
+        "remove.svg" => include_bytes!("../../../res/icons/remove.svg"),
+        _ => panic!("unknown custom icon: {name}"),
+    };
+    widget::icon::from_svg_bytes(bytes)
 }
 
 pub(crate) fn icon_label_button<'a>(
@@ -43,7 +50,7 @@ pub(crate) fn icon_label_button<'a>(
 ) -> Element<'a, Message> {
     use cosmic::iced::widget::button;
     let icon_elem: Element<'_, Message> = if icon.ends_with(".svg") {
-        widget::icon::icon(widget::icon::from_path(icon_path(icon))).size(16).into()
+        widget::icon::icon(custom_icon(icon)).size(16).into()
     } else {
         colored_icon(icon, 16, ICON_DARK)
     };

@@ -1,4 +1,4 @@
-use super::{icon_path, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME, ICON_RED};
+use super::{custom_icon, DEFAULT_SCROLL_AMOUNT, DEFAULT_WAIT_TIME, ICON_RED};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::app::state::FieldId;
@@ -10,7 +10,6 @@ use cosmic::iced::widget::button;
 use cosmic::iced::Alignment;
 use cosmic::{widget, Element};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 /// Returns (display_text, is_invalid) for a numeric field. While the field has
 /// been typed into, the literal typed text is shown (even once it parses
@@ -62,8 +61,8 @@ pub(crate) fn instruction_row<'a>(
     spacing: &cosmic::cosmic_theme::Spacing,
     invalid_field_buffers: &HashMap<(usize, FieldId), String>,
 ) -> Element<'a, Message> {
-    let compact_icon_button = |path: PathBuf| {
-        widget::button::icon(widget::icon::from_path(path)).padding(8)
+    let compact_icon_button = |name: &str| {
+        widget::button::icon(custom_icon(name)).padding(8)
     };
 
     let instruction: Element<Message> = match ins {
@@ -227,17 +226,17 @@ pub(crate) fn instruction_row<'a>(
         cosmic::widget::container(
             cosmic::widget::row![
                 cosmic::widget::tooltip(
-                    compact_icon_button(icon_path("up.svg")).on_press(ReorderInstruction(index, -1)),
+                    compact_icon_button("up.svg").on_press(ReorderInstruction(index, -1)),
                     cosmic::widget::container("Move up"),
                     cosmic::widget::tooltip::Position::Top
                 ),
                 cosmic::widget::tooltip(
-                    compact_icon_button(icon_path("down.svg")).on_press(ReorderInstruction(index, 1)),
+                    compact_icon_button("down.svg").on_press(ReorderInstruction(index, 1)),
                     cosmic::widget::container("Move down"),
                     cosmic::widget::tooltip::Position::Bottom
                 ),
                 cosmic::widget::tooltip(
-                    compact_icon_button(icon_path("remove.svg")).on_press(RemoveInstruction(index as isize)),
+                    compact_icon_button("remove.svg").on_press(RemoveInstruction(index as isize)),
                     cosmic::widget::container("Remove instruction"),
                     cosmic::widget::tooltip::Position::Left
                 ),

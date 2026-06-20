@@ -1,11 +1,10 @@
-use super::{colored_icon, icon_label_button, icon_path, ICON_DARK, ICON_RED};
+use super::{colored_icon, custom_icon, icon_label_button, ICON_DARK, ICON_RED};
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::app::state::RecordingPhase;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
-use std::path::PathBuf;
 
 pub(crate) fn macro_selector_row<'a>(
     macro_strs: &'a [String],
@@ -13,8 +12,8 @@ pub(crate) fn macro_selector_row<'a>(
     confirm_remove_macro: bool,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
-    let compact_icon_button = |path: PathBuf| {
-        widget::button::icon(widget::icon::from_path(path)).padding(8)
+    let compact_icon_button = |name: &str| {
+        widget::button::icon(custom_icon(name)).padding(8)
     };
 
     let symbol_label_button = |symbol: &'static str, label: &'static str| {
@@ -33,9 +32,9 @@ pub(crate) fn macro_selector_row<'a>(
 
     let new_macro_button = symbol_label_button("＋", "New macro").on_press(NewMacro);
     let remove_macro_button = if has_selected {
-        compact_icon_button(icon_path("remove.svg")).on_press(RemoveMacro)
+        compact_icon_button("remove.svg").on_press(RemoveMacro)
     } else {
-        compact_icon_button(icon_path("remove.svg"))
+        compact_icon_button("remove.svg")
     };
 
     let settings_button = widget::button::icon(

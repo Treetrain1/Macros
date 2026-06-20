@@ -69,6 +69,24 @@ pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
     recording::update_hotkey_table(bindings.clone());
     app.editor_ui.hotkey_bindings = bindings;
 
+    #[cfg(windows)]
+    {
+        // Delay slightly so the update check doesn't compete with initial UI rendering.
+        let check_task = Task::perform(
+            async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let current_version = env!("CARGO_PKG_VERSION").to_string();
+                tokio::task::spawn_blocking(move || {
+                    crate::updater::check_for_update(&current_version)
+                })
+                .await
+                .unwrap_or_else(|err| Err(format!("Task join error: {err}")))
+            },
+            |result| Message::UpdateCheckResult(result.map(|opt| opt.map(|info| info.version))).into(),
+        );
+        return Task::batch(vec![app.update_title(), check_task]);
+    }
+    #[cfg(not(windows))]
     app.update_title()
 }
 

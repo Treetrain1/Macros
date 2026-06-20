@@ -119,7 +119,7 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
 
     let tcp_rows = build_tcp_server_rows(app, &spacing);
 
-    let settings_col = widget::settings::view_column(vec![
+    let mut sections: Vec<Element<Message>> = vec![
         widget::settings::section()
             .title("Global Hotkeys")
             .add(
@@ -144,8 +144,24 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
                     .padding([0, 15, 0, 15]),
             )
             .into(),
-    ])
-    .width(Length::Fill);
+    ];
+
+    #[cfg(windows)]
+    {
+        let update_rows = build_update_rows(app, &spacing);
+        sections.push(
+            widget::settings::section()
+                .title("Updates")
+                .add(
+                    widget::column::with_children(update_rows)
+                        .spacing(spacing.space_xs)
+                        .padding([0, 15, 0, 15]),
+                )
+                .into(),
+        );
+    }
+
+    let settings_col = widget::settings::view_column(sections).width(Length::Fill);
 
     let mut scrollable_children: Vec<Element<Message>> = vec![];
     if let Some(w) = grab_warning {
@@ -288,6 +304,71 @@ fn build_tcp_server_rows<'a>(
         .align_y(Alignment::Center)
         .into(),
     ]
+}
+
+#[cfg(windows)]
+fn build_update_rows<'a>(
+    app: &'a App,
+    spacing: &cosmic::cosmic_theme::Spacing,
+) -> Vec<Element<'a, Message>> {
+    use crate::app::state::UpdateCheckState;
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    let (status_text, update_available) = match &app.editor_ui.update_check_state {
+        UpdateCheckState::Idle => (String::new(), false),
+        UpdateCheckState::Checking => ("Checking for updates...".to_string(), false),
+        UpdateCheckState::UpToDate => ("Up to date".to_string(), false),
+        UpdateCheckState::UpdateAvailable(v) => (format!("Update available: {v}"), true),
+        UpdateCheckState::Applying => ("Installing update...".to_string(), false),
+        UpdateCheckState::Error(e) => (format!("Update check failed: {e}"), false),
+    };
+
+    let checking_or_applying = matches!(
+        app.editor_ui.update_check_state,
+        UpdateCheckState::Checking | UpdateCheckState::Applying
+    );
+
+    let mut check_btn = button(widget::text("Check for Updates")).padding([6, 12]);
+    if !checking_or_applying {
+        check_btn = check_btn.on_press(CheckForUpdates);
+    }
+
+    let mut rows = vec![
+        widget::row![
+            widget::text(format!("Current version: {current_version}"))
+                .width(Length::Fill)
+                .align_x(Alignment::Start),
+            check_btn,
+        ]
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center)
+        .into(),
+    ];
+
+    if !status_text.is_empty() {
+        rows.push(
+            widget::row![
+                widget::text(status_text)
+                    .width(Length::Fill)
+                    .align_x(Alignment::Start),
+            ]
+            .spacing(spacing.space_xs)
+            .into(),
+        );
+    }
+
+    if update_available {
+        rows.push(
+            widget::row![button(widget::text("Update Now"))
+                .padding([6, 12])
+                .on_press(ApplyUpdate)]
+            .spacing(spacing.space_xs)
+            .into(),
+        );
+    }
+
+    rows
 }
 
 fn build_add_form<'a>(

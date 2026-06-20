@@ -7,6 +7,8 @@ mod input;
 mod app;
 mod recording;
 mod ipc;
+#[cfg(windows)]
+mod updater;
 
 use app::App;
 use cosmic::app::Settings;

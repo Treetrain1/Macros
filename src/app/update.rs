@@ -5,7 +5,7 @@ use crate::app::key_mapping::{
 };
 use crate::app::message::Message;
 use crate::app::message::Message::*;
-use crate::app::state::{ComboCapture, FieldId, Page, RecordingPhase};
+use crate::app::state::{ComboCapture, FieldId, Page, RecordingPhase, UpdateCheckState};
 use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
 use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
@@ -409,6 +409,66 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             app.execution.ipc_auto_start = enabled;
             if let Err(err) = config::save_config_value(&app.config, "ipc_enabled", enabled) {
                 warn!("Failed to save IPC auto-start setting: {}", err);
+            }
+        }
+        #[cfg(windows)]
+        CheckForUpdates => {
+            app.editor_ui.update_check_state = UpdateCheckState::Checking;
+            return Task::perform(
+                async move {
+                    let current_version = env!("CARGO_PKG_VERSION").to_string();
+                    tokio::task::spawn_blocking(move || {
+                        crate::updater::check_for_update(&current_version)
+                    })
+                    .await
+                    .unwrap_or_else(|err| Err(format!("Task join error: {err}")))
+                },
+                |result| {
+                    UpdateCheckResult(result.map(|opt| opt.map(|info| info.version))).into()
+                },
+            );
+        }
+        #[cfg(not(windows))]
+        CheckForUpdates => {}
+        UpdateCheckResult(result) => {
+            app.editor_ui.update_check_state = match result {
+                Ok(Some(version)) => UpdateCheckState::UpdateAvailable(version),
+                Ok(None) => UpdateCheckState::UpToDate,
+                Err(err) => UpdateCheckState::Error(err),
+            };
+        }
+        #[cfg(windows)]
+        ApplyUpdate => {
+            app.editor_ui.update_check_state = UpdateCheckState::Applying;
+            return Task::perform(
+                async move {
+                    let current_version = env!("CARGO_PKG_VERSION").to_string();
+                    tokio::task::spawn_blocking(move || {
+                        crate::updater::apply_update(&current_version)
+                    })
+                    .await
+                    .unwrap_or_else(|err| Err(format!("Task join error: {err}")))
+                },
+                |result| UpdateApplyResult(result).into(),
+            );
+        }
+        #[cfg(not(windows))]
+        ApplyUpdate => {}
+        UpdateApplyResult(result) => {
+            match result {
+                #[cfg(windows)]
+                Ok(exe_path) => {
+                    if let Err(err) = crate::updater::relaunch(&exe_path) {
+                        app.editor_ui.update_check_state = UpdateCheckState::Error(err);
+                    } else {
+                        std::process::exit(0);
+                    }
+                }
+                #[cfg(not(windows))]
+                Ok(_) => {}
+                Err(err) => {
+                    app.editor_ui.update_check_state = UpdateCheckState::Error(err);
+                }
             }
         }
         StartRecording => {

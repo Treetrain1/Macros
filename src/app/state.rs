@@ -110,6 +110,16 @@ pub(crate) enum RecordingPhase {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) enum UpdateCheckState {
+    Idle,
+    Checking,
+    UpToDate,
+    UpdateAvailable(String),
+    Applying,
+    Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Page {
     Main,
     Settings,
@@ -148,6 +158,7 @@ pub(crate) struct EditorUiState {
     /// Raw text typed into the IPC server port field, kept even when invalid.
     pub(crate) ipc_port_text: String,
     pub(crate) ipc_port_invalid: bool,
+    pub(crate) update_check_state: UpdateCheckState,
 }
 
 impl EditorUiState {
@@ -171,6 +182,7 @@ impl EditorUiState {
             invalid_field_buffers: HashMap::new(),
             ipc_port_text: String::new(),
             ipc_port_invalid: false,
+            update_check_state: UpdateCheckState::Idle,
         }
     }
 

@@ -1,0 +1,46 @@
+#define MyAppName "Macros"
+#define MyAppExeName "macros.exe"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0-dev"
+#endif
+#define MyAppPublisher "Ethan Stokes"
+#define MyAppURL "https://github.com/EthanRStokes/macros"
+
+[Setup]
+AppId={{5C076DD5-93F2-457D-855D-BCC8AEFBBA43}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=commandline dialog
+DisableProgramGroupPage=yes
+OutputDir=..\dist
+OutputBaseFilename=macros-windows-x86_64-setup
+SetupIconFile=..\res\icons\macros.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+
+[Files]
+Source: "..\target\x86_64-pc-windows-msvc\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

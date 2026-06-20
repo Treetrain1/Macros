@@ -102,6 +102,40 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Locate or install Inno Setup
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y
+          }
+
+      - name: Determine installer version
+        if: matrix.name == 'windows-x86_64'
+        id: installer_version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          echo "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (Inno Setup)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=${{ steps.installer_version.outputs.value }}" installer\macros.iss
+
+      - name: Upload installer artifact
+        if: matrix.name == 'windows-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macros-windows-x86_64-setup.exe
+          path: dist/macros-windows-x86_64-setup.exe
+          if-no-files-found: error
+          retention-days: 90
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -152,6 +186,7 @@ jobs:
 
             | Platform | File |
             |---|---|
-            | Windows x86_64 | `macros-windows-x86_64.exe` |
+            | Windows x86_64 (installer) | `macros-windows-x86_64-setup.exe` |
+            | Windows x86_64 (portable exe) | `macros-windows-x86_64.exe` |
             | Linux x86_64 | `macros-linux-x86_64` |
             | Linux arm64 | `macros-linux-arm64` |

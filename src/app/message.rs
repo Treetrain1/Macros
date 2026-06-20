@@ -52,5 +52,9 @@ pub(crate) enum Message {
     StartIpcServer,
     StopIpcServer,
     SetIpcAutoStart(bool),
+    CheckForUpdates,
+    UpdateCheckResult(Result<Option<String>, String>),
+    ApplyUpdate,
+    UpdateApplyResult(Result<std::path::PathBuf, String>),
     NoOp,
 }

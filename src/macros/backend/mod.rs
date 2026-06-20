@@ -83,9 +83,16 @@ pub fn create_backend() -> Option<Arc<Mutex<dyn InputBackend>>> {
 
     #[cfg(windows)]
     {
-        let b = windows::WinApiBackend::new();
-        let arc: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(b));
-        return Some(arc);
+        match windows::WinApiBackend::new() {
+            Ok(b) => {
+                let arc: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(b));
+                return Some(arc);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to create Windows input backend: {}", e);
+                return None;
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]

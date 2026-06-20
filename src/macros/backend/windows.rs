@@ -3,15 +3,12 @@ use std::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use enigo::{Enigo, Keyboard, Mouse, Settings};
 use tracing::warn;
-use windows_sys::Win32::Foundation::{HWND, POINT};
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
-    MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
-    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
-    GetAsyncKeyState, RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY,
+    GetAsyncKeyState, RegisterHotKey, UnregisterHotKey, VIRTUAL_KEY,
     VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
     VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
     VK_LEFT, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,
@@ -21,7 +18,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+    CallNextHookEx, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
     IsIconic, IsWindowVisible, PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW,
     GW_HWNDNEXT, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
     WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
@@ -62,128 +59,98 @@ static PENDING_BINDINGS: OnceLock<Mutex<Option<Vec<HotkeyBinding>>>> = OnceLock:
 
 use std::sync::Mutex;
 
-// ── Helper: send a raw INPUT ─────────────────────────────────────────────────
-
-unsafe fn send_input(input: INPUT) {
-    unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32); }
-}
-
-fn vk_input(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk,
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    }
-}
-
-fn mouse_input(flags: u32, dx: i32, dy: i32, data: u32) -> INPUT {
-    INPUT {
-        r#type: INPUT_MOUSE,
-        Anonymous: INPUT_0 {
-            mi: MOUSEINPUT {
-                dx,
-                dy,
-                mouseData: data,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    }
-}
-
 // ── Key mapping ───────────────────────────────────────────────────────────────
 
-fn macro_key_to_vk(key: &MacroKey) -> Option<(VIRTUAL_KEY, bool)> {
-    Some(match key {
-        MacroKey::Return => (VK_RETURN, false),
-        MacroKey::Backspace => (VK_BACK, false),
-        MacroKey::Tab => (VK_TAB, false),
-        MacroKey::Space => (VK_SPACE, false),
-        MacroKey::Escape => (VK_ESCAPE, false),
-        MacroKey::Delete => (VK_DELETE, false),
-        MacroKey::Insert => (VK_INSERT, false),
-        MacroKey::Home => (VK_HOME, false),
-        MacroKey::End => (VK_END, false),
-        MacroKey::PageUp => (VK_PRIOR, false),
-        MacroKey::PageDown => (VK_NEXT, false),
-        MacroKey::UpArrow => (VK_UP, false),
-        MacroKey::DownArrow => (VK_DOWN, false),
-        MacroKey::LeftArrow => (VK_LEFT, false),
-        MacroKey::RightArrow => (VK_RIGHT, false),
-        MacroKey::Shift | MacroKey::LShift => (VK_LSHIFT, false),
-        MacroKey::RShift => (VK_RSHIFT, false),
-        MacroKey::Control | MacroKey::LControl => (VK_LCONTROL, false),
-        MacroKey::RControl => (VK_RCONTROL, false),
-        MacroKey::Alt | MacroKey::Option => (VK_LMENU, false),
-        MacroKey::AltGr => (VK_RMENU, false),
-        MacroKey::Meta | MacroKey::LMenu => (VK_LWIN, false),
-        MacroKey::CapsLock => (VK_CAPITAL, false),
-        MacroKey::NumLock => (VK_NUMLOCK, false),
-        MacroKey::ScrollLock => (VK_SCROLL, false),
-        MacroKey::Pause => (VK_PAUSE, false),
-        MacroKey::PrintScr => (VK_SNAPSHOT, false),
-        MacroKey::F1 => (VK_F1, false),
-        MacroKey::F2 => (0x71u16, false),
-        MacroKey::F3 => (0x72u16, false),
-        MacroKey::F4 => (0x73u16, false),
-        MacroKey::F5 => (0x74u16, false),
-        MacroKey::F6 => (0x75u16, false),
-        MacroKey::F7 => (0x76u16, false),
-        MacroKey::F8 => (0x77u16, false),
-        MacroKey::F9 => (0x78u16, false),
-        MacroKey::F10 => (VK_F10, false),
-        MacroKey::F11 => (VK_F11, false),
-        MacroKey::F12 => (VK_F12, false),
-        MacroKey::F13 => (0x7Cu16, false),
-        MacroKey::F14 => (0x7Du16, false),
-        MacroKey::F15 => (0x7Eu16, false),
-        MacroKey::F16 => (0x7Fu16, false),
-        MacroKey::F17 => (0x80u16, false),
-        MacroKey::F18 => (0x81u16, false),
-        MacroKey::F19 => (0x82u16, false),
-        MacroKey::F20 => (0x83u16, false),
-        MacroKey::F21 => (0x84u16, false),
-        MacroKey::F22 => (0x85u16, false),
-        MacroKey::F23 => (0x86u16, false),
-        MacroKey::F24 => (0x87u16, false),
-        MacroKey::Numpad0 => (VK_NUMPAD0, false),
-        MacroKey::Numpad1 => (VK_NUMPAD1, false),
-        MacroKey::Numpad2 => (VK_NUMPAD2, false),
-        MacroKey::Numpad3 => (VK_NUMPAD3, false),
-        MacroKey::Numpad4 => (VK_NUMPAD4, false),
-        MacroKey::Numpad5 => (VK_NUMPAD5, false),
-        MacroKey::Numpad6 => (VK_NUMPAD6, false),
-        MacroKey::Numpad7 => (VK_NUMPAD7, false),
-        MacroKey::Numpad8 => (VK_NUMPAD8, false),
-        MacroKey::Numpad9 => (VK_NUMPAD9, false),
-        MacroKey::Add => (0x6Bu16, false),
-        MacroKey::Subtract => (0x6Du16, false),
-        MacroKey::Multiply => (0x6Au16, false),
-        MacroKey::Divide => (0x6Fu16, false),
-        MacroKey::Decimal => (0x6Eu16, false),
-        MacroKey::VolumeDown => (VK_VOLUME_DOWN, false),
-        MacroKey::VolumeMute => (VK_VOLUME_MUTE, false),
-        MacroKey::VolumeUp => (VK_VOLUME_UP, false),
-        MacroKey::Select => (0x29u16, false),
-        MacroKey::Unicode(c) => {
-            let vk = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(*c as u16) };
-            if vk == -1 {
-                return None;
-            }
-            let vk_code = (vk & 0xFF) as u16;
-            let needs_shift = (vk >> 8) & 0x01 != 0;
-            (vk_code, needs_shift)
-        }
-        MacroKey::Other(n) => (*n as u16, false),
-    })
+/// Maps this app's `MacroKey` to an `enigo::Key`. `enigo::Key::Other(u32)` is
+/// treated by enigo as a raw Windows VK code, so it's used here for keys with
+/// no named `enigo::Key` equivalent (matching `MacroKey::Other`'s own
+/// "raw VK code" semantics).
+fn macro_key_to_enigo_key(key: &MacroKey) -> enigo::Key {
+    use enigo::Key;
+    match key {
+        MacroKey::Return => Key::Return,
+        MacroKey::Backspace => Key::Backspace,
+        MacroKey::Tab => Key::Tab,
+        MacroKey::Space => Key::Space,
+        MacroKey::Escape => Key::Escape,
+        MacroKey::Delete => Key::Delete,
+        MacroKey::Insert => Key::Insert,
+        MacroKey::Home => Key::Home,
+        MacroKey::End => Key::End,
+        MacroKey::PageUp => Key::PageUp,
+        MacroKey::PageDown => Key::PageDown,
+        MacroKey::UpArrow => Key::UpArrow,
+        MacroKey::DownArrow => Key::DownArrow,
+        MacroKey::LeftArrow => Key::LeftArrow,
+        MacroKey::RightArrow => Key::RightArrow,
+        MacroKey::Shift => Key::Shift,
+        MacroKey::LShift => Key::LShift,
+        MacroKey::RShift => Key::RShift,
+        MacroKey::Control => Key::Control,
+        MacroKey::LControl => Key::LControl,
+        MacroKey::RControl => Key::RControl,
+        MacroKey::Alt | MacroKey::Option => Key::Alt,
+        MacroKey::AltGr => Key::Other(VK_RMENU as u32),
+        MacroKey::Meta | MacroKey::LMenu => Key::Meta,
+        MacroKey::CapsLock => Key::CapsLock,
+        MacroKey::NumLock => Key::Numlock,
+        MacroKey::ScrollLock => Key::Scroll,
+        MacroKey::Pause => Key::Pause,
+        MacroKey::PrintScr => Key::PrintScr,
+        MacroKey::F1 => Key::F1,
+        MacroKey::F2 => Key::F2,
+        MacroKey::F3 => Key::F3,
+        MacroKey::F4 => Key::F4,
+        MacroKey::F5 => Key::F5,
+        MacroKey::F6 => Key::F6,
+        MacroKey::F7 => Key::F7,
+        MacroKey::F8 => Key::F8,
+        MacroKey::F9 => Key::F9,
+        MacroKey::F10 => Key::F10,
+        MacroKey::F11 => Key::F11,
+        MacroKey::F12 => Key::F12,
+        MacroKey::F13 => Key::F13,
+        MacroKey::F14 => Key::F14,
+        MacroKey::F15 => Key::F15,
+        MacroKey::F16 => Key::F16,
+        MacroKey::F17 => Key::F17,
+        MacroKey::F18 => Key::F18,
+        MacroKey::F19 => Key::F19,
+        MacroKey::F20 => Key::F20,
+        MacroKey::F21 => Key::F21,
+        MacroKey::F22 => Key::F22,
+        MacroKey::F23 => Key::F23,
+        MacroKey::F24 => Key::F24,
+        MacroKey::Numpad0 => Key::Numpad0,
+        MacroKey::Numpad1 => Key::Numpad1,
+        MacroKey::Numpad2 => Key::Numpad2,
+        MacroKey::Numpad3 => Key::Numpad3,
+        MacroKey::Numpad4 => Key::Numpad4,
+        MacroKey::Numpad5 => Key::Numpad5,
+        MacroKey::Numpad6 => Key::Numpad6,
+        MacroKey::Numpad7 => Key::Numpad7,
+        MacroKey::Numpad8 => Key::Numpad8,
+        MacroKey::Numpad9 => Key::Numpad9,
+        MacroKey::Add => Key::Add,
+        MacroKey::Subtract => Key::Subtract,
+        MacroKey::Multiply => Key::Multiply,
+        MacroKey::Divide => Key::Divide,
+        MacroKey::Decimal => Key::Decimal,
+        MacroKey::VolumeDown => Key::VolumeDown,
+        MacroKey::VolumeMute => Key::VolumeMute,
+        MacroKey::VolumeUp => Key::VolumeUp,
+        MacroKey::Select => Key::Other(0x29),
+        MacroKey::Unicode(c) => Key::Unicode(*c),
+        MacroKey::Other(n) => Key::Other(*n),
+    }
+}
+
+fn to_enigo_dir(dir: Direction) -> enigo::Direction {
+    match dir {
+        Direction::Press => enigo::Direction::Press,
+        Direction::Release => enigo::Direction::Release,
+        Direction::Click => enigo::Direction::Click,
+    }
 }
 
 /// Maps the hotkey name strings produced by `MacroKey::hotkey_name()` to Win32 VK codes.
@@ -326,156 +293,92 @@ pub(crate) fn signal_hotkey_update(bindings: Vec<HotkeyBinding>) {
 
 // ── InputBackend impl ─────────────────────────────────────────────────────────
 
-pub struct WinApiBackend;
+pub struct WinApiBackend {
+    enigo: Enigo,
+}
 
 impl WinApiBackend {
-    pub fn new() -> Self {
-        Self
+    pub fn new() -> Result<Self, String> {
+        let settings = Settings {
+            // Match the previous SendInput-based implementation: relative
+            // mouse moves are raw MOUSEEVENTF_MOVE deltas, subject to the
+            // user's OS pointer-speed/acceleration settings, rather than
+            // enigo's default of converting them to an absolute move.
+            windows_subject_to_mouse_speed_and_acceleration_level: true,
+            // The previous implementation never auto-released held keys on
+            // drop; modifier cleanup is handled explicitly in
+            // `prepare_for_macro_execution`.
+            release_keys_when_dropped: false,
+            ..Default::default()
+        };
+        let enigo = Enigo::new(&settings).map_err(|e| e.to_string())?;
+        Ok(Self { enigo })
     }
 }
 
 impl InputBackend for WinApiBackend {
     fn key(&mut self, key: MacroKey, dir: Direction) -> Result<(), String> {
-        let (vk, needs_shift) =
-            macro_key_to_vk(&key).ok_or_else(|| format!("no VK mapping for {:?}", key))?;
-        unsafe {
-            match dir {
-                Direction::Press => {
-                    if needs_shift { send_input(vk_input(VK_LSHIFT, 0)); }
-                    send_input(vk_input(vk, 0));
-                }
-                Direction::Release => {
-                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
-                    if needs_shift { send_input(vk_input(VK_LSHIFT, KEYEVENTF_KEYUP)); }
-                }
-                Direction::Click => {
-                    if needs_shift { send_input(vk_input(VK_LSHIFT, 0)); }
-                    send_input(vk_input(vk, 0));
-                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
-                    if needs_shift { send_input(vk_input(VK_LSHIFT, KEYEVENTF_KEYUP)); }
-                }
-            }
-        }
-        Ok(())
+        let key = macro_key_to_enigo_key(&key);
+        self.enigo.key(key, to_enigo_dir(dir)).map_err(|e| e.to_string())
     }
 
     fn raw_keycode(&mut self, keycode: u16, dir: Direction) -> Result<(), String> {
-        let vk = keycode;
-        unsafe {
-            match dir {
-                Direction::Press => send_input(vk_input(vk, 0)),
-                Direction::Release => send_input(vk_input(vk, KEYEVENTF_KEYUP)),
-                Direction::Click => {
-                    send_input(vk_input(vk, 0));
-                    send_input(vk_input(vk, KEYEVENTF_KEYUP));
-                }
-            }
-        }
-        Ok(())
+        self.enigo
+            .key(enigo::Key::Other(keycode as u32), to_enigo_dir(dir))
+            .map_err(|e| e.to_string())
     }
 
     fn button(&mut self, button: MacroButton, dir: Direction) -> Result<(), String> {
-        unsafe {
-            match button {
-                MacroButton::ScrollUp => {
-                    send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, 120));
-                }
-                MacroButton::ScrollDown => {
-                    send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, (-120i32) as u32));
-                }
-                MacroButton::ScrollLeft => {
-                    send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, (-120i32) as u32));
-                }
-                MacroButton::ScrollRight => {
-                    send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, 120));
-                }
-                MacroButton::Left => match dir {
-                    Direction::Press | Direction::Click => {
-                        send_input(mouse_input(MOUSEEVENTF_LEFTDOWN, 0, 0, 0));
-                        if matches!(dir, Direction::Click) {
-                            send_input(mouse_input(MOUSEEVENTF_LEFTUP, 0, 0, 0));
-                        }
-                    }
-                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_LEFTUP, 0, 0, 0)),
-                },
-                MacroButton::Right => match dir {
-                    Direction::Press | Direction::Click => {
-                        send_input(mouse_input(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0));
-                        if matches!(dir, Direction::Click) {
-                            send_input(mouse_input(MOUSEEVENTF_RIGHTUP, 0, 0, 0));
-                        }
-                    }
-                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_RIGHTUP, 0, 0, 0)),
-                },
-                MacroButton::Middle => match dir {
-                    Direction::Press | Direction::Click => {
-                        send_input(mouse_input(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0));
-                        if matches!(dir, Direction::Click) {
-                            send_input(mouse_input(MOUSEEVENTF_MIDDLEUP, 0, 0, 0));
-                        }
-                    }
-                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_MIDDLEUP, 0, 0, 0)),
-                },
-                MacroButton::Back => match dir {
-                    Direction::Press | Direction::Click => {
-                        send_input(mouse_input(MOUSEEVENTF_XDOWN, 0, 0, 1));
-                        if matches!(dir, Direction::Click) {
-                            send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 1));
-                        }
-                    }
-                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 1)),
-                },
-                MacroButton::Forward => match dir {
-                    Direction::Press | Direction::Click => {
-                        send_input(mouse_input(MOUSEEVENTF_XDOWN, 0, 0, 2));
-                        if matches!(dir, Direction::Click) {
-                            send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 2));
-                        }
-                    }
-                    Direction::Release => send_input(mouse_input(MOUSEEVENTF_XUP, 0, 0, 2)),
-                },
-                MacroButton::Other(_) => {}
-            }
+        use enigo::{Axis as EAxis, Button as EButton};
+        let dir = to_enigo_dir(dir);
+        match button {
+            // enigo's vertical scroll sign convention is inverted relative to
+            // the raw MOUSEEVENTF_WHEEL delta this used to send directly, so
+            // negate to keep "ScrollUp" actually scrolling up.
+            MacroButton::ScrollUp => self.enigo.scroll(-1, EAxis::Vertical),
+            MacroButton::ScrollDown => self.enigo.scroll(1, EAxis::Vertical),
+            MacroButton::ScrollLeft => self.enigo.scroll(-1, EAxis::Horizontal),
+            MacroButton::ScrollRight => self.enigo.scroll(1, EAxis::Horizontal),
+            MacroButton::Left => self.enigo.button(EButton::Left, dir),
+            MacroButton::Right => self.enigo.button(EButton::Right, dir),
+            MacroButton::Middle => self.enigo.button(EButton::Middle, dir),
+            MacroButton::Back => self.enigo.button(EButton::Back, dir),
+            MacroButton::Forward => self.enigo.button(EButton::Forward, dir),
+            MacroButton::Other(_) => Ok(()),
         }
-        Ok(())
+        .map_err(|e| e.to_string())
     }
 
     fn move_mouse_rel(&mut self, dx: i32, dy: i32) -> Result<(), String> {
-        unsafe { send_input(mouse_input(MOUSEEVENTF_MOVE, dx, dy, 0)); }
-        Ok(())
+        self.enigo
+            .move_mouse(dx, dy, enigo::Coordinate::Rel)
+            .map_err(|e| e.to_string())
     }
 
     fn move_mouse_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
-        let cur = self.cursor_pos().unwrap_or((0, 0));
-        self.move_mouse_rel(x - cur.0, y - cur.1)
+        self.enigo
+            .move_mouse(x, y, enigo::Coordinate::Abs)
+            .map_err(|e| e.to_string())
     }
 
     fn scroll(&mut self, amount: i32, axis: Axis) -> Result<(), String> {
-        unsafe {
-            match axis {
-                Axis::Vertical => send_input(mouse_input(MOUSEEVENTF_WHEEL, 0, 0, (amount * 120) as u32)),
-                Axis::Horizontal => send_input(mouse_input(MOUSEEVENTF_HWHEEL, 0, 0, (amount * 120) as u32)),
-            }
-        }
-        Ok(())
+        // enigo negates the vertical length internally before sending
+        // MOUSEEVENTF_WHEEL, so negate here to keep `amount`'s sign matching
+        // the raw wheel-delta convention this trait used before (positive =
+        // up). Horizontal isn't negated by enigo, so it passes through as-is.
+        let (length, axis) = match axis {
+            Axis::Vertical => (-amount, enigo::Axis::Vertical),
+            Axis::Horizontal => (amount, enigo::Axis::Horizontal),
+        };
+        self.enigo.scroll(length, axis).map_err(|e| e.to_string())
     }
 
     fn text(&mut self, s: &str) -> Result<(), String> {
-        for c in s.chars() {
-            let _ = self.key(MacroKey::Unicode(c), Direction::Click);
-        }
-        Ok(())
+        self.enigo.text(s).map_err(|e| e.to_string())
     }
 
     fn cursor_pos(&self) -> Option<(i32, i32)> {
-        let mut pt = POINT { x: 0, y: 0 };
-        unsafe {
-            if GetCursorPos(&mut pt) != 0 {
-                Some((pt.x, pt.y))
-            } else {
-                None
-            }
-        }
+        self.enigo.location().ok()
     }
 }
 
@@ -808,15 +711,15 @@ pub(crate) fn prepare_for_macro_execution() {
     }
 
     // Release any physically-held modifier keys.
-    unsafe {
+    if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
         for &vk in &[
             VK_LCONTROL, VK_RCONTROL,
             VK_LSHIFT, VK_RSHIFT,
             VK_LMENU, VK_RMENU,
             VK_LWIN, VK_RWIN,
         ] {
-            if GetAsyncKeyState(vk as i32) < 0 {
-                send_input(vk_input(vk, KEYEVENTF_KEYUP));
+            if unsafe { GetAsyncKeyState(vk as i32) } < 0 {
+                let _ = enigo.key(enigo::Key::Other(vk as u32), enigo::Direction::Release);
             }
         }
     }

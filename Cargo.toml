@@ -52,6 +52,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
 ] }
+enigo = "0.6"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
     rev = "8df1858",

@@ -95,10 +95,30 @@ pub(crate) fn macro_editor<'a>(
         widget::column::with_children(instructions).spacing(spacing.space_xs).into(),
         cosmic::widget::container(
             cosmic::widget::row![
-                undo_button,
-                redo_button,
-                icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
-                icon_label_button("document-save-symbolic", "Save macro", 6, Some(SaveMacro)),
+                cosmic::widget::tooltip(
+                    undo_button,
+                    cosmic::widget::container("Undo last instruction change"),
+                    cosmic::widget::tooltip::Position::Top
+                ),
+                cosmic::widget::tooltip(
+                    redo_button,
+                    cosmic::widget::container("Redo last undone change"),
+                    cosmic::widget::tooltip::Position::Top
+                ),
+                cosmic::widget::tooltip(
+                    icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
+                    cosmic::widget::container(if confirm_clear_instructions {
+                        "Click again within 5 seconds to remove every instruction in this macro"
+                    } else {
+                        "Arms removal for every instruction in this macro"
+                    }),
+                    cosmic::widget::tooltip::Position::Top
+                ),
+                cosmic::widget::tooltip(
+                    icon_label_button("document-save-symbolic", "Save macro", 6, Some(SaveMacro)),
+                    cosmic::widget::container("Persist the current macro to your config"),
+                    cosmic::widget::tooltip::Position::Top
+                ),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
@@ -148,7 +168,7 @@ pub(crate) fn macro_editor<'a>(
     )
     .padding(10)
     .width(Length::Fill)
-    .height(Length::Fill)
+    .height(Length::Shrink)
     .align_x(Alignment::Center)
     .into()
 }

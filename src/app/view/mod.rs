@@ -110,8 +110,8 @@ fn build_main_view(app: &App) -> Element<'_, Message> {
 
     cosmic::widget::container(content)
         .width(Length::Fill)
-        .height(Length::Fill)
+        .height(Length::Shrink)
         .align_x(Alignment::Center)
-        .align_y(Alignment::Start)
+        .align_y(Alignment::Center)
         .into()
 }

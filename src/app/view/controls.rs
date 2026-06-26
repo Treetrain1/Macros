@@ -55,9 +55,25 @@ pub(crate) fn macro_selector_row<'a>(
         cosmic::widget::container(cosmic::widget::text("")).width(Length::Fill),
         cosmic::widget::container(
             cosmic::widget::column![
-                new_macro_button,
-                remove_macro_button,
-                settings_button,
+                cosmic::widget::tooltip(
+                    new_macro_button,
+                    cosmic::widget::container("Add a new macro"),
+                    cosmic::widget::tooltip::Position::Left
+                ),
+                cosmic::widget::tooltip(
+                    remove_macro_button,
+                    cosmic::widget::container(if confirm_remove_macro {
+                        "Click again to permanently delete the selected macro"
+                    } else {
+                        "Arms deletion for the selected macro"
+                    }),
+                    cosmic::widget::tooltip::Position::Left
+                ),
+                cosmic::widget::tooltip(
+                    settings_button,
+                    cosmic::widget::container("Open Settings"),
+                    cosmic::widget::tooltip::Position::Left
+                ),
             ]
             .spacing(12)
             .align_x(Alignment::Center)
@@ -142,16 +158,26 @@ pub(crate) fn run_controls_row<'a>(
 
     let left_column = cosmic::widget::container(
         cosmic::widget::row![
-            run_macro_button,
-            cosmic::widget::container(
-                cosmic::widget::row![
-                    cosmic::widget::text("Loop mode"),
-                    loop_mode,
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center)
+            cosmic::widget::tooltip(
+                run_macro_button,
+                cosmic::widget::container(
+                    "Runs the current macro once or starts looping if enabled"
+                ),
+                cosmic::widget::tooltip::Position::Top
+            ),
+            cosmic::widget::tooltip(
+                cosmic::widget::container(
+                    cosmic::widget::row![
+                        cosmic::widget::text("Loop mode"),
+                        loop_mode,
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                )
+                .padding([8, 12]),
+                cosmic::widget::container("Enable to loop the macro continuously"),
+                cosmic::widget::tooltip::Position::Top
             )
-            .padding([8, 12]),
         ]
         .spacing(12)
         .align_y(Alignment::Center),

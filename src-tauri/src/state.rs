@@ -426,7 +426,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
     }
 }
 
-pub(crate) fn emit_state_updated(app: &tauri::AppHandle, s: &AppState) {
+pub(crate) fn emit_state_updated<R: tauri::Runtime>(app: &tauri::AppHandle<R>, s: &AppState) {
     use tauri::Emitter;
     let dto = build_state_dto(s);
     let _ = app.emit("state-updated", dto);

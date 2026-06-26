@@ -10,7 +10,7 @@ use crate::state::{
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Runtime, State};
 use tracing::warn;
 
 const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
@@ -63,7 +63,7 @@ pub(crate) fn get_state(state: State<SharedState>) -> Result<StateDto, String> {
 // ─── Macro library ─────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn select_macro(state: State<SharedState>, app: tauri::AppHandle, index: usize) -> Result<(), String> {
+pub(crate) fn select_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let macros = config::get_macros_from_config();
     if let Some(mac) = macros.get(index) {
@@ -83,7 +83,7 @@ pub(crate) fn select_macro(state: State<SharedState>, app: tauri::AppHandle, ind
 }
 
 #[tauri::command]
-pub(crate) fn new_macro(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn new_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let new_macro = Macro::new("New Macro".into(), "".into(), vec![]);
     let new_id = new_macro.id.clone();
     if let Err(e) = new_macro.add() {
@@ -103,7 +103,7 @@ pub(crate) fn new_macro(state: State<SharedState>, app: tauri::AppHandle) -> Res
 }
 
 #[tauri::command]
-pub(crate) fn remove_macro(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn remove_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if !s.confirm_remove_macro {
         s.confirm_remove_macro = true;
@@ -125,7 +125,7 @@ pub(crate) fn remove_macro(state: State<SharedState>, app: tauri::AppHandle) -> 
 }
 
 #[tauri::command]
-pub(crate) fn set_title(state: State<SharedState>, app: tauri::AppHandle, title: String) -> Result<(), String> {
+pub(crate) fn set_title<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, title: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &mut s.current_macro {
         mac.name = title;
@@ -140,7 +140,7 @@ pub(crate) fn set_title(state: State<SharedState>, app: tauri::AppHandle, title:
 }
 
 #[tauri::command]
-pub(crate) fn save_macro(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn save_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &s.current_macro {
         if let Err(e) = mac.save() {
@@ -155,9 +155,9 @@ pub(crate) fn save_macro(state: State<SharedState>, app: tauri::AppHandle) -> Re
 // ─── Instructions ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn add_instruction(
+pub(crate) fn add_instruction<R: Runtime>(
     state: State<SharedState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     index: usize,
     instruction: InstructionDto,
 ) -> Result<(), String> {
@@ -175,9 +175,9 @@ pub(crate) fn add_instruction(
 }
 
 #[tauri::command]
-pub(crate) fn edit_instruction(
+pub(crate) fn edit_instruction<R: Runtime>(
     state: State<SharedState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     index: usize,
     instruction: InstructionDto,
 ) -> Result<(), String> {
@@ -194,9 +194,9 @@ pub(crate) fn edit_instruction(
 }
 
 #[tauri::command]
-pub(crate) fn edit_instruction_field(
+pub(crate) fn edit_instruction_field<R: Runtime>(
     state: State<SharedState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     index: usize,
     field_id: String,
     text: String,
@@ -234,7 +234,7 @@ pub(crate) fn edit_instruction_field(
 }
 
 #[tauri::command]
-pub(crate) fn remove_instruction(state: State<SharedState>, app: tauri::AppHandle, index: usize) -> Result<(), String> {
+pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &s.current_macro {
         if !mac.code.is_empty() && index < mac.code.len() {
@@ -251,7 +251,7 @@ pub(crate) fn remove_instruction(state: State<SharedState>, app: tauri::AppHandl
 }
 
 #[tauri::command]
-pub(crate) fn reorder_instruction(state: State<SharedState>, app: tauri::AppHandle, index: usize, direction: i32) -> Result<(), String> {
+pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize, direction: i32) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &s.current_macro {
         let len = mac.code.len();
@@ -278,7 +278,7 @@ pub(crate) fn reorder_instruction(state: State<SharedState>, app: tauri::AppHand
 }
 
 #[tauri::command]
-pub(crate) fn clear_instructions(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if !s.confirm_clear_instructions {
         s.confirm_clear_instructions = true;
@@ -312,7 +312,7 @@ pub(crate) fn clear_instructions(state: State<SharedState>, app: tauri::AppHandl
 }
 
 #[tauri::command]
-pub(crate) fn undo(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(prev_code) = s.undo_stack.pop() {
         let current = s.current_macro.as_ref().map(|m| m.code.clone());
@@ -330,7 +330,7 @@ pub(crate) fn undo(state: State<SharedState>, app: tauri::AppHandle) -> Result<(
 }
 
 #[tauri::command]
-pub(crate) fn redo(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(next_code) = s.redo_stack.pop() {
         let current = s.current_macro.as_ref().map(|m| m.code.clone());
@@ -350,7 +350,7 @@ pub(crate) fn redo(state: State<SharedState>, app: tauri::AppHandle) -> Result<(
 // ─── Key capture ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn start_key_capture(state: State<SharedState>, app: tauri::AppHandle, index: usize) -> Result<(), String> {
+pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.key_capture_index = Some(index);
     emit_state_updated(&app, &s);
@@ -358,9 +358,9 @@ pub(crate) fn start_key_capture(state: State<SharedState>, app: tauri::AppHandle
 }
 
 #[tauri::command]
-pub(crate) fn key_capture_event(
+pub(crate) fn key_capture_event<R: Runtime>(
     state: State<SharedState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     code: String,
     key: String,
 ) -> Result<(), String> {
@@ -388,7 +388,7 @@ pub(crate) fn key_capture_event(
 // ─── Execution ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn run_macro(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let (mac, emulator, is_looping, loop_mode) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mac = s.current_macro.clone();
@@ -433,7 +433,7 @@ pub(crate) fn run_macro(state: State<SharedState>, app: tauri::AppHandle) -> Res
 }
 
 #[tauri::command]
-pub(crate) fn toggle_loop_mode(state: State<SharedState>, app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+pub(crate) fn toggle_loop_mode<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, enabled: bool) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.loop_mode_enabled = enabled;
     config::update_settings(|settings| settings.loop_mode_enabled = Some(enabled));
@@ -444,7 +444,7 @@ pub(crate) fn toggle_loop_mode(state: State<SharedState>, app: tauri::AppHandle,
 // ─── Recording ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn start_recording(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn start_recording<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if s.current_macro.is_none() { return Ok(()); }
     s.recording_countdown_generation = s.recording_countdown_generation.wrapping_add(1);
@@ -478,7 +478,7 @@ pub(crate) fn start_recording(state: State<SharedState>, app: tauri::AppHandle) 
 }
 
 #[tauri::command]
-pub(crate) fn stop_recording(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn stop_recording<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     stop_recording_impl(&mut s);
     emit_state_updated(&app, &s);
@@ -506,7 +506,7 @@ fn stop_recording_impl(s: &mut crate::state::AppState) {
 }
 
 /// Called from the QueueSignal background task when the OS-level hook signals stop.
-pub(crate) fn stop_recording_internal(state: &SharedState, app: &tauri::AppHandle) {
+pub(crate) fn stop_recording_internal<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) {
     if let Ok(mut s) = state.lock() {
         stop_recording_impl(&mut s);
         emit_state_updated(app, &s);
@@ -514,7 +514,7 @@ pub(crate) fn stop_recording_internal(state: &SharedState, app: &tauri::AppHandl
 }
 
 #[tauri::command]
-pub(crate) fn toggle_record_mouse_relative(state: State<SharedState>, app: tauri::AppHandle, relative: bool) -> Result<(), String> {
+pub(crate) fn toggle_record_mouse_relative<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, relative: bool) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.record_mouse_relative = relative;
     recording::RECORD_MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
@@ -525,7 +525,7 @@ pub(crate) fn toggle_record_mouse_relative(state: State<SharedState>, app: tauri
 // ─── Navigation ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn open_settings(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn open_settings<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.page = Page::Settings;
     s.hotkey_bindings = config::load_hotkey_bindings();
@@ -536,7 +536,7 @@ pub(crate) fn open_settings(state: State<SharedState>, app: tauri::AppHandle) ->
 }
 
 #[tauri::command]
-pub(crate) fn close_settings(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn close_settings<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.page = Page::Main;
     s.combo_capture = None;
@@ -548,7 +548,7 @@ pub(crate) fn close_settings(state: State<SharedState>, app: tauri::AppHandle) -
 // ─── Hotkey bindings ───────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn start_combo_capture(state: State<SharedState>, app: tauri::AppHandle, action: HotkeyActionDto) -> Result<(), String> {
+pub(crate) fn start_combo_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, action: HotkeyActionDto) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.combo_capture = Some(ComboCapture::Named(dto_to_hotkey_action(&action)));
     emit_state_updated(&app, &s);
@@ -556,7 +556,7 @@ pub(crate) fn start_combo_capture(state: State<SharedState>, app: tauri::AppHand
 }
 
 #[tauri::command]
-pub(crate) fn start_pending_combo_capture(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn start_pending_combo_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.combo_capture = Some(ComboCapture::Pending);
     emit_state_updated(&app, &s);
@@ -564,9 +564,9 @@ pub(crate) fn start_pending_combo_capture(state: State<SharedState>, app: tauri:
 }
 
 #[tauri::command]
-pub(crate) fn combo_capture_event(
+pub(crate) fn combo_capture_event<R: Runtime>(
     state: State<SharedState>,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     code: String,
     modifiers: u8,
 ) -> Result<(), String> {
@@ -597,7 +597,7 @@ pub(crate) fn combo_capture_event(
 }
 
 #[tauri::command]
-pub(crate) fn cancel_combo_capture(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn cancel_combo_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.combo_capture = None;
     emit_state_updated(&app, &s);
@@ -605,7 +605,7 @@ pub(crate) fn cancel_combo_capture(state: State<SharedState>, app: tauri::AppHan
 }
 
 #[tauri::command]
-pub(crate) fn set_pending_macro_idx(state: State<SharedState>, app: tauri::AppHandle, index: Option<usize>) -> Result<(), String> {
+pub(crate) fn set_pending_macro_idx<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: Option<usize>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let entry = s.pending_macro_hotkey.get_or_insert((None, None));
     entry.0 = index;
@@ -614,7 +614,7 @@ pub(crate) fn set_pending_macro_idx(state: State<SharedState>, app: tauri::AppHa
 }
 
 #[tauri::command]
-pub(crate) fn add_macro_hotkey(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn add_macro_hotkey<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some((Some(idx), Some(combo))) = s.pending_macro_hotkey.take() {
         let macros = config::get_macros_from_config();
@@ -632,7 +632,7 @@ pub(crate) fn add_macro_hotkey(state: State<SharedState>, app: tauri::AppHandle)
 }
 
 #[tauri::command]
-pub(crate) fn remove_hotkey_binding(state: State<SharedState>, app: tauri::AppHandle, index: usize) -> Result<(), String> {
+pub(crate) fn remove_hotkey_binding<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if index < s.hotkey_bindings.len() {
         s.hotkey_bindings.remove(index);
@@ -643,7 +643,7 @@ pub(crate) fn remove_hotkey_binding(state: State<SharedState>, app: tauri::AppHa
 }
 
 #[tauri::command]
-pub(crate) fn clear_named_hotkey(state: State<SharedState>, app: tauri::AppHandle, action: HotkeyActionDto) -> Result<(), String> {
+pub(crate) fn clear_named_hotkey<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, action: HotkeyActionDto) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let action = dto_to_hotkey_action(&action);
     s.hotkey_bindings.retain(|b| b.action != action);
@@ -653,7 +653,7 @@ pub(crate) fn clear_named_hotkey(state: State<SharedState>, app: tauri::AppHandl
 }
 
 #[tauri::command]
-pub(crate) fn reset_hotkey_to_default(state: State<SharedState>, app: tauri::AppHandle, action: HotkeyActionDto) -> Result<(), String> {
+pub(crate) fn reset_hotkey_to_default<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, action: HotkeyActionDto) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let action = dto_to_hotkey_action(&action);
     if let Some(default_combo) = config::default_combo_for_action(&action) {
@@ -676,7 +676,7 @@ fn save_hotkey_bindings_impl(s: &mut crate::state::AppState) {
 // ─── IPC server ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn set_ipc_port_text(state: State<SharedState>, app: tauri::AppHandle, text: String) -> Result<(), String> {
+pub(crate) fn set_ipc_port_text<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, text: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     match text.trim().parse::<u16>() {
         Ok(port) => {
@@ -693,7 +693,7 @@ pub(crate) fn set_ipc_port_text(state: State<SharedState>, app: tauri::AppHandle
 }
 
 #[tauri::command]
-pub(crate) fn start_ipc_server(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn start_ipc_server<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if s.ipc_server.is_none() {
         if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
@@ -708,7 +708,7 @@ pub(crate) fn start_ipc_server(state: State<SharedState>, app: tauri::AppHandle)
 }
 
 #[tauri::command]
-pub(crate) fn stop_ipc_server(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn stop_ipc_server<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(tx) = s.ipc_shutdown_tx.take() {
         let _ = tx.send(true);
@@ -722,7 +722,7 @@ pub(crate) fn stop_ipc_server(state: State<SharedState>, app: tauri::AppHandle) 
 }
 
 #[tauri::command]
-pub(crate) fn set_ipc_auto_start(state: State<SharedState>, app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_ipc_auto_start<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, enabled: bool) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.ipc_auto_start = enabled;
     config::update_settings(|settings| settings.ipc_auto_start = Some(enabled));
@@ -733,7 +733,7 @@ pub(crate) fn set_ipc_auto_start(state: State<SharedState>, app: tauri::AppHandl
 // ─── Updates (Windows) ─────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn check_for_updates(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn check_for_updates<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.update_check_state = UpdateCheckState::Checking;
@@ -747,7 +747,7 @@ pub(crate) fn check_for_updates(state: State<SharedState>, app: tauri::AppHandle
     Ok(())
 }
 
-pub(crate) async fn check_for_updates_internal(state: &SharedState, app: &tauri::AppHandle) {
+pub(crate) async fn check_for_updates_internal<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) {
     #[cfg(windows)]
     {
         let version = env!("CARGO_PKG_VERSION").to_string();
@@ -768,7 +768,7 @@ pub(crate) async fn check_for_updates_internal(state: &SharedState, app: &tauri:
 }
 
 #[tauri::command]
-pub(crate) fn apply_update(state: State<SharedState>, app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn apply_update<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.update_check_state = UpdateCheckState::Applying;
@@ -799,7 +799,7 @@ pub(crate) fn apply_update(state: State<SharedState>, app: tauri::AppHandle) -> 
 
 // ─── Hotkey action handler (called from QueueSignal task) ──────────────────
 
-pub(crate) fn handle_hotkey_action(state: &SharedState, app: &tauri::AppHandle, action: HotkeyAction) {
+pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>, action: HotkeyAction) {
     match &action {
         HotkeyAction::RunMacro | HotkeyAction::RunSpecificMacro(_) => {
             let s = match state.lock() {

@@ -16,13 +16,13 @@ use crate::recording::QueueSignal;
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Cef, Manager};
 
 pub fn run() {
     tracing_subscriber::fmt::init();
     let _ = tracing_log::LogTracer::init();
 
-    tauri::Builder::default()
+    tauri::Builder::<Cef>::default()
         .setup(|app| {
             let settings = config::load_settings();
 

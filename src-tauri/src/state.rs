@@ -1,0 +1,433 @@
+use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
+use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
+use crate::macros::backend::InputBackend;
+use crate::macros::thread_pool::ThreadPool;
+use crate::macros::{Instruction, Macro};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+pub(crate) type SharedState = Arc<Mutex<AppState>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) enum FieldId {
+    WaitDuration,
+    WaitRandomness,
+    MoveMouseX,
+    MoveMouseY,
+    ScrollAmount,
+}
+
+impl std::fmt::Display for FieldId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldId::WaitDuration => write!(f, "WaitDuration"),
+            FieldId::WaitRandomness => write!(f, "WaitRandomness"),
+            FieldId::MoveMouseX => write!(f, "MoveMouseX"),
+            FieldId::MoveMouseY => write!(f, "MoveMouseY"),
+            FieldId::ScrollAmount => write!(f, "ScrollAmount"),
+        }
+    }
+}
+
+impl std::str::FromStr for FieldId {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "WaitDuration" => Ok(FieldId::WaitDuration),
+            "WaitRandomness" => Ok(FieldId::WaitRandomness),
+            "MoveMouseX" => Ok(FieldId::MoveMouseX),
+            "MoveMouseY" => Ok(FieldId::MoveMouseY),
+            "ScrollAmount" => Ok(FieldId::ScrollAmount),
+            _ => Err(format!("Unknown FieldId: {s}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RecordingPhase {
+    Idle,
+    Countdown(u8),
+    Active,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum UpdateCheckState {
+    Idle,
+    Checking,
+    UpToDate,
+    UpdateAvailable(String),
+    Applying,
+    Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Page {
+    Main,
+    Settings,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ComboCapture {
+    Named(HotkeyAction),
+    Pending,
+}
+
+pub(crate) struct AppState {
+    pub(crate) macro_selected: Option<usize>,
+    pub(crate) current_macro: Option<Macro>,
+    pub(crate) macros_list: Vec<Macro>,
+    pub(crate) macro_strs: Vec<String>,
+    pub(crate) emulator: Option<Arc<Mutex<dyn InputBackend>>>,
+    pub(crate) thread_pool: ThreadPool,
+    pub(crate) is_looping: Arc<Mutex<bool>>,
+    pub(crate) loop_mode_enabled: bool,
+    pub(crate) ipc_server: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) ipc_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub(crate) ipc_active_port: Option<u16>,
+    pub(crate) ipc_auto_start: bool,
+    pub(crate) confirm_remove_macro: bool,
+    pub(crate) confirm_clear_instructions: bool,
+    pub(crate) clear_confirm_generation: u64,
+    pub(crate) key_capture_index: Option<usize>,
+    pub(crate) undo_stack: Vec<Vec<Instruction>>,
+    pub(crate) redo_stack: Vec<Vec<Instruction>>,
+    pub(crate) recording_phase: RecordingPhase,
+    pub(crate) recording_countdown_generation: u64,
+    pub(crate) record_mouse_relative: bool,
+    pub(crate) page: Page,
+    pub(crate) combo_capture: Option<ComboCapture>,
+    pub(crate) hotkey_bindings: Vec<HotkeyBinding>,
+    pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
+    pub(crate) invalid_field_buffers: HashMap<(usize, FieldId), String>,
+    pub(crate) ipc_port_text: String,
+    pub(crate) ipc_port_invalid: bool,
+    pub(crate) update_check_state: UpdateCheckState,
+}
+
+// ─── Serializable DTO ──────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub(crate) struct StateDto {
+    pub(crate) macro_names: Vec<String>,
+    pub(crate) macro_selected: Option<usize>,
+    pub(crate) current_macro: Option<MacroDto>,
+    pub(crate) loop_mode_enabled: bool,
+    pub(crate) is_looping: bool,
+    pub(crate) ipc_active_port: Option<u16>,
+    pub(crate) ipc_auto_start: bool,
+    pub(crate) confirm_remove_macro: bool,
+    pub(crate) confirm_clear_instructions: bool,
+    pub(crate) key_capture_index: Option<usize>,
+    pub(crate) can_undo: bool,
+    pub(crate) can_redo: bool,
+    pub(crate) recording_phase: RecordingPhaseDto,
+    pub(crate) record_mouse_relative: bool,
+    pub(crate) page: String,
+    pub(crate) combo_capture: Option<ComboCaptureDto>,
+    pub(crate) hotkey_bindings: Vec<HotkeyBindingDto>,
+    pub(crate) pending_macro_hotkey: Option<PendingMacroHotkeyDto>,
+    pub(crate) invalid_field_buffers: Vec<InvalidFieldDto>,
+    pub(crate) ipc_port_text: String,
+    pub(crate) ipc_port_invalid: bool,
+    pub(crate) emulator_available: bool,
+    pub(crate) grab_available: bool,
+    pub(crate) update_check_state: UpdateCheckStateDto,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct MacroDto {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) instructions: Vec<InstructionDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub(crate) enum InstructionDto {
+    Wait { duration: f64, randomness: f64 },
+    Text { text: String },
+    Key { key: String, direction: String },
+    Button { button: String, direction: String },
+    MoveMouse { x: i32, y: i32, coordinate: String },
+    Scroll { amount: i32, axis: String },
+    Command { command: String },
+    Comment { comment: String },
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct RecordingPhaseDto {
+    pub(crate) phase: String,
+    pub(crate) countdown: Option<u8>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub(crate) enum HotkeyActionDto {
+    RunMacro,
+    StopLoop,
+    NextMacro,
+    PrevMacro,
+    ToggleLoop,
+    StartRecordingImmediate,
+    RunSpecificMacro { macro_id: String },
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct HotkeyBindingDto {
+    pub(crate) binding_index: usize,
+    pub(crate) action: HotkeyActionDto,
+    pub(crate) combo_display: String,
+    pub(crate) macro_name: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct ComboCaptureDto {
+    pub(crate) kind: String,
+    pub(crate) action: Option<HotkeyActionDto>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct PendingMacroHotkeyDto {
+    pub(crate) macro_index: Option<usize>,
+    pub(crate) combo_display: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct InvalidFieldDto {
+    pub(crate) instruction_index: usize,
+    pub(crate) field_id: String,
+    pub(crate) text: String,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct UpdateCheckStateDto {
+    pub(crate) state: String,
+    pub(crate) version: Option<String>,
+    pub(crate) error: Option<String>,
+}
+
+// ─── Conversions ───────────────────────────────────────────────────────────
+
+fn direction_to_str(d: &Direction) -> &'static str {
+    match d {
+        Direction::Click => "Click",
+        Direction::Press => "Press",
+        Direction::Release => "Release",
+    }
+}
+
+fn str_to_direction(s: &str) -> Direction {
+    match s {
+        "Press" => Direction::Press,
+        "Release" => Direction::Release,
+        _ => Direction::Click,
+    }
+}
+
+fn coordinate_to_str(c: &Coordinate) -> &'static str {
+    match c {
+        Coordinate::Abs => "Absolute",
+        Coordinate::Rel => "Relative",
+    }
+}
+
+fn str_to_coordinate(s: &str) -> Coordinate {
+    match s {
+        "Relative" => Coordinate::Rel,
+        _ => Coordinate::Abs,
+    }
+}
+
+fn axis_to_str(a: &Axis) -> &'static str {
+    match a {
+        Axis::Vertical => "Vertical",
+        Axis::Horizontal => "Horizontal",
+    }
+}
+
+fn str_to_axis(s: &str) -> Axis {
+    match s {
+        "Horizontal" => Axis::Horizontal,
+        _ => Axis::Vertical,
+    }
+}
+
+pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
+    match ins {
+        Instruction::Wait(dur, rand) => InstructionDto::Wait { duration: *dur, randomness: *rand },
+        Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
+        Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
+        Instruction::Token(token) => match token {
+            InputToken::Text(t) => InstructionDto::Text { text: t.clone() },
+            InputToken::Key(k, d) => InstructionDto::Key {
+                key: key_to_string(k).unwrap_or("Unknown").to_string(),
+                direction: direction_to_str(d).to_string(),
+            },
+            InputToken::Button(b, d) => InstructionDto::Button {
+                button: get_mouse_button_names()[mouse_button_to_index(b)].to_string(),
+                direction: direction_to_str(d).to_string(),
+            },
+            InputToken::MoveMouse(x, y, coord) => InstructionDto::MoveMouse {
+                x: *x,
+                y: *y,
+                coordinate: coordinate_to_str(coord).to_string(),
+            },
+            InputToken::Scroll(amt, axis) => InstructionDto::Scroll {
+                amount: *amt,
+                axis: axis_to_str(axis).to_string(),
+            },
+            InputToken::Raw(_, _) => InstructionDto::Comment { comment: "(raw keycode)".to_string() },
+        },
+    }
+}
+
+pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
+    use crate::input::{index_to_mouse_button, key_names::string_to_key};
+    Some(match dto {
+        InstructionDto::Wait { duration, randomness } => Instruction::Wait(*duration, *randomness),
+        InstructionDto::Text { text } => Instruction::Token(InputToken::Text(text.clone())),
+        InstructionDto::Key { key, direction } => {
+            let mk = string_to_key(key).ok()?;
+            Instruction::Token(InputToken::Key(mk, str_to_direction(direction)))
+        }
+        InstructionDto::Button { button, direction } => {
+            let names = get_mouse_button_names();
+            let idx = names.iter().position(|&n| n == button.as_str()).unwrap_or(0);
+            Instruction::Token(InputToken::Button(index_to_mouse_button(idx), str_to_direction(direction)))
+        }
+        InstructionDto::MoveMouse { x, y, coordinate } => {
+            Instruction::Token(InputToken::MoveMouse(*x, *y, str_to_coordinate(coordinate)))
+        }
+        InstructionDto::Scroll { amount, axis } => {
+            Instruction::Token(InputToken::Scroll(*amount, str_to_axis(axis)))
+        }
+        InstructionDto::Command { command } => Instruction::Command(command.clone()),
+        InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
+    })
+}
+
+fn hotkey_action_to_dto(action: &HotkeyAction) -> HotkeyActionDto {
+    match action {
+        HotkeyAction::RunMacro => HotkeyActionDto::RunMacro,
+        HotkeyAction::StopLoop => HotkeyActionDto::StopLoop,
+        HotkeyAction::NextMacro => HotkeyActionDto::NextMacro,
+        HotkeyAction::PrevMacro => HotkeyActionDto::PrevMacro,
+        HotkeyAction::ToggleLoop => HotkeyActionDto::ToggleLoop,
+        HotkeyAction::StartRecordingImmediate => HotkeyActionDto::StartRecordingImmediate,
+        HotkeyAction::RunSpecificMacro(id) => HotkeyActionDto::RunSpecificMacro { macro_id: id.clone() },
+    }
+}
+
+pub(crate) fn dto_to_hotkey_action(dto: &HotkeyActionDto) -> HotkeyAction {
+    match dto {
+        HotkeyActionDto::RunMacro => HotkeyAction::RunMacro,
+        HotkeyActionDto::StopLoop => HotkeyAction::StopLoop,
+        HotkeyActionDto::NextMacro => HotkeyAction::NextMacro,
+        HotkeyActionDto::PrevMacro => HotkeyAction::PrevMacro,
+        HotkeyActionDto::ToggleLoop => HotkeyAction::ToggleLoop,
+        HotkeyActionDto::StartRecordingImmediate => HotkeyAction::StartRecordingImmediate,
+        HotkeyActionDto::RunSpecificMacro { macro_id } => HotkeyAction::RunSpecificMacro(macro_id.clone()),
+    }
+}
+
+pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
+    let current_macro = s.current_macro.as_ref().map(|mac| MacroDto {
+        id: mac.id.clone(),
+        name: mac.name.clone(),
+        description: mac.description.clone(),
+        instructions: mac.code.iter().map(instruction_to_dto).collect(),
+    });
+
+    let recording_phase = match &s.recording_phase {
+        RecordingPhase::Idle => RecordingPhaseDto { phase: "Idle".to_string(), countdown: None },
+        RecordingPhase::Countdown(n) => RecordingPhaseDto { phase: "Countdown".to_string(), countdown: Some(*n) },
+        RecordingPhase::Active => RecordingPhaseDto { phase: "Active".to_string(), countdown: None },
+    };
+
+    let combo_capture = s.combo_capture.as_ref().map(|cc| match cc {
+        ComboCapture::Named(action) => ComboCaptureDto {
+            kind: "Named".to_string(),
+            action: Some(hotkey_action_to_dto(action)),
+        },
+        ComboCapture::Pending => ComboCaptureDto {
+            kind: "Pending".to_string(),
+            action: None,
+        },
+    });
+
+    let macros_list = &s.macros_list;
+    let hotkey_bindings: Vec<HotkeyBindingDto> = s.hotkey_bindings.iter().enumerate().map(|(i, b)| {
+        let macro_name = if let HotkeyAction::RunSpecificMacro(ref id) = b.action {
+            macros_list.iter().find(|m| &m.id == id).map(|m| m.name.clone())
+                .or_else(|| Some("(deleted)".to_string()))
+        } else {
+            None
+        };
+        HotkeyBindingDto {
+            binding_index: i,
+            action: hotkey_action_to_dto(&b.action),
+            combo_display: b.combo.format(),
+            macro_name,
+        }
+    }).collect();
+
+    let pending_macro_hotkey = s.pending_macro_hotkey.as_ref().map(|(idx, combo)| PendingMacroHotkeyDto {
+        macro_index: *idx,
+        combo_display: combo.as_ref().map(|c| c.format()),
+    });
+
+    let invalid_field_buffers: Vec<InvalidFieldDto> = s.invalid_field_buffers.iter().map(|((ins_idx, field), text)| {
+        InvalidFieldDto {
+            instruction_index: *ins_idx,
+            field_id: field.to_string(),
+            text: text.clone(),
+        }
+    }).collect();
+
+    let is_looping = s.is_looping.lock().map(|g| *g).unwrap_or(false);
+
+    let update_check_state = match &s.update_check_state {
+        UpdateCheckState::Idle => UpdateCheckStateDto { state: "Idle".to_string(), version: None, error: None },
+        UpdateCheckState::Checking => UpdateCheckStateDto { state: "Checking".to_string(), version: None, error: None },
+        UpdateCheckState::UpToDate => UpdateCheckStateDto { state: "UpToDate".to_string(), version: None, error: None },
+        UpdateCheckState::UpdateAvailable(v) => UpdateCheckStateDto { state: "UpdateAvailable".to_string(), version: Some(v.clone()), error: None },
+        UpdateCheckState::Applying => UpdateCheckStateDto { state: "Applying".to_string(), version: None, error: None },
+        UpdateCheckState::Error(e) => UpdateCheckStateDto { state: "Error".to_string(), version: None, error: Some(e.clone()) },
+    };
+
+    StateDto {
+        macro_names: s.macro_strs.clone(),
+        macro_selected: s.macro_selected,
+        current_macro,
+        loop_mode_enabled: s.loop_mode_enabled,
+        is_looping,
+        ipc_active_port: s.ipc_active_port,
+        ipc_auto_start: s.ipc_auto_start,
+        confirm_remove_macro: s.confirm_remove_macro,
+        confirm_clear_instructions: s.confirm_clear_instructions,
+        key_capture_index: s.key_capture_index,
+        can_undo: !s.undo_stack.is_empty(),
+        can_redo: !s.redo_stack.is_empty(),
+        recording_phase,
+        record_mouse_relative: s.record_mouse_relative,
+        page: match s.page { Page::Main => "Main".to_string(), Page::Settings => "Settings".to_string() },
+        combo_capture,
+        hotkey_bindings,
+        pending_macro_hotkey,
+        invalid_field_buffers,
+        ipc_port_text: s.ipc_port_text.clone(),
+        ipc_port_invalid: s.ipc_port_invalid,
+        emulator_available: s.emulator.is_some(),
+        grab_available: !crate::recording::grab_failed(),
+        update_check_state,
+    }
+}
+
+pub(crate) fn emit_state_updated(app: &tauri::AppHandle, s: &AppState) {
+    use tauri::Emitter;
+    let dto = build_state_dto(s);
+    let _ = app.emit("state-updated", dto);
+}

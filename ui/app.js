@@ -1,0 +1,725 @@
+// Tauri v2 API
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+
+// ─── Virtual scroll constants (mirror the Rust impl) ────────────────────────
+const ROW_H = 60;
+const BUFFER = 5;
+
+// ─── App state (full snapshot from backend) ──────────────────────────────────
+let state = {};
+let appVersion = '';
+
+// ─── Initialisation ──────────────────────────────────────────────────────────
+async function init() {
+    try {
+        appVersion = await window.__TAURI__.app.getVersion();
+    } catch (_) {}
+    try {
+        state = await invoke('get_state');
+    } catch (e) {
+        console.error('Failed to get initial state:', e);
+    }
+    render(state);
+    await listen('state-updated', evt => {
+        state = evt.payload;
+        render(state);
+    });
+    setupStaticListeners();
+}
+
+// ─── Keyboard capture (key instructions + hotkey combo capture) ──────────────
+document.addEventListener('keydown', async e => {
+    if (state.key_capture_index != null) {
+        e.preventDefault();
+        await invoke('key_capture_event', { code: e.code, key: e.key });
+        return;
+    }
+    if (state.combo_capture != null) {
+        e.preventDefault();
+        if (e.key === 'Escape') { await invoke('cancel_combo_capture'); return; }
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+        const modifiers = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) |
+                          (e.altKey  ? 4 : 0) | (e.metaKey  ? 8 : 0);
+        await invoke('combo_capture_event', { code: e.code, modifiers });
+    }
+});
+
+// ─── Master render ────────────────────────────────────────────────────────────
+function render(s) {
+    const onMain = s.page === 'Main';
+    document.getElementById('main-page').classList.toggle('hidden', !onMain);
+    document.getElementById('settings-page').classList.toggle('hidden', onMain);
+    if (onMain) renderMain(s);
+    else renderSettings(s);
+}
+
+// ═══ Main Page ════════════════════════════════════════════════════════════════
+
+function renderMain(s) {
+    renderMacroSelector(s);
+    renderRunControls(s);
+    renderEditor(s);
+}
+
+function renderMacroSelector(s) {
+    const dropdown = document.getElementById('macro-dropdown');
+    const currentSelected = dropdown.value;
+
+    // Rebuild options only when the list changes
+    const prevOptions = [...dropdown.options].map(o => o.text).join('|');
+    const newOptions = s.macro_names.join('|');
+    if (prevOptions !== newOptions) {
+        dropdown.innerHTML = '<option value="">— no macro selected —</option>';
+        s.macro_names.forEach((name, idx) => {
+            const opt = document.createElement('option');
+            opt.value = idx;
+            opt.textContent = name;
+            dropdown.appendChild(opt);
+        });
+    }
+
+    const selectedVal = s.macro_selected != null ? String(s.macro_selected) : '';
+    if (dropdown.value !== selectedVal) dropdown.value = selectedVal;
+
+    const removeBtn = document.getElementById('remove-macro-btn');
+    const hasSelected = s.macro_selected != null;
+    removeBtn.disabled = !hasSelected;
+    removeBtn.classList.toggle('confirm-armed', s.confirm_remove_macro);
+    removeBtn.textContent = s.confirm_remove_macro ? '⚠ Confirm delete?' : '✕ Remove';
+}
+
+function renderRunControls(s) {
+    const runBtn = document.getElementById('run-macro-btn');
+    const loopCheck = document.getElementById('loop-mode-check');
+    const recordBtn = document.getElementById('record-btn');
+
+    runBtn.disabled = s.macro_selected == null;
+    if (s.loop_mode_enabled) {
+        runBtn.textContent = '🔁 Start loop';
+    } else {
+        runBtn.textContent = '▶ Run macro';
+    }
+
+    if (loopCheck.checked !== s.loop_mode_enabled) {
+        loopCheck.checked = s.loop_mode_enabled;
+    }
+
+    const phase = s.recording_phase;
+    if (phase.phase === 'Countdown') {
+        recordBtn.textContent = `⏸ Recording in ${phase.countdown}s…`;
+        recordBtn.className = 'btn-record';
+        recordBtn.disabled = false;
+    } else if (phase.phase === 'Active') {
+        recordBtn.textContent = '⏹ Stop recording (Esc)';
+        recordBtn.className = 'btn-active-record';
+        recordBtn.disabled = false;
+    } else {
+        recordBtn.textContent = '⏺ Record';
+        recordBtn.className = 'btn-record';
+        recordBtn.disabled = s.macro_selected == null;
+    }
+}
+
+// ─── Instruction Editor ───────────────────────────────────────────────────────
+
+function renderEditor(s) {
+    const editorEl = document.getElementById('macro-editor');
+    if (s.current_macro == null) {
+        editorEl.classList.add('hidden');
+        return;
+    }
+    editorEl.classList.remove('hidden');
+
+    // Title
+    const titleInput = document.getElementById('macro-title');
+    if (document.activeElement !== titleInput) {
+        titleInput.value = s.current_macro.name;
+    }
+
+    // Toolbar buttons
+    document.getElementById('undo-btn').disabled = !s.can_undo;
+    document.getElementById('redo-btn').disabled = !s.can_redo;
+    const clearBtn = document.getElementById('clear-instructions-btn');
+    clearBtn.classList.toggle('confirm-armed', s.confirm_clear_instructions);
+    clearBtn.textContent = s.confirm_clear_instructions
+        ? '⚠ Confirm clear (5s)?'
+        : '✕ Clear instructions';
+
+    renderInstructions(s);
+}
+
+function renderInstructions(s) {
+    const scrollEl = document.getElementById('instructions-scroll');
+    const inner = document.getElementById('instructions-inner');
+    const instructions = s.current_macro?.instructions ?? [];
+    const len = instructions.length;
+
+    const scrollTop = scrollEl.scrollTop;
+    const viewportH = scrollEl.clientHeight || 600;
+
+    const rawStart = Math.floor(scrollTop / ROW_H);
+    const visibleCount = Math.ceil(viewportH / ROW_H) + 1;
+    const startIdx = Math.max(0, rawStart - BUFFER);
+    const endIdx = Math.min(len, rawStart + visibleCount + BUFFER);
+
+    inner.style.paddingTop = (startIdx * ROW_H) + 'px';
+    inner.style.paddingBottom = (Math.max(0, len - endIdx) * ROW_H) + 'px';
+
+    // Rebuild rows
+    const frag = document.createDocumentFragment();
+    for (let i = startIdx; i < endIdx; i++) {
+        frag.appendChild(buildInstructionRow(i, instructions[i], s.key_capture_index, s.invalid_field_buffers));
+    }
+    inner.replaceChildren(frag);
+}
+
+let scrollRafPending = false;
+function attachScrollListener() {
+    const scrollEl = document.getElementById('instructions-scroll');
+    if (scrollEl) {
+        scrollEl.addEventListener('scroll', () => {
+            if (!scrollRafPending) {
+                scrollRafPending = true;
+                requestAnimationFrame(() => {
+                    scrollRafPending = false;
+                    if (state.current_macro) renderInstructions(state);
+                });
+            }
+        });
+    }
+}
+
+function getInvalidText(invalidBuffers, idx, fieldId) {
+    const entry = invalidBuffers?.find(b => b.instruction_index === idx && b.field_id === fieldId);
+    return entry ? { text: entry.text, invalid: true } : null;
+}
+
+function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers) {
+    const row = document.createElement('div');
+    row.className = 'instruction-row';
+
+    const content = document.createElement('div');
+    content.className = 'instruction-content';
+    buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers);
+    row.appendChild(content);
+
+    // Controls: Up, Down, Remove, Add-after
+    const controls = document.createElement('div');
+    controls.className = 'row-controls';
+
+    const upBtn = document.createElement('button');
+    upBtn.textContent = '▲';
+    upBtn.title = 'Move up';
+    upBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: -1 });
+
+    const downBtn = document.createElement('button');
+    downBtn.textContent = '▼';
+    downBtn.title = 'Move down';
+    downBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: 1 });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Remove instruction';
+    removeBtn.onclick = () => invoke('remove_instruction', { index: i });
+
+    const addSel = document.createElement('select');
+    addSel.title = 'Insert instruction after this one';
+    addSel.innerHTML = `
+        <option value="">Insert after…</option>
+        <option value="Wait">Wait</option>
+        <option value="Text">Text</option>
+        <option value="Key">Key</option>
+        <option value="Button">Mouse Button</option>
+        <option value="MoveMouse">Move Mouse</option>
+        <option value="Scroll">Scroll</option>
+        <option value="Command">Command</option>
+        <option value="Comment">Comment</option>
+    `;
+    addSel.onchange = async () => {
+        if (!addSel.value) return;
+        const insType = addSel.value;
+        addSel.value = '';
+        await addInstructionAt(i + 1, insType);
+    };
+
+    controls.appendChild(upBtn);
+    controls.appendChild(downBtn);
+    controls.appendChild(removeBtn);
+    controls.appendChild(addSel);
+    row.appendChild(controls);
+    return row;
+}
+
+function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers) {
+    const label = document.createElement('span');
+    label.className = 'instruction-label';
+
+    switch (ins.type) {
+        case 'Wait': {
+            label.textContent = 'Wait (ms):';
+            const durBuf = getInvalidText(invalidBuffers, i, 'WaitDuration');
+            const randBuf = getInvalidText(invalidBuffers, i, 'WaitRandomness');
+            const durInput = numInput(durBuf?.text ?? String(ins.duration), durBuf?.invalid, v =>
+                invoke('edit_instruction_field', { index: i, fieldId: 'WaitDuration', text: v }));
+            const randInput = numInput(randBuf?.text ?? String(ins.randomness), randBuf?.invalid, v =>
+                invoke('edit_instruction_field', { index: i, fieldId: 'WaitRandomness', text: v }));
+            const randLabel = document.createElement('span');
+            randLabel.className = 'instruction-label';
+            randLabel.textContent = '± random:';
+            content.appendChild(label);
+            content.appendChild(durInput);
+            content.appendChild(randLabel);
+            content.appendChild(randInput);
+            break;
+        }
+        case 'Text': {
+            label.textContent = 'Text:';
+            const inp = textInput(ins.text, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Text', text: v } }));
+            content.appendChild(label);
+            content.appendChild(inp);
+            break;
+        }
+        case 'Key': {
+            label.textContent = 'Key:';
+            const isCapturing = keyCaptureIdx === i;
+            const captureBtn = document.createElement('button');
+            captureBtn.className = 'key-capture-btn';
+            captureBtn.textContent = isCapturing ? 'Press any key…' : ins.key;
+            captureBtn.onclick = () => invoke('start_key_capture', { index: i });
+
+            const dirSel = directionSelect(ins.direction, dir =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Key', key: ins.key, direction: dir } }));
+            content.appendChild(label);
+            content.appendChild(captureBtn);
+            content.appendChild(dirSel);
+            break;
+        }
+        case 'Button': {
+            label.textContent = 'Mouse:';
+            const buttons = ['Left', 'Right', 'Middle', 'Side', 'Extra'];
+            const btnSel = enumSelect(buttons, ins.button, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Button', button: v, direction: ins.direction } }));
+            const dirSel = directionSelect(ins.direction, dir =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Button', button: ins.button, direction: dir } }));
+            content.appendChild(label);
+            content.appendChild(btnSel);
+            content.appendChild(dirSel);
+            break;
+        }
+        case 'MoveMouse': {
+            label.textContent = 'Move mouse:';
+            const xBuf = getInvalidText(invalidBuffers, i, 'MoveMouseX');
+            const yBuf = getInvalidText(invalidBuffers, i, 'MoveMouseY');
+            const xInput = numInput(xBuf?.text ?? String(ins.x), xBuf?.invalid, v =>
+                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseX', text: v }));
+            const yInput = numInput(yBuf?.text ?? String(ins.y), yBuf?.invalid, v =>
+                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseY', text: v }));
+            xInput.placeholder = 'X';
+            yInput.placeholder = 'Y';
+            const coordSel = enumSelect(['Absolute', 'Relative'], ins.coordinate, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'MoveMouse', x: ins.x, y: ins.y, coordinate: v } }));
+            content.appendChild(label);
+            content.appendChild(xInput);
+            content.appendChild(yInput);
+            content.appendChild(coordSel);
+            break;
+        }
+        case 'Scroll': {
+            label.textContent = 'Scroll:';
+            const amtBuf = getInvalidText(invalidBuffers, i, 'ScrollAmount');
+            const amtInput = numInput(amtBuf?.text ?? String(ins.amount), amtBuf?.invalid, v =>
+                invoke('edit_instruction_field', { index: i, fieldId: 'ScrollAmount', text: v }));
+            const axisSel = enumSelect(['Vertical', 'Horizontal'], ins.axis, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Scroll', amount: ins.amount, axis: v } }));
+            content.appendChild(label);
+            content.appendChild(amtInput);
+            content.appendChild(axisSel);
+            break;
+        }
+        case 'Command': {
+            label.textContent = 'Command:';
+            const inp = textInput(ins.command, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Command', command: v } }));
+            inp.placeholder = 'bash -c …';
+            content.appendChild(label);
+            content.appendChild(inp);
+            break;
+        }
+        case 'Comment': {
+            label.textContent = '//';
+            const inp = textInput(ins.comment, v =>
+                invoke('edit_instruction', { index: i, instruction: { type: 'Comment', comment: v } }));
+            inp.placeholder = 'Comment';
+            inp.style.fontStyle = 'italic';
+            inp.style.color = 'var(--text-dim)';
+            content.appendChild(label);
+            content.appendChild(inp);
+            break;
+        }
+        default: {
+            label.textContent = ins.type;
+            content.appendChild(label);
+        }
+    }
+}
+
+// ─── Widget helpers ───────────────────────────────────────────────────────────
+
+function textInput(value, onChange) {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = value;
+    inp.style.flex = '1';
+    inp.addEventListener('input', () => onChange(inp.value));
+    return inp;
+}
+
+function numInput(value, invalid, onChange) {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = value;
+    inp.style.width = '72px';
+    if (invalid) inp.classList.add('invalid');
+    inp.addEventListener('input', () => onChange(inp.value));
+    return inp;
+}
+
+function directionSelect(current, onChange) {
+    return enumSelect(['Click', 'Press', 'Release'], current, onChange);
+}
+
+function enumSelect(options, current, onChange) {
+    const sel = document.createElement('select');
+    options.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt;
+        o.textContent = opt;
+        if (opt === current) o.selected = true;
+        sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => onChange(sel.value));
+    return sel;
+}
+
+// ─── Add instruction at index ─────────────────────────────────────────────────
+
+function defaultInstruction(type) {
+    switch (type) {
+        case 'Wait':      return { type: 'Wait', duration: 1000, randomness: 0 };
+        case 'Text':      return { type: 'Text', text: 'text' };
+        case 'Key':       return { type: 'Key', key: 'KeyA', direction: 'Click' };
+        case 'Button':    return { type: 'Button', button: 'Left', direction: 'Click' };
+        case 'MoveMouse': return { type: 'MoveMouse', x: 0, y: 0, coordinate: 'Relative' };
+        case 'Scroll':    return { type: 'Scroll', amount: 4, axis: 'Vertical' };
+        case 'Command':   return { type: 'Command', command: '' };
+        case 'Comment':   return { type: 'Comment', comment: '' };
+        default:          return { type: 'Comment', comment: '' };
+    }
+}
+
+async function addInstructionAt(index, type) {
+    const ins = defaultInstruction(type);
+    await invoke('add_instruction', { index, instruction: ins });
+}
+
+// ═══ Settings Page ════════════════════════════════════════════════════════════
+
+function renderSettings(s) {
+    renderWarnings(s);
+    renderGlobalHotkeys(s);
+    renderPerMacroHotkeys(s);
+    renderTcpServer(s);
+    renderUpdates(s);
+}
+
+function renderWarnings(s) {
+    const container = document.getElementById('warnings-container');
+    container.innerHTML = '';
+    if (!s.grab_available) {
+        const banner = document.createElement('div');
+        banner.className = 'warning-banner';
+        banner.innerHTML = '⚠ Global hotkeys unavailable.<br>Check system permissions (Accessibility / input group).';
+        container.appendChild(banner);
+    }
+    if (!s.emulator_available) {
+        const banner = document.createElement('div');
+        banner.className = 'warning-banner';
+        banner.innerHTML = '⚠ Input emulation unavailable.<br>Check system permissions.';
+        container.appendChild(banner);
+    }
+}
+
+const NAMED_ACTIONS = [
+    { label: 'Run Macro',                    type: 'RunMacro' },
+    { label: 'Stop Loop',                    type: 'StopLoop' },
+    { label: 'Next Macro',                   type: 'NextMacro' },
+    { label: 'Previous Macro',               type: 'PrevMacro' },
+    { label: 'Toggle Loop',                  type: 'ToggleLoop' },
+    { label: 'Start Recording (immediate)',  type: 'StartRecordingImmediate' },
+];
+
+function renderGlobalHotkeys(s) {
+    const list = document.getElementById('global-hotkeys-list');
+    list.innerHTML = '';
+
+    NAMED_ACTIONS.forEach(({ label, type }) => {
+        const binding = s.hotkey_bindings.find(b => b.action.type === type);
+        const comboDisplay = binding?.combo_display ?? null;
+        const isCapturing = s.combo_capture?.kind === 'Named' && s.combo_capture?.action?.type === type;
+
+        const row = document.createElement('div');
+        row.className = 'settings-row';
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'settings-row-label';
+        labelEl.textContent = label;
+
+        const comboBtn = document.createElement('button');
+        if (isCapturing) {
+            comboBtn.textContent = 'Press combo…';
+            comboBtn.disabled = false;
+        } else {
+            comboBtn.textContent = comboDisplay ?? 'Not set';
+            comboBtn.onclick = () => invoke('start_combo_capture', { action: { type } });
+        }
+
+        // Default button
+        const defBtn = document.createElement('button');
+        defBtn.textContent = 'Default';
+        defBtn.style.display = (isCapturing || comboDisplay == null) ? 'none' : '';
+        defBtn.onclick = () => invoke('reset_hotkey_to_default', { action: { type } });
+
+        // Clear button
+        const clearBtn = document.createElement('button');
+        clearBtn.textContent = '✕';
+        clearBtn.style.display = (isCapturing || comboDisplay == null) ? 'none' : '';
+        clearBtn.onclick = () => invoke('clear_named_hotkey', { action: { type } });
+
+        row.appendChild(labelEl);
+        row.appendChild(comboBtn);
+        row.appendChild(defBtn);
+        row.appendChild(clearBtn);
+        list.appendChild(row);
+    });
+}
+
+function renderPerMacroHotkeys(s) {
+    const list = document.getElementById('per-macro-hotkeys-list');
+    list.innerHTML = '';
+
+    const perMacroBindings = s.hotkey_bindings.filter(b => b.action.type === 'RunSpecificMacro');
+    perMacroBindings.forEach(b => {
+        const row = document.createElement('div');
+        row.className = 'settings-row';
+
+        const name = document.createElement('span');
+        name.className = 'settings-row-label';
+        name.textContent = b.macro_name ?? '(deleted)';
+
+        const comboBtn = document.createElement('button');
+        comboBtn.textContent = b.combo_display;
+        // Re-capture not wired for per-macro (matches existing app behaviour)
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '✕';
+        removeBtn.onclick = () => invoke('remove_hotkey_binding', { index: b.binding_index });
+
+        row.appendChild(name);
+        row.appendChild(comboBtn);
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+    });
+
+    // Update Add form
+    const pendingSel = document.getElementById('pending-macro-select');
+    const currentPendingVal = pendingSel.value;
+    pendingSel.innerHTML = '<option value="">Select macro…</option>';
+    s.macro_names.forEach((name, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = name;
+        pendingSel.appendChild(opt);
+    });
+    if (currentPendingVal) pendingSel.value = currentPendingVal;
+
+    const isCapturingPending = s.combo_capture?.kind === 'Pending';
+    const pendingCombo = s.pending_macro_hotkey?.combo_display;
+    const pendingComboBtn = document.getElementById('pending-combo-btn');
+    if (isCapturingPending) {
+        pendingComboBtn.textContent = 'Press combo…';
+    } else {
+        pendingComboBtn.textContent = pendingCombo ?? 'Set combo';
+        pendingComboBtn.onclick = () => invoke('start_pending_combo_capture');
+    }
+
+    const addBtn = document.getElementById('add-macro-hotkey-btn');
+    const canAdd = s.pending_macro_hotkey?.macro_index != null && pendingCombo != null;
+    addBtn.disabled = !canAdd;
+}
+
+function renderTcpServer(s) {
+    const section = document.getElementById('tcp-server-section');
+    section.innerHTML = '';
+
+    // Port row
+    const portRow = document.createElement('div');
+    portRow.className = 'settings-row';
+    const portLabel = document.createElement('span');
+    portLabel.className = 'settings-row-label';
+    portLabel.textContent = 'Port';
+    const portInput = document.createElement('input');
+    portInput.type = 'text';
+    portInput.value = s.ipc_port_text;
+    portInput.style.width = '80px';
+    if (s.ipc_port_invalid) portInput.classList.add('invalid');
+    portInput.addEventListener('input', () => invoke('set_ipc_port_text', { text: portInput.value }));
+    portRow.appendChild(portLabel);
+    portRow.appendChild(portInput);
+    section.appendChild(portRow);
+
+    // Status + toggle row
+    const statusRow = document.createElement('div');
+    statusRow.className = 'settings-row';
+    const statusLabel = document.createElement('span');
+    statusLabel.className = 'settings-row-label';
+    statusLabel.textContent = s.ipc_active_port != null
+        ? `Listening on 127.0.0.1:${s.ipc_active_port}`
+        : 'Stopped';
+    const toggleBtn = document.createElement('button');
+    if (s.ipc_active_port != null) {
+        toggleBtn.textContent = 'Stop Server';
+        toggleBtn.onclick = () => invoke('stop_ipc_server');
+    } else {
+        toggleBtn.textContent = 'Start Server';
+        toggleBtn.disabled = s.ipc_port_invalid;
+        toggleBtn.onclick = () => invoke('start_ipc_server');
+    }
+    statusRow.appendChild(statusLabel);
+    statusRow.appendChild(toggleBtn);
+    section.appendChild(statusRow);
+
+    // Auto-start row
+    const autoRow = document.createElement('div');
+    autoRow.className = 'settings-row';
+    const autoLabel = document.createElement('span');
+    autoLabel.className = 'settings-row-label';
+    autoLabel.textContent = 'Automatically start server on app launch';
+    const autoCheck = document.createElement('input');
+    autoCheck.type = 'checkbox';
+    autoCheck.checked = s.ipc_auto_start;
+    autoCheck.onchange = () => invoke('set_ipc_auto_start', { enabled: autoCheck.checked });
+    autoRow.appendChild(autoLabel);
+    autoRow.appendChild(autoCheck);
+    section.appendChild(autoRow);
+}
+
+function renderUpdates(s) {
+    const section = document.getElementById('updates-section');
+    const content = document.getElementById('updates-content');
+    content.innerHTML = '';
+
+    const uc = s.update_check_state;
+
+    const versionRow = document.createElement('div');
+    versionRow.className = 'settings-row';
+    const versionLabel = document.createElement('span');
+    versionLabel.className = 'settings-row-label';
+    versionLabel.textContent = appVersion ? `Current version: ${appVersion}` : 'Updates';
+    const checkBtn = document.createElement('button');
+    checkBtn.textContent = 'Check for Updates';
+    const busy = uc.state === 'Checking' || uc.state === 'Applying';
+    checkBtn.disabled = busy;
+    checkBtn.onclick = () => invoke('check_for_updates');
+    versionRow.appendChild(versionLabel);
+    versionRow.appendChild(checkBtn);
+    content.appendChild(versionRow);
+
+    if (uc.state !== 'Idle') {
+        const statusRow = document.createElement('div');
+        statusRow.className = 'settings-row';
+        let msg = '';
+        if (uc.state === 'Checking') msg = 'Checking for updates…';
+        else if (uc.state === 'UpToDate') msg = 'Up to date';
+        else if (uc.state === 'UpdateAvailable') msg = `Update available: ${uc.version}`;
+        else if (uc.state === 'Applying') msg = 'Installing update…';
+        else if (uc.state === 'Error') msg = `Update check failed: ${uc.error}`;
+        statusRow.textContent = msg;
+        content.appendChild(statusRow);
+    }
+
+    if (uc.state === 'UpdateAvailable') {
+        const updateRow = document.createElement('div');
+        updateRow.className = 'settings-row';
+        const updateBtn = document.createElement('button');
+        updateBtn.textContent = 'Update Now';
+        updateBtn.onclick = () => invoke('apply_update');
+        updateRow.appendChild(updateBtn);
+        content.appendChild(updateRow);
+    }
+}
+
+// ─── Static event listeners ───────────────────────────────────────────────────
+
+function setupStaticListeners() {
+    // Scroll listener for virtual list
+    attachScrollListener();
+
+    // Macro selector
+    document.getElementById('macro-dropdown').addEventListener('change', e => {
+        const val = e.target.value;
+        if (val === '') return;
+        invoke('select_macro', { index: parseInt(val) });
+    });
+
+    // Macro CRUD buttons
+    document.getElementById('new-macro-btn').onclick = () => invoke('new_macro');
+    document.getElementById('remove-macro-btn').onclick = () => invoke('remove_macro');
+    document.getElementById('settings-btn').onclick = () => invoke('open_settings');
+
+    // Run controls
+    document.getElementById('run-macro-btn').onclick = () => invoke('run_macro');
+    document.getElementById('loop-mode-check').onchange = e => {
+        invoke('toggle_loop_mode', { enabled: e.target.checked });
+    };
+    document.getElementById('record-btn').onclick = () => {
+        if (state.recording_phase?.phase === 'Idle') {
+            invoke('start_recording');
+        } else {
+            invoke('stop_recording');
+        }
+    };
+
+    // Macro title
+    document.getElementById('macro-title').addEventListener('input', e => {
+        invoke('set_title', { title: e.target.value });
+    });
+
+    // Editor toolbar
+    document.getElementById('undo-btn').onclick = () => invoke('undo');
+    document.getElementById('redo-btn').onclick = () => invoke('redo');
+    document.getElementById('clear-instructions-btn').onclick = () => invoke('clear_instructions');
+    document.getElementById('save-macro-btn').onclick = () => invoke('save_macro');
+
+    // Add instruction at end
+    document.getElementById('add-instruction-btn').onclick = () => {
+        const type = document.getElementById('add-instruction-type').value;
+        const len = state.current_macro?.instructions?.length ?? 0;
+        addInstructionAt(len, type);
+    };
+
+    // Settings back button
+    document.getElementById('back-btn').onclick = () => invoke('close_settings');
+
+    // Per-macro hotkey add form
+    document.getElementById('pending-macro-select').addEventListener('change', e => {
+        const val = e.target.value;
+        invoke('set_pending_macro_idx', { index: val === '' ? null : parseInt(val) });
+    });
+    document.getElementById('add-macro-hotkey-btn').onclick = () => invoke('add_macro_hotkey');
+}
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+
+window.addEventListener('DOMContentLoaded', init);

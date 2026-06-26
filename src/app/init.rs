@@ -48,6 +48,17 @@ pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
         app.execution.loop_mode_enabled = loop_mode;
     }
 
+    // On macOS the event tap requires Accessibility permission. Prompt for it
+    // before starting the grab thread; if it's already granted the call is a
+    // no-op. The user must restart the app after granting permission.
+    #[cfg(target_os = "macos")]
+    {
+        let trusted = crate::macros::backend::macos::request_accessibility();
+        if !trusted {
+            recording::set_grab_failed(true);
+        }
+    }
+
     // Start the grab thread unconditionally so hotkeys work from launch.
     recording::start_grab_thread();
 

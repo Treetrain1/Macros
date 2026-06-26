@@ -45,6 +45,9 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             if let Some(mac) = &mut app.macro_lib.current_macro {
                 mac.name = title;
                 auto_save_current_macro(app);
+                // Name changed — rebuild the dropdown list.
+                let config = app.config.clone();
+                app.macro_lib.update_macros(&config);
             }
         }
         SetDescription(desc) => {
@@ -69,6 +72,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 if let Some(mac) = &mut app.macro_lib.current_macro {
                     mac.code = prev_code;
                 }
+                app.editor_ui.scroll_offset_y = 0.0;
                 app.editor_ui.invalid_field_buffers.clear();
                 auto_save_current_macro(app);
             }
@@ -82,6 +86,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                 if let Some(mac) = &mut app.macro_lib.current_macro {
                     mac.code = next_code;
                 }
+                app.editor_ui.scroll_offset_y = 0.0;
                 app.editor_ui.invalid_field_buffers.clear();
                 auto_save_current_macro(app);
             }
@@ -515,6 +520,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         }
         StopRecording => {
             app.editor_ui.recording_phase = RecordingPhase::Idle;
+            app.editor_ui.scroll_offset_y = 0.0;
             let instructions: Vec<Instruction> = recording::get_recording_queue()
                 .lock()
                 .unwrap()
@@ -746,8 +752,10 @@ pub(crate) fn auto_save_current_macro(app: &mut App) {
             if let Err(err) = config::set_selected_macro_id(&app.config, Some(&mac.id)) {
                 warn!("Failed to save selected macro id: {}", err);
             }
-            let config = app.config.clone();
-            app.macro_lib.update_macros(&config);
+            // Do NOT call update_macros() here — it reads every macro file from
+            // disk and rebuilds the full list, which is far too expensive for
+            // frequent edits (instruction adds, field changes, recording, etc.).
+            // Callers that change the displayed name call update_macros() themselves.
         }
     }
 }

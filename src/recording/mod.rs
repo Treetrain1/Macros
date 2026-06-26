@@ -17,6 +17,10 @@ pub(crate) fn grab_failed() -> bool {
     GRAB_FAILED.load(Ordering::Relaxed)
 }
 
+pub(crate) fn set_grab_failed(v: bool) {
+    GRAB_FAILED.store(v, Ordering::Relaxed);
+}
+
 /// A signal pushed from a synchronous capture callback (OS hook/evdev thread)
 /// to the GUI's async subscription. Delivered over an unbounded channel
 /// instead of a polled queue so the GUI reacts as soon as it's sent, not on
@@ -135,7 +139,12 @@ pub(crate) fn reset_timing() {
         *t = Some(Instant::now());
     }
     if let Ok(mut t) = BASELINE_HW.get_or_init(|| Mutex::new(None)).lock() {
-        *t = Some(SystemTime::now());
+        // Reset to None so elapsed_since_session_start lazily sets the baseline
+        // from the first Hardware event's own clock (mach_absolute_time on macOS,
+        // evdev timeval on Linux). Setting it here with SystemTime::now() breaks
+        // macOS because mach_absolute_time (ns since boot) is incompatible with
+        // Unix time — duration_since always errors → every delta collapses to 0.
+        *t = None;
     }
     if let Ok(mut t) = LAST_ELAPSED.get_or_init(|| Mutex::new(None)).lock() {
         *t = Some(Duration::ZERO);

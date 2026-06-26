@@ -38,7 +38,11 @@ impl Macro {
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Running macro: {}", self.name);
-            self.run(emulator, Some(Arc::clone(&stop_flag)));
+            // Pass None so Wait instructions use the direct spin-sleep path
+            // instead of the stoppable polling loop. Single runs don't need
+            // mid-wait interruption, and the polling loop was causing waits
+            // to be skipped when stop_requested fired spuriously.
+            self.run(emulator, None);
             if let Ok(mut state) = stop_flag.lock() {
                 *state = false;
             }

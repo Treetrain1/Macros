@@ -51,12 +51,15 @@ pub(crate) fn macro_editor<'a>(
         600.0
     };
     let raw_start = (scroll_offset_y / ESTIMATED_ROW_HEIGHT).floor() as usize;
-    let start_idx = raw_start.saturating_sub(BUFFER);
     let visible_count = (viewport_h / ESTIMATED_ROW_HEIGHT).ceil() as usize + 1;
     let end_idx = (raw_start + visible_count + BUFFER).min(len);
-    // Captured by the on_scroll closure to suppress messages when the rendered
-    // range hasn't changed. Without this, every scroll pixel fires a message.
+    // Clamp start to end so that stale scroll positions (e.g. after undo or
+    // stop-recording shrinks the list) never produce a usize underflow.
+    let start_idx = raw_start.saturating_sub(BUFFER).min(end_idx);
+    // Captured by the on_scroll closure to suppress messages when neither the
+    // rendered range nor the viewport height has changed.
     let captured_raw_start = raw_start;
+    let captured_viewport_h = scroll_viewport_height;
 
     let top_height = start_idx as f32 * ESTIMATED_ROW_HEIGHT;
     let bottom_height = len.saturating_sub(end_idx) as f32 * ESTIMATED_ROW_HEIGHT;
@@ -92,30 +95,10 @@ pub(crate) fn macro_editor<'a>(
         widget::column::with_children(instructions).spacing(spacing.space_xs).into(),
         cosmic::widget::container(
             cosmic::widget::row![
-                cosmic::widget::tooltip(
-                    undo_button,
-                    cosmic::widget::container("Undo last instruction change"),
-                    cosmic::widget::tooltip::Position::Top
-                ),
-                cosmic::widget::tooltip(
-                    redo_button,
-                    cosmic::widget::container("Redo last undone change"),
-                    cosmic::widget::tooltip::Position::Top
-                ),
-                cosmic::widget::tooltip(
-                    icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
-                    cosmic::widget::container(if confirm_clear_instructions {
-                        "Click again within 5 seconds to remove every instruction in this macro"
-                    } else {
-                        "Arms removal for every instruction in this macro"
-                    }),
-                    cosmic::widget::tooltip::Position::Top
-                ),
-                cosmic::widget::tooltip(
-                    icon_label_button("document-save-symbolic", "Save macro", 6, Some(SaveMacro)),
-                    cosmic::widget::container("Persist the current macro to your config"),
-                    cosmic::widget::tooltip::Position::Top
-                ),
+                undo_button,
+                redo_button,
+                icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
+                icon_label_button("document-save-symbolic", "Save macro", 6, Some(SaveMacro)),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
@@ -132,10 +115,17 @@ pub(crate) fn macro_editor<'a>(
         .on_scroll(move |vp| {
             let new_y = vp.absolute_offset().y;
             let new_raw = (new_y / ESTIMATED_ROW_HEIGHT).floor() as usize;
-            if new_raw == captured_raw_start {
+            let new_h = vp.bounds().height;
+            // Only fire when the rendered row range would actually change: either
+            // the scroll position moved to a new row, or the viewport grew/shrank
+            // enough that visible_count changes. Comparing row counts (not raw
+            // pixel heights) avoids sending a message on every resize pixel.
+            let new_visible = (new_h / ESTIMATED_ROW_HEIGHT).ceil() as usize;
+            let old_visible = (captured_viewport_h / ESTIMATED_ROW_HEIGHT).ceil() as usize;
+            if new_raw == captured_raw_start && new_visible == old_visible {
                 NoOp
             } else {
-                EditorScrolled(new_y, vp.bounds().height)
+                EditorScrolled(new_y, new_h)
             }
         });
 
@@ -158,7 +148,7 @@ pub(crate) fn macro_editor<'a>(
     )
     .padding(10)
     .width(Length::Fill)
-    .height(Length::Shrink)
+    .height(Length::Fill)
     .align_x(Alignment::Center)
     .into()
 }

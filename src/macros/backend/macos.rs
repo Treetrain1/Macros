@@ -328,6 +328,28 @@ fn cgevent_hardware_timestamp(event: &CGEvent) -> std::time::SystemTime {
     std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(ns)
 }
 
+// ── Accessibility permission ──────────────────────────────────────────────────
+
+/// Checks whether this process has been granted Accessibility permission.
+/// When not trusted, shows the macOS system prompt asking the user to grant it.
+/// Must be called from the main thread.
+pub(crate) fn request_accessibility() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
+    }
+
+    let key = CFString::from_static_string("AXTrustedCheckOptionPrompt");
+    let val = CFBoolean::true_value();
+    let opts = CFDictionary::from_CFType_pairs(&[(key, val)]);
+    unsafe { AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef() as *const _) }
+}
+
 // ── Capture ───────────────────────────────────────────────────────────────────
 
 pub(super) fn start_capture_thread(
@@ -338,17 +360,28 @@ pub(super) fn start_capture_thread(
         std::thread::Builder::new()
             .name("cgeventtap".into())
             .spawn(move || {
+                use std::sync::{Arc, Mutex};
                 crate::macros::priority::raise_current_thread_priority();
-                use std::sync::Mutex;
-                let callback = Mutex::new(callback);
 
-                // Track previous modifier flags so FlagsChanged can synthesise
-                // KeyPress/KeyRelease events. Modifier keys fire FlagsChanged,
-                // not KeyDown/KeyUp, so without this held_mods stays 0 and no
-                // modifier-based hotkey ever matches.
-                let prev_flags = std::sync::Mutex::new(CGEventFlags::empty());
+                // Shared between both tap closures. No actual mutex contention:
+                // both taps run on the same single-threaded CFRunLoop.
+                let callback = Arc::new(Mutex::new(callback));
+                let run_loop = CFRunLoop::get_current();
 
-                let tap = CGEventTap::new(
+                // Keep both taps and their RunLoop sources alive until run_current()
+                // returns (which never happens in practice).
+                let _kb_tap;
+                let _kb_src;
+                let _mouse_tap;
+                let _mouse_src;
+
+                // ── Keyboard tap (active, HeadInsert) ─────────────────────────
+                // Must be active + HeadInsert so we can suppress keyboard events
+                // when they match a hotkey. FlagsChanged is mapped to synthetic
+                // KeyPress/KeyRelease so modifier-only hotkeys work.
+                let cb_kb = Arc::clone(&callback);
+                let prev_flags = Mutex::new(CGEventFlags::empty());
+                match CGEventTap::new(
                     CGEventTapLocation::HID,
                     CGEventTapPlacement::HeadInsertEventTap,
                     CGEventTapOptions::Default,
@@ -356,28 +389,18 @@ pub(super) fn start_capture_thread(
                         CGEventType::KeyDown,
                         CGEventType::KeyUp,
                         CGEventType::FlagsChanged,
-                        CGEventType::MouseMoved,
-                        CGEventType::LeftMouseDown,
-                        CGEventType::LeftMouseUp,
-                        CGEventType::RightMouseDown,
-                        CGEventType::RightMouseUp,
-                        CGEventType::OtherMouseDown,
-                        CGEventType::OtherMouseUp,
-                        CGEventType::ScrollWheel,
                     ],
-                    |_proxy, ev_type, event| {
-                        // Synthesise KeyPress/KeyRelease for modifier keys from FlagsChanged.
+                    move |_proxy, ev_type, event| {
                         if matches!(ev_type, CGEventType::FlagsChanged) {
                             let cur = event.get_flags();
                             let prev = {
                                 let Ok(mut g) = prev_flags.lock() else {
                                     return Some(event.clone());
                                 };
-                                let prev = *g;
+                                let p = *g;
                                 *g = cur;
-                                prev
+                                p
                             };
-                            // (flag bit, corresponding MacroKey)
                             let pairs: &[(CGEventFlags, MacroKey)] = &[
                                 (CGEventFlags::CGEventFlagControl,   MacroKey::LControl),
                                 (CGEventFlags::CGEventFlagShift,     MacroKey::LShift),
@@ -385,7 +408,7 @@ pub(super) fn start_capture_thread(
                                 (CGEventFlags::CGEventFlagCommand,   MacroKey::Meta),
                             ];
                             let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
-                            if let Ok(mut cb) = callback.lock() {
+                            if let Ok(mut cb) = cb_kb.lock() {
                                 for (flag, key) in pairs {
                                     let was = prev.contains(*flag);
                                     let now = cur.contains(*flag);
@@ -401,13 +424,64 @@ pub(super) fn start_capture_thread(
 
                         let capture_ev: Option<CaptureEvent> = match ev_type {
                             CGEventType::KeyDown => {
-                                let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-                                cg_keycode_to_macro_key(keycode).map(CaptureEvent::KeyPress)
+                                let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+                                cg_keycode_to_macro_key(kc).map(CaptureEvent::KeyPress)
                             }
                             CGEventType::KeyUp => {
-                                let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-                                cg_keycode_to_macro_key(keycode).map(CaptureEvent::KeyRelease)
+                                let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+                                cg_keycode_to_macro_key(kc).map(CaptureEvent::KeyRelease)
                             }
+                            _ => None,
+                        };
+
+                        if let Some(ev) = capture_ev {
+                            if let Ok(mut cb) = cb_kb.lock() {
+                                let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
+                                if matches!(cb(ev, ts), CaptureDecision::Suppress) {
+                                    return None;
+                                }
+                            }
+                        }
+                        Some(event.clone())
+                    },
+                ) {
+                    Ok(tap) => {
+                        let src = tap.mach_port.create_runloop_source(0).unwrap();
+                        run_loop.add_source(&src, unsafe { kCFRunLoopDefaultMode });
+                        tap.enable();
+                        _kb_src = Some(src);
+                        _kb_tap = Some(tap);
+                    }
+                    Err(_) => {
+                        warn!("Keyboard event tap failed — grant Accessibility access in System Settings → Privacy & Security → Accessibility, then restart");
+                        crate::recording::set_grab_failed(true);
+                        _kb_src = None;
+                        _kb_tap = None;
+                    }
+                }
+
+                // ── Mouse tap (listen-only) ────────────────────────────────────
+                // The OS fires this callback as a notification — it does NOT wait
+                // for us before delivering events to apps or the window manager.
+                // This means window dragging and resizing are never blocked or
+                // delayed by our recording code.
+                let cb_mouse = Arc::clone(&callback);
+                match CGEventTap::new(
+                    CGEventTapLocation::Session,
+                    CGEventTapPlacement::HeadInsertEventTap,
+                    CGEventTapOptions::ListenOnly,
+                    vec![
+                        CGEventType::MouseMoved,
+                        CGEventType::LeftMouseDown,
+                        CGEventType::LeftMouseUp,
+                        CGEventType::RightMouseDown,
+                        CGEventType::RightMouseUp,
+                        CGEventType::OtherMouseDown,
+                        CGEventType::OtherMouseUp,
+                        CGEventType::ScrollWheel,
+                    ],
+                    move |_proxy, ev_type, event| {
+                        let capture_ev: Option<CaptureEvent> = match ev_type {
                             CGEventType::MouseMoved => {
                                 let dx = event.get_double_value_field(EventField::MOUSE_EVENT_DELTA_X) as i32;
                                 let dy = event.get_double_value_field(EventField::MOUSE_EVENT_DELTA_Y) as i32;
@@ -417,6 +491,8 @@ pub(super) fn start_capture_thread(
                             CGEventType::LeftMouseUp => Some(CaptureEvent::ButtonRelease(MacroButton::Left)),
                             CGEventType::RightMouseDown => Some(CaptureEvent::ButtonPress(MacroButton::Right)),
                             CGEventType::RightMouseUp => Some(CaptureEvent::ButtonRelease(MacroButton::Right)),
+                            CGEventType::OtherMouseDown => Some(CaptureEvent::ButtonPress(MacroButton::Middle)),
+                            CGEventType::OtherMouseUp => Some(CaptureEvent::ButtonRelease(MacroButton::Middle)),
                             CGEventType::ScrollWheel => {
                                 let v = event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1) as i32;
                                 let h = event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2) as i32;
@@ -426,28 +502,29 @@ pub(super) fn start_capture_thread(
                         };
 
                         if let Some(ev) = capture_ev {
-                            if let Ok(mut cb) = callback.lock() {
+                            if let Ok(mut cb) = cb_mouse.lock() {
                                 let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
-                                if matches!(cb(ev, ts), CaptureDecision::Suppress) {
-                                    return None;
-                                }
+                                cb(ev, ts); // CaptureDecision is ignored for listen-only taps
                             }
                         }
                         Some(event.clone())
                     },
-                );
-
-                match tap {
+                ) {
                     Ok(tap) => {
-                        let source = tap.mach_port.create_runloop_source(0).unwrap();
-                        CFRunLoop::get_current().add_source(&source, unsafe { kCFRunLoopDefaultMode });
+                        let src = tap.mach_port.create_runloop_source(1).unwrap();
+                        run_loop.add_source(&src, unsafe { kCFRunLoopDefaultMode });
                         tap.enable();
-                        CFRunLoop::run_current();
+                        _mouse_src = Some(src);
+                        _mouse_tap = Some(tap);
                     }
                     Err(_) => {
-                        warn!("CGEventTap creation failed (check Accessibility permissions)");
+                        warn!("Mouse event tap failed — mouse input will not be captured for recording");
+                        _mouse_src = None;
+                        _mouse_tap = None;
                     }
                 }
+
+                CFRunLoop::run_current();
             })
             .ok();
     });

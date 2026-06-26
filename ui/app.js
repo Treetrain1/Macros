@@ -12,6 +12,9 @@ let appVersion = '';
 
 // ─── Initialisation ──────────────────────────────────────────────────────────
 async function init() {
+    // Always wire up buttons first so they work regardless of state-load outcome.
+    setupStaticListeners();
+
     try {
         appVersion = await window.__TAURI__.app.getVersion();
     } catch (_) {}
@@ -21,11 +24,14 @@ async function init() {
         console.error('Failed to get initial state:', e);
     }
     render(state);
-    await listen('state-updated', evt => {
-        state = evt.payload;
-        render(state);
-    });
-    setupStaticListeners();
+    try {
+        await listen('state-updated', evt => {
+            state = evt.payload;
+            render(state);
+        });
+    } catch (e) {
+        console.error('Failed to subscribe to state updates:', e);
+    }
 }
 
 // ─── Keyboard capture (key instructions + hotkey combo capture) ──────────────
@@ -47,11 +53,15 @@ document.addEventListener('keydown', async e => {
 
 // ─── Master render ────────────────────────────────────────────────────────────
 function render(s) {
-    const onMain = s.page === 'Main';
+    const onMain = s.page !== 'Settings';
     document.getElementById('main-page').classList.toggle('hidden', !onMain);
     document.getElementById('settings-page').classList.toggle('hidden', onMain);
-    if (onMain) renderMain(s);
-    else renderSettings(s);
+    try {
+        if (onMain) renderMain(s);
+        else renderSettings(s);
+    } catch (e) {
+        console.error('render error:', e);
+    }
 }
 
 // ═══ Main Page ════════════════════════════════════════════════════════════════
@@ -68,10 +78,10 @@ function renderMacroSelector(s) {
 
     // Rebuild options only when the list changes
     const prevOptions = [...dropdown.options].map(o => o.text).join('|');
-    const newOptions = s.macro_names.join('|');
+    const newOptions = (s.macro_names ?? []).join('|');
     if (prevOptions !== newOptions) {
         dropdown.innerHTML = '<option value="">— no macro selected —</option>';
-        s.macro_names.forEach((name, idx) => {
+        (s.macro_names ?? []).forEach((name, idx) => {
             const opt = document.createElement('option');
             opt.value = idx;
             opt.textContent = name;
@@ -465,7 +475,7 @@ function renderGlobalHotkeys(s) {
     list.innerHTML = '';
 
     NAMED_ACTIONS.forEach(({ label, type }) => {
-        const binding = s.hotkey_bindings.find(b => b.action.type === type);
+        const binding = (s.hotkey_bindings ?? []).find(b => b.action.type === type);
         const comboDisplay = binding?.combo_display ?? null;
         const isCapturing = s.combo_capture?.kind === 'Named' && s.combo_capture?.action?.type === type;
 
@@ -509,7 +519,7 @@ function renderPerMacroHotkeys(s) {
     const list = document.getElementById('per-macro-hotkeys-list');
     list.innerHTML = '';
 
-    const perMacroBindings = s.hotkey_bindings.filter(b => b.action.type === 'RunSpecificMacro');
+    const perMacroBindings = (s.hotkey_bindings ?? []).filter(b => b.action.type === 'RunSpecificMacro');
     perMacroBindings.forEach(b => {
         const row = document.createElement('div');
         row.className = 'settings-row';
@@ -536,7 +546,7 @@ function renderPerMacroHotkeys(s) {
     const pendingSel = document.getElementById('pending-macro-select');
     const currentPendingVal = pendingSel.value;
     pendingSel.innerHTML = '<option value="">Select macro…</option>';
-    s.macro_names.forEach((name, idx) => {
+    (s.macro_names ?? []).forEach((name, idx) => {
         const opt = document.createElement('option');
         opt.value = idx;
         opt.textContent = name;

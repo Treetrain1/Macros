@@ -23,6 +23,9 @@ pub fn run() {
     let _ = tracing_log::LogTracer::init();
 
     tauri::Builder::<Cef>::default()
+        .command_line_args([
+            ("--ozone-platform".to_string(), Some("x11".to_string())),
+        ])
         .setup(|app| {
             let settings = config::load_settings();
 

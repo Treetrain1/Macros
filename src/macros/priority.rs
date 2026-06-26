@@ -8,7 +8,11 @@ use tracing::warn;
 /// limit on Linux) — never treated as a hard failure.
 #[cfg(unix)]
 pub(crate) fn raise_current_thread_priority() {
-    let param = libc::sched_param { sched_priority: 10 };
+    let param = unsafe {
+        let mut p = std::mem::MaybeUninit::<libc::sched_param>::zeroed().assume_init();
+        p.sched_priority = 10;
+        p
+    };
     let ok = unsafe {
         libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &param)
     } == 0;

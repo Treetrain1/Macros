@@ -2,8 +2,8 @@ use std::sync::OnceLock;
 
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
 use core_graphics::event::{
-    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventType, CGMouseButton, EventField,
+    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions,
+    CGEventTapPlacement, CGEventType, CGMouseButton, EventField,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
@@ -122,6 +122,11 @@ pub struct MacosBackend {
     source: CGEventSource,
 }
 
+// CGEventSource is safe to use across threads; the NonNull it wraps is an
+// opaque CoreGraphics ref-counted object that CoreGraphics itself uses from
+// any thread (the HID event tap runs on its own thread).
+unsafe impl Send for MacosBackend {}
+
 impl MacosBackend {
     pub fn new() -> Self {
         Self {
@@ -132,6 +137,24 @@ impl MacosBackend {
 
     fn post(&self, event: CGEvent) {
         event.post(CGEventTapLocation::HID);
+    }
+
+    fn scroll_raw(&self, wheel1: i32, wheel2: i32, wheel3: i32) {
+        let wheel_count = if wheel2 != 0 || wheel3 != 0 { 2 } else { 1 };
+        let raw = unsafe {
+            CGEventCreateScrollWheelEvent2(
+                self.source.as_ptr(),
+                1, // kCGScrollEventUnitLine
+                wheel_count,
+                wheel1,
+                wheel2,
+                wheel3,
+            )
+        };
+        if !raw.is_null() {
+            let ev = unsafe { CGEvent::from_ptr(raw) };
+            self.post(ev);
+        }
     }
 
     fn emit_key(&self, keycode: u16, down: bool, needs_shift: bool) {
@@ -189,23 +212,19 @@ impl InputBackend for MacosBackend {
 
         let (down_ty, up_ty, mouse_btn) = match button {
             MacroButton::ScrollUp => {
-                let ev = CGEvent::new_scroll_event(self.source.clone(), core_graphics::event::ScrollEventUnit::Line, 1, 1, 0, 0).ok();
-                if let Some(ev) = ev { self.post(ev); }
+                self.scroll_raw(1, 0, 0);
                 return Ok(());
             }
             MacroButton::ScrollDown => {
-                let ev = CGEvent::new_scroll_event(self.source.clone(), core_graphics::event::ScrollEventUnit::Line, 1, -1, 0, 0).ok();
-                if let Some(ev) = ev { self.post(ev); }
+                self.scroll_raw(-1, 0, 0);
                 return Ok(());
             }
             MacroButton::ScrollLeft => {
-                let ev = CGEvent::new_scroll_event(self.source.clone(), core_graphics::event::ScrollEventUnit::Line, 2, 0, -1, 0).ok();
-                if let Some(ev) = ev { self.post(ev); }
+                self.scroll_raw(0, -1, 0);
                 return Ok(());
             }
             MacroButton::ScrollRight => {
-                let ev = CGEvent::new_scroll_event(self.source.clone(), core_graphics::event::ScrollEventUnit::Line, 2, 0, 1, 0).ok();
-                if let Some(ev) = ev { self.post(ev); }
+                self.scroll_raw(0, 1, 0);
                 return Ok(());
             }
             MacroButton::Left => (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left),
@@ -262,16 +281,7 @@ impl InputBackend for MacosBackend {
             Axis::Vertical => (amount, 0),
             Axis::Horizontal => (0, amount),
         };
-        let ev = CGEvent::new_scroll_event(
-            self.source.clone(),
-            core_graphics::event::ScrollEventUnit::Line,
-            2,
-            v,
-            h,
-            0,
-        )
-        .map_err(|_| "CGEvent scroll failed".to_string())?;
-        self.post(ev);
+        self.scroll_raw(v, h, 0);
         Ok(())
     }
 
@@ -290,13 +300,20 @@ impl InputBackend for MacosBackend {
 
 // ── Hardware event timestamp ────────────────────────────────────────────────
 
-// `core-graphics` 0.23 does not bind `CGEventGetTimestamp`; declare it
-// ourselves. Linking is already satisfied by core-graphics's own
-// `link(name = "CoreGraphics", ...)` extern block since we use it with
-// default features; repeated here defensively.
-#[cfg_attr(feature = "link", link(name = "CoreGraphics", kind = "framework"))]
-extern "C" {
+// `core-graphics` 0.23 does not bind `CGEventGetTimestamp` or
+// `CGEventCreateScrollWheelEvent2`; declare them ourselves.
+unsafe extern "C" {
     fn CGEventGetTimestamp(event: core_graphics::sys::CGEventRef) -> u64;
+
+    // kCGScrollEventUnitPixel = 0, kCGScrollEventUnitLine = 1
+    fn CGEventCreateScrollWheelEvent2(
+        source: core_graphics::sys::CGEventSourceRef,
+        units: u32,
+        wheel_count: u32,
+        wheel1: i32,
+        wheel2: i32,
+        wheel3: i32,
+    ) -> core_graphics::sys::CGEventRef;
 }
 
 /// OS-assigned timestamp (mach_absolute_time-based ns since boot, NOT
@@ -325,6 +342,12 @@ pub(super) fn start_capture_thread(
                 use std::sync::Mutex;
                 let callback = Mutex::new(callback);
 
+                // Track previous modifier flags so FlagsChanged can synthesise
+                // KeyPress/KeyRelease events. Modifier keys fire FlagsChanged,
+                // not KeyDown/KeyUp, so without this held_mods stays 0 and no
+                // modifier-based hotkey ever matches.
+                let prev_flags = std::sync::Mutex::new(CGEventFlags::empty());
+
                 let tap = CGEventTap::new(
                     CGEventTapLocation::HID,
                     CGEventTapPlacement::HeadInsertEventTap,
@@ -332,6 +355,7 @@ pub(super) fn start_capture_thread(
                     vec![
                         CGEventType::KeyDown,
                         CGEventType::KeyUp,
+                        CGEventType::FlagsChanged,
                         CGEventType::MouseMoved,
                         CGEventType::LeftMouseDown,
                         CGEventType::LeftMouseUp,
@@ -342,6 +366,39 @@ pub(super) fn start_capture_thread(
                         CGEventType::ScrollWheel,
                     ],
                     |_proxy, ev_type, event| {
+                        // Synthesise KeyPress/KeyRelease for modifier keys from FlagsChanged.
+                        if matches!(ev_type, CGEventType::FlagsChanged) {
+                            let cur = event.get_flags();
+                            let prev = {
+                                let Ok(mut g) = prev_flags.lock() else {
+                                    return Some(event.clone());
+                                };
+                                let prev = *g;
+                                *g = cur;
+                                prev
+                            };
+                            // (flag bit, corresponding MacroKey)
+                            let pairs: &[(CGEventFlags, MacroKey)] = &[
+                                (CGEventFlags::CGEventFlagControl,   MacroKey::LControl),
+                                (CGEventFlags::CGEventFlagShift,     MacroKey::LShift),
+                                (CGEventFlags::CGEventFlagAlternate, MacroKey::Alt),
+                                (CGEventFlags::CGEventFlagCommand,   MacroKey::Meta),
+                            ];
+                            let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
+                            if let Ok(mut cb) = callback.lock() {
+                                for (flag, key) in pairs {
+                                    let was = prev.contains(*flag);
+                                    let now = cur.contains(*flag);
+                                    if !was && now {
+                                        cb(CaptureEvent::KeyPress(key.clone()), ts);
+                                    } else if was && !now {
+                                        cb(CaptureEvent::KeyRelease(key.clone()), ts);
+                                    }
+                                }
+                            }
+                            return Some(event.clone());
+                        }
+
                         let capture_ev: Option<CaptureEvent> = match ev_type {
                             CGEventType::KeyDown => {
                                 let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;

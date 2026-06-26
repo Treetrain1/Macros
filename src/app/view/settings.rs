@@ -28,6 +28,13 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
             widget::text("Try running the app as administrator.")
                 .class(cosmic::theme::Text::Color(yellow)),
         ];
+        #[cfg(target_os = "macos")]
+        let col = widget::column![
+            widget::text("⚠ Global hotkeys unavailable: check Accessibility permissions.")
+                .class(cosmic::theme::Text::Color(yellow)),
+            widget::text("System Settings → Privacy & Security → Accessibility → enable this app.")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
         Some(col.spacing(spacing.space_xxs).into())
     } else {
         None
@@ -43,6 +50,11 @@ pub(crate) fn settings_view(app: &App) -> Element<'_, Message> {
         #[cfg(target_os = "windows")]
         let col = widget::column![
             widget::text("⚠ Input emulation unavailable.")
+                .class(cosmic::theme::Text::Color(yellow)),
+        ];
+        #[cfg(target_os = "macos")]
+        let col = widget::column![
+            widget::text("⚠ Input emulation unavailable: check Accessibility permissions.")
                 .class(cosmic::theme::Text::Color(yellow)),
         ];
         Some(col.spacing(spacing.space_xxs).into())

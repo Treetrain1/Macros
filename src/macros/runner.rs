@@ -89,7 +89,7 @@ impl Macro {
                             }
                             let remaining = deadline - now;
                             if remaining > STOP_POLL_INTERVAL {
-                                std::thread::sleep(STOP_POLL_INTERVAL);
+                                spin_sleeper().sleep(STOP_POLL_INTERVAL);
                             } else {
                                 spin_sleeper().sleep_until(deadline);
                                 break;

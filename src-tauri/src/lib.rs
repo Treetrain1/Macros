@@ -16,16 +16,13 @@ use crate::recording::QueueSignal;
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{Cef, Manager};
+use tauri::Manager;
 
 pub fn run() {
     tracing_subscriber::fmt::init();
     let _ = tracing_log::LogTracer::init();
 
-    tauri::Builder::<Cef>::default()
-        .command_line_args([
-            ("--ozone-platform".to_string(), Some("x11".to_string())),
-        ])
+    tauri::Builder::default()
         .setup(|app| {
             let settings = config::load_settings();
 

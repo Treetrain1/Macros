@@ -109,9 +109,19 @@ export function dropdown(options, current, onChange, opts = {}) {
 
     function onOutsideMouseDown(e) {
         if (root.contains(e.target) || (panel && panel.contains(e.target))) return;
+        if (panel) {
+            const r = panel.getBoundingClientRect();
+            if (e.clientX >= r.left && e.clientX <= r.right &&
+                e.clientY >= r.top && e.clientY <= r.bottom) return;
+        }
         close();
     }
-    function onScrollOrResize() { close(); }
+    function onScrollOrResize() {
+        if (!panel) return;
+        const tr = trigger.getBoundingClientRect();
+        const inView = tr.bottom >= 0 && tr.top <= window.innerHeight;
+        if (!inView) close();
+    }
 
     function commit(val) {
         value = val;
@@ -148,10 +158,7 @@ export function dropdown(options, current, onChange, opts = {}) {
             row.dataset.value = o.value;
             row.textContent = o.label;
             if (String(o.value) === String(value)) row.classList.add('dd-option-current');
-            row.addEventListener('mousedown', e => {
-                e.preventDefault();
-                commit(o.value);
-            });
+            row.addEventListener('click', () => commit(o.value));
             row.addEventListener('mouseenter', () => highlight(idx));
             panel.appendChild(row);
         });

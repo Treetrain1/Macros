@@ -449,13 +449,17 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
             }
         } else {
             let _ = loop_control::set_loop_state(&is_looping, true);
-            let stop_flag = Arc::clone(&is_looping);
-            tokio::task::spawn_blocking(move || {
-                #[cfg(windows)]
-                crate::macros::backend::windows::prepare_for_macro_execution();
-                mac.run(emulator, Some(Arc::clone(&stop_flag)));
-                if let Ok(mut st) = stop_flag.lock() { *st = false; }
-            });
+            let mac_name = mac.name.clone();
+            let single_run_task = mac.into_single_run_task(Arc::clone(&emulator), Arc::clone(&is_looping));
+            let mut s = state.lock().map_err(|e| e.to_string())?;
+            if let Err(e) = thread::spawn_macro_thread(
+                &mut s.thread_pool,
+                format!("run_{}", mac_name),
+                single_run_task,
+            ) {
+                warn!("Failed to spawn run thread: {e}");
+                let _ = loop_control::stop_loop(&is_looping);
+            }
         }
     }
 

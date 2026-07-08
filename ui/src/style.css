@@ -596,6 +596,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   cursor: pointer;
 }
 .dd-option[aria-selected="true"] { background: var(--hover-overlay); }
+.dd-option:active { background: var(--bg3); }
 .dd-option-current { color: var(--accent); font-weight: 600; }
 
 /* Split button: primary "add" action fused to a chevron that opens a type

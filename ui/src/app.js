@@ -190,11 +190,37 @@ function renderEditor(s) {
     renderInstructions(s);
 }
 
+function saveFocusedInput() {
+    const el = document.activeElement;
+    if (!el || el.dataset.ix === undefined || el.dataset.field === undefined) return null;
+    return {
+        ix: el.dataset.ix,
+        field: el.dataset.field,
+        start: el.selectionStart,
+        end: el.selectionEnd,
+    };
+}
+
+function restoreFocusedInput(saved) {
+    if (!saved) return;
+    const inner = document.getElementById('instructions-inner');
+    if (!inner) return;
+    const el = inner.querySelector(`[data-ix="${saved.ix}"][data-field="${saved.field}"]`);
+    if (el) {
+        el.focus();
+        if (saved.start != null) {
+            el.setSelectionRange(saved.start, saved.end);
+        }
+    }
+}
+
 function renderInstructions(s) {
     const scrollEl = document.getElementById('instructions-scroll');
     const inner = document.getElementById('instructions-inner');
     const instructions = s.current_macro?.instructions ?? [];
     const len = instructions.length;
+
+    const savedFocus = saveFocusedInput();
 
     if (len === 0) {
         inner.style.paddingTop = '';
@@ -220,12 +246,41 @@ function renderInstructions(s) {
     const invalidBuffers = s.invalid_field_buffers ?? [];
     const currentInvalidKeys = new Set(invalidBuffers.map(b => `${b.instruction_index}:${b.field_id}`));
 
-    // Rebuild rows
-    const frag = document.createDocumentFragment();
-    for (let i = startIdx; i < endIdx; i++) {
-        frag.appendChild(buildInstructionRow(i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys));
+    // Map existing rows by data-index
+    const existingRows = new Map();
+    for (const child of inner.children) {
+        const idx = parseInt(child.dataset.index);
+        if (!isNaN(idx)) existingRows.set(idx, child);
     }
-    inner.replaceChildren(frag);
+
+    // Remove rows that scrolled out of view
+    for (const [idx, row] of existingRows) {
+        if (idx < startIdx || idx >= endIdx) {
+            row.remove();
+            existingRows.delete(idx);
+        }
+    }
+
+    // Update visible rows in place and insert new ones, maintaining DOM order
+    let prevRow = null;
+    for (let i = startIdx; i < endIdx; i++) {
+        const existing = existingRows.get(i);
+        if (existing) {
+            updateInstructionRowContent(existing, i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys);
+            existingRows.delete(i);
+            prevRow = existing;
+        } else {
+            const newRow = buildInstructionRow(i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys);
+            if (prevRow) {
+                prevRow.after(newRow);
+            } else {
+                inner.prepend(newRow);
+            }
+            prevRow = newRow;
+        }
+    }
+
+    restoreFocusedInput(savedFocus);
 
     prevInvalidKeys = currentInvalidKeys;
 }
@@ -250,7 +305,19 @@ function getInvalidText(invalidBuffers, prevInvalidKeys, idx, fieldId) {
     const entry = invalidBuffers?.find(b => b.instruction_index === idx && b.field_id === fieldId);
     if (!entry) return null;
     const isNew = !prevInvalidKeys.has(`${idx}:${fieldId}`);
-    return { text: entry.text, invalid: true, isNew };
+    const trimmed = entry.text.trim();
+    let invalid = true;
+    if (trimmed !== '') {
+        const num = Number(trimmed);
+        if (!isNaN(num)) {
+            if (fieldId === 'WaitDuration' || fieldId === 'WaitRandomness') {
+                invalid = false;
+            } else {
+                invalid = !Number.isInteger(num);
+            }
+        }
+    }
+    return { text: entry.text, invalid, isNew };
 }
 
 function buildEmptyInstructionsState() {
@@ -266,9 +333,18 @@ function buildEmptyInstructionsState() {
     return wrap;
 }
 
+function updateInstructionRowContent(row, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
+    const oldContent = row.querySelector('.instruction-content');
+    const newContent = document.createElement('div');
+    newContent.className = 'instruction-content';
+    buildInstructionContent(newContent, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys);
+    oldContent.replaceWith(newContent);
+}
+
 function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
     const row = document.createElement('div');
     row.className = 'instruction-row';
+    row.dataset.index = String(i);
 
     const content = document.createElement('div');
     content.className = 'instruction-content';
@@ -332,9 +408,9 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
             const durBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitDuration');
             const randBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitRandomness');
             const durInput = numInput(durBuf?.text ?? String(ins.duration), durBuf?.invalid, durBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'WaitDuration', text: v }));
+                invoke('edit_instruction_field', { index: i, fieldId: 'WaitDuration', text: v }), i, 'WaitDuration');
             const randInput = numInput(randBuf?.text ?? String(ins.randomness), randBuf?.invalid, randBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'WaitRandomness', text: v }));
+                invoke('edit_instruction_field', { index: i, fieldId: 'WaitRandomness', text: v }), i, 'WaitRandomness');
             const randLabel = document.createElement('span');
             randLabel.className = 'instruction-label';
             randLabel.textContent = '± random:';
@@ -347,7 +423,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Text': {
             label.textContent = 'Text:';
             const inp = textInput(ins.text, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Text', text: v } }));
+                invoke('edit_instruction', { index: i, instruction: { type: 'Text', text: v } }), i, 'Text');
             content.appendChild(label);
             content.appendChild(inp);
             break;
@@ -384,9 +460,9 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
             const xBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseX');
             const yBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseY');
             const xInput = numInput(xBuf?.text ?? String(ins.x), xBuf?.invalid, xBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseX', text: v }));
+                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseX', text: v }), i, 'MoveMouseX');
             const yInput = numInput(yBuf?.text ?? String(ins.y), yBuf?.invalid, yBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseY', text: v }));
+                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseY', text: v }), i, 'MoveMouseY');
             xInput.placeholder = 'X';
             yInput.placeholder = 'Y';
             const coordSel = enumSelect(['Absolute', 'Relative'], ins.coordinate, v =>
@@ -401,7 +477,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
             label.textContent = 'Scroll:';
             const amtBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'ScrollAmount');
             const amtInput = numInput(amtBuf?.text ?? String(ins.amount), amtBuf?.invalid, amtBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'ScrollAmount', text: v }));
+                invoke('edit_instruction_field', { index: i, fieldId: 'ScrollAmount', text: v }), i, 'ScrollAmount');
             const axisSel = enumSelect(['Vertical', 'Horizontal'], ins.axis, v =>
                 invoke('edit_instruction', { index: i, instruction: { type: 'Scroll', amount: ins.amount, axis: v } }));
             content.appendChild(label);
@@ -412,7 +488,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Command': {
             label.textContent = 'Command:';
             const inp = textInput(ins.command, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Command', command: v } }));
+                invoke('edit_instruction', { index: i, instruction: { type: 'Command', command: v } }), i, 'Command');
             inp.placeholder = 'bash -c …';
             content.appendChild(label);
             content.appendChild(inp);
@@ -421,7 +497,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Comment': {
             label.textContent = '//';
             const inp = textInput(ins.comment, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Comment', comment: v } }));
+                invoke('edit_instruction', { index: i, instruction: { type: 'Comment', comment: v } }), i, 'Comment');
             inp.placeholder = 'Comment';
             inp.style.fontStyle = 'italic';
             inp.style.color = 'var(--text-dim)';
@@ -438,16 +514,17 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
 
 // ─── Widget helpers ───────────────────────────────────────────────────────────
 
-function textInput(value, onChange) {
+function textInput(value, onChange, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
     inp.style.flex = '1';
+    if (ix != null && field != null) { inp.dataset.ix = String(ix); inp.dataset.field = field; }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
 }
 
-function numInput(value, invalid, isNew, onChange) {
+function numInput(value, invalid, isNew, onChange, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
@@ -456,6 +533,7 @@ function numInput(value, invalid, isNew, onChange) {
         inp.classList.add('invalid');
         if (isNew) inp.classList.add('shake-once');
     }
+    if (ix != null && field != null) { inp.dataset.ix = String(ix); inp.dataset.field = field; }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
 }

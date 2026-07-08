@@ -725,7 +725,7 @@ pub(crate) fn set_ipc_port_text<R: Runtime>(state: State<SharedState>, app: taur
 }
 
 #[tauri::command]
-pub(crate) fn start_ipc_server<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+pub(crate) async fn start_ipc_server<R: Runtime>(state: State<'_, SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if s.ipc_server.is_none() {
         if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {

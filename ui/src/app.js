@@ -199,7 +199,9 @@ function renderInstructions(s) {
     if (len === 0) {
         inner.style.paddingTop = '';
         inner.style.paddingBottom = '';
-        inner.replaceChildren(buildEmptyInstructionsState());
+        if (!inner.querySelector('.empty-state')) {
+            inner.replaceChildren(buildEmptyInstructionsState());
+        }
         prevInvalidKeys = new Set();
         return;
     }

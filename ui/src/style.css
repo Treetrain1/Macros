@@ -451,6 +451,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   background-clip: padding-box;
 }
 .settings-section {
+  flex-shrink: 0;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;

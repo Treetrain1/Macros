@@ -340,9 +340,20 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   background-clip: padding-box;
 }
 .canvas-scroll::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+.canvas-scroll.panning, .canvas-scroll.panning * { cursor: grabbing !important; }
 
-.canvas-inner {
+/* canvas-sizer's box is the zoomed (on-screen) footprint, so the native
+   scrollbars cover exactly the zoomed content; canvas-inner stays laid out
+   at unscaled (canvas-space) coordinates and is visually scaled with a CSS
+   transform, so strand positions never need to know about zoom at all. */
+.canvas-sizer {
   position: relative;
+}
+.canvas-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
 }
 
 .canvas-add-strand {

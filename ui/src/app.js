@@ -248,11 +248,21 @@ function estimateStrandSize(strand) {
 // back into canvas (strand.x/y) space when a drag ends on empty canvas.
 let lastBounds = { minX: 0, minY: 0 };
 
+// ── Zoom (ctrl+scroll) ──────────────────────────────────────────────────────
+// canvas-inner stays laid out at unscaled canvas-space coordinates and is
+// visually scaled with a CSS transform; canvas-sizer's box is set to the
+// zoomed footprint so the scrollbars/scroll range match what's on screen.
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 2.5;
+let canvasZoom = 1;
+
 function renderCanvas(s) {
     const inner = document.getElementById('canvas-inner');
+    const sizer = document.getElementById('canvas-sizer');
     const scrollEl = document.getElementById('canvas-scroll');
     const strands = s.current_macro?.strands ?? [];
     const macroId = s.current_macro?.id ?? null;
+    if (macroId !== currentMacroId) canvasZoom = 1;
 
     const savedFocus = saveFocusedInput();
 
@@ -274,8 +284,13 @@ function renderCanvas(s) {
     }
     lastBounds = { minX, minY };
 
-    inner.style.width = (maxX - minX + 2 * CANVAS_PAD) + 'px';
-    inner.style.height = (maxY - minY + 2 * CANVAS_PAD) + 'px';
+    const innerW = maxX - minX + 2 * CANVAS_PAD;
+    const innerH = maxY - minY + 2 * CANVAS_PAD;
+    inner.style.width = innerW + 'px';
+    inner.style.height = innerH + 'px';
+    inner.style.transform = `scale(${canvasZoom})`;
+    sizer.style.width = (innerW * canvasZoom) + 'px';
+    sizer.style.height = (innerH * canvasZoom) + 'px';
 
     inner.replaceChildren();
     for (const strand of strands) {
@@ -659,13 +674,58 @@ function beginPickup(e, strandId, index) {
     dragCandidate = { strandId, index, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
 }
 
+// ── Middle-click-drag panning ───────────────────────────────────────────────
+let pan = null;
+
+function beginPan(e) {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    const scrollEl = document.getElementById('canvas-scroll');
+    pan = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startScrollLeft: scrollEl.scrollLeft,
+        startScrollTop: scrollEl.scrollTop,
+    };
+    scrollEl.classList.add('panning');
+}
+
 function attachDragListeners() {
+    document.getElementById('canvas-scroll').addEventListener('pointerdown', beginPan);
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointercancel', onPointerUp);
+    document.getElementById('canvas-scroll').addEventListener('wheel', onCanvasWheel, { passive: false });
+}
+
+function onCanvasWheel(e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const scrollEl = document.getElementById('canvas-scroll');
+    const rect = scrollEl.getBoundingClientRect();
+    // Point under the cursor, in unscaled canvas-space px, kept stable across the zoom change.
+    const canvasPtX = (e.clientX - rect.left + scrollEl.scrollLeft) / canvasZoom;
+    const canvasPtY = (e.clientY - rect.top + scrollEl.scrollTop) / canvasZoom;
+
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12; // scroll up = zoom in, scroll down = zoom out
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, canvasZoom * factor));
+    if (newZoom === canvasZoom) return;
+    canvasZoom = newZoom;
+    renderCanvas(state);
+
+    scrollEl.scrollLeft = canvasPtX * canvasZoom - (e.clientX - rect.left);
+    scrollEl.scrollTop = canvasPtY * canvasZoom - (e.clientY - rect.top);
 }
 
 function onPointerMove(e) {
+    if (pan) {
+        if (e.pointerId !== pan.pointerId) return;
+        const scrollEl = document.getElementById('canvas-scroll');
+        scrollEl.scrollLeft = pan.startScrollLeft - (e.clientX - pan.startX);
+        scrollEl.scrollTop = pan.startScrollTop - (e.clientY - pan.startY);
+        return;
+    }
     if (drag) {
         if (e.pointerId !== drag.pointerId) return;
         positionGhost(e);
@@ -779,14 +839,18 @@ function updateSnapTarget(e) {
 
 function clientToCanvas(clientX, clientY) {
     const inner = document.getElementById('canvas-inner');
-    const rect = inner.getBoundingClientRect();
+    const rect = inner.getBoundingClientRect(); // reflects the current zoom transform
     return [
-        Math.round(clientX - rect.left - CANVAS_PAD + lastBounds.minX),
-        Math.round(clientY - rect.top - CANVAS_PAD + lastBounds.minY),
+        Math.round((clientX - rect.left) / canvasZoom - CANVAS_PAD + lastBounds.minX),
+        Math.round((clientY - rect.top) / canvasZoom - CANVAS_PAD + lastBounds.minY),
     ];
 }
 
 function onPointerUp(e) {
+    if (pan && pan.pointerId === e.pointerId) {
+        pan = null;
+        document.getElementById('canvas-scroll').classList.remove('panning');
+    }
     if (dragCandidate && dragCandidate.pointerId === e.pointerId) {
         dragCandidate = null;
     }

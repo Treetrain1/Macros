@@ -36,12 +36,14 @@ jobs:
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: macros-linux-x86_64
+            linux_arch: x86_64
             experimental: false
 
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: macros-linux-arm64
+            linux_arch: aarch64
             experimental: false
 
           # macOS is experimental: enigo is not declared as a macOS dep in Cargo.toml
@@ -95,10 +97,58 @@ jobs:
         run: Copy-Item target/${{ matrix.target }}/release/macros.exe ${{ matrix.artifact_name }}
 
       - name: Upload artifact
+        if: runner.os != 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Build AppImage
+        if: runner.os == 'Linux'
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          wget -q -O linuxdeploy.AppImage "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.linux_arch }}.AppImage"
+          wget -q -O linuxdeploy-plugin-appimage.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-${{ matrix.linux_arch }}.AppImage"
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-appimage.AppImage
+          ./linuxdeploy.AppImage \
+            --appdir AppDir \
+            --executable ${{ matrix.artifact_name }} \
+            --desktop-file res/macros.desktop \
+            --icon-file res/icons/macros.png \
+            --output appimage
+          mv Macros*.AppImage ${{ matrix.artifact_name }}.AppImage
+
+      - name: Upload AppImage artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}.AppImage
+          path: ${{ matrix.artifact_name }}.AppImage
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Install Flatpak tooling
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+
+      - name: Build Flatpak
+        if: runner.os == 'Linux'
+        run: |
+          cp ${{ matrix.artifact_name }} packaging/flatpak/macros
+          flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/dev.ethanstokes.Macros.yml
+          flatpak build-bundle flatpak-repo ${{ matrix.artifact_name }}.flatpak dev.ethanstokes.Macros stable
+
+      - name: Upload Flatpak artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}.flatpak
+          path: ${{ matrix.artifact_name }}.flatpak
           if-no-files-found: error
           retention-days: 90
 
@@ -188,5 +238,7 @@ jobs:
             |---|---|
             | Windows x86_64 (installer) | `macros-windows-x86_64-setup.exe` |
             | Windows x86_64 (portable exe) | `macros-windows-x86_64.exe` |
-            | Linux x86_64 | `macros-linux-x86_64` |
-            | Linux arm64 | `macros-linux-arm64` |
+            | Linux x86_64 (AppImage) | `macros-linux-x86_64.AppImage` |
+            | Linux x86_64 (Flatpak) | `macros-linux-x86_64.flatpak` |
+            | Linux arm64 (AppImage) | `macros-linux-arm64.AppImage` |
+            | Linux arm64 (Flatpak) | `macros-linux-arm64.flatpak` |

@@ -32,6 +32,8 @@ pub(crate) fn build_app(core: Core) -> App {
 }
 
 pub(crate) fn setup_app(app: &mut App) -> Task<Message> {
+    config::migrate_legacy_config_dir();
+
     if let Err(err) = config::migrate_legacy_macros_to_files(&app.config) {
         warn!("Failed to migrate legacy macros: {}", err);
     }

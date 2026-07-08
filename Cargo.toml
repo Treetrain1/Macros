@@ -1,6 +1,6 @@
 [package]
 name = "macros"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 
 [dependencies]
@@ -21,7 +21,7 @@ libc = "0.2"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "8df1858"
+rev = "be41927"
 version = "1.0.0"
 default-features = false
 
@@ -29,7 +29,7 @@ default-features = false
 evdev = "0.13.2"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "8df1858",
+    rev = "be41927",
     version = "1.0.0",
     default-features = false,
     features = [
@@ -59,7 +59,7 @@ self_update = { version = "0.44", default-features = false, features = ["reqwest
 http = "1"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "8df1858",
+    rev = "be41927",
     version = "1.0.0",
     default-features = false,
     features = [
@@ -77,7 +77,7 @@ core-foundation = "0.9"
 foreign-types = "0.5"
 libcosmic = {
     git = "https://github.com/pop-os/libcosmic.git",
-    rev = "8df1858",
+    rev = "be41927",
     version = "1.0.0",
     default-features = false,
     features = [

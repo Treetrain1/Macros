@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "identifier": "com.treetrain1.Macros",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "withGlobalTauri": true,

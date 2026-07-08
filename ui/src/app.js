@@ -1,3 +1,5 @@
+import './style.css';
+
 // Tauri v2 API
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -9,6 +11,13 @@ const BUFFER = 5;
 // ─── App state (full snapshot from backend) ──────────────────────────────────
 let state = {};
 let appVersion = '';
+
+// One-shot animation tracking: only shake/enter-animate on the render where a
+// field first goes invalid / a warning first appears, not on every rebuild
+// while it stays that way (rows are fully recreated on every state push).
+let prevInvalidKeys = new Set();
+let prevPortInvalid = false;
+let prevWarnings = { grab: false, emulator: false };
 
 // ─── Initialisation ──────────────────────────────────────────────────────────
 async function init() {
@@ -54,8 +63,8 @@ document.addEventListener('keydown', async e => {
 // ─── Master render ────────────────────────────────────────────────────────────
 function render(s) {
     const onMain = s.page !== 'Settings';
-    document.getElementById('main-page').classList.toggle('hidden', !onMain);
-    document.getElementById('settings-page').classList.toggle('hidden', onMain);
+    document.getElementById('main-page').classList.toggle('page-hidden', !onMain);
+    document.getElementById('settings-page').classList.toggle('page-hidden', onMain);
     try {
         if (onMain) renderMain(s);
         else renderSettings(s);
@@ -118,7 +127,7 @@ function renderRunControls(s) {
     const phase = s.recording_phase;
     if (phase.phase === 'Countdown') {
         recordBtn.textContent = `⏸ Recording in ${phase.countdown}s…`;
-        recordBtn.className = 'btn-record';
+        recordBtn.className = 'btn-record btn-record-countdown';
         recordBtn.disabled = false;
     } else if (phase.phase === 'Active') {
         recordBtn.textContent = '⏹ Stop recording (Esc)';
@@ -176,12 +185,17 @@ function renderInstructions(s) {
     inner.style.paddingTop = (startIdx * ROW_H) + 'px';
     inner.style.paddingBottom = (Math.max(0, len - endIdx) * ROW_H) + 'px';
 
+    const invalidBuffers = s.invalid_field_buffers ?? [];
+    const currentInvalidKeys = new Set(invalidBuffers.map(b => `${b.instruction_index}:${b.field_id}`));
+
     // Rebuild rows
     const frag = document.createDocumentFragment();
     for (let i = startIdx; i < endIdx; i++) {
-        frag.appendChild(buildInstructionRow(i, instructions[i], s.key_capture_index, s.invalid_field_buffers));
+        frag.appendChild(buildInstructionRow(i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys));
     }
     inner.replaceChildren(frag);
+
+    prevInvalidKeys = currentInvalidKeys;
 }
 
 let scrollRafPending = false;
@@ -200,18 +214,20 @@ function attachScrollListener() {
     }
 }
 
-function getInvalidText(invalidBuffers, idx, fieldId) {
+function getInvalidText(invalidBuffers, prevInvalidKeys, idx, fieldId) {
     const entry = invalidBuffers?.find(b => b.instruction_index === idx && b.field_id === fieldId);
-    return entry ? { text: entry.text, invalid: true } : null;
+    if (!entry) return null;
+    const isNew = !prevInvalidKeys.has(`${idx}:${fieldId}`);
+    return { text: entry.text, invalid: true, isNew };
 }
 
-function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers) {
+function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
     const row = document.createElement('div');
     row.className = 'instruction-row';
 
     const content = document.createElement('div');
     content.className = 'instruction-content';
-    buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers);
+    buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys);
     row.appendChild(content);
 
     // Controls: Up, Down, Remove, Add-after
@@ -261,18 +277,18 @@ function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers) {
     return row;
 }
 
-function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers) {
+function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
     const label = document.createElement('span');
     label.className = 'instruction-label';
 
     switch (ins.type) {
         case 'Wait': {
             label.textContent = 'Wait (ms):';
-            const durBuf = getInvalidText(invalidBuffers, i, 'WaitDuration');
-            const randBuf = getInvalidText(invalidBuffers, i, 'WaitRandomness');
-            const durInput = numInput(durBuf?.text ?? String(ins.duration), durBuf?.invalid, v =>
+            const durBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitDuration');
+            const randBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitRandomness');
+            const durInput = numInput(durBuf?.text ?? String(ins.duration), durBuf?.invalid, durBuf?.isNew, v =>
                 invoke('edit_instruction_field', { index: i, fieldId: 'WaitDuration', text: v }));
-            const randInput = numInput(randBuf?.text ?? String(ins.randomness), randBuf?.invalid, v =>
+            const randInput = numInput(randBuf?.text ?? String(ins.randomness), randBuf?.invalid, randBuf?.isNew, v =>
                 invoke('edit_instruction_field', { index: i, fieldId: 'WaitRandomness', text: v }));
             const randLabel = document.createElement('span');
             randLabel.className = 'instruction-label';
@@ -320,11 +336,11 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers)
         }
         case 'MoveMouse': {
             label.textContent = 'Move mouse:';
-            const xBuf = getInvalidText(invalidBuffers, i, 'MoveMouseX');
-            const yBuf = getInvalidText(invalidBuffers, i, 'MoveMouseY');
-            const xInput = numInput(xBuf?.text ?? String(ins.x), xBuf?.invalid, v =>
+            const xBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseX');
+            const yBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseY');
+            const xInput = numInput(xBuf?.text ?? String(ins.x), xBuf?.invalid, xBuf?.isNew, v =>
                 invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseX', text: v }));
-            const yInput = numInput(yBuf?.text ?? String(ins.y), yBuf?.invalid, v =>
+            const yInput = numInput(yBuf?.text ?? String(ins.y), yBuf?.invalid, yBuf?.isNew, v =>
                 invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseY', text: v }));
             xInput.placeholder = 'X';
             yInput.placeholder = 'Y';
@@ -338,8 +354,8 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers)
         }
         case 'Scroll': {
             label.textContent = 'Scroll:';
-            const amtBuf = getInvalidText(invalidBuffers, i, 'ScrollAmount');
-            const amtInput = numInput(amtBuf?.text ?? String(ins.amount), amtBuf?.invalid, v =>
+            const amtBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'ScrollAmount');
+            const amtInput = numInput(amtBuf?.text ?? String(ins.amount), amtBuf?.invalid, amtBuf?.isNew, v =>
                 invoke('edit_instruction_field', { index: i, fieldId: 'ScrollAmount', text: v }));
             const axisSel = enumSelect(['Vertical', 'Horizontal'], ins.axis, v =>
                 invoke('edit_instruction', { index: i, instruction: { type: 'Scroll', amount: ins.amount, axis: v } }));
@@ -386,12 +402,15 @@ function textInput(value, onChange) {
     return inp;
 }
 
-function numInput(value, invalid, onChange) {
+function numInput(value, invalid, isNew, onChange) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
     inp.style.width = '72px';
-    if (invalid) inp.classList.add('invalid');
+    if (invalid) {
+        inp.classList.add('invalid');
+        if (isNew) inp.classList.add('shake-once');
+    }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
 }
@@ -447,18 +466,21 @@ function renderSettings(s) {
 function renderWarnings(s) {
     const container = document.getElementById('warnings-container');
     container.innerHTML = '';
-    if (!s.grab_available) {
+    const grabMissing = !s.grab_available;
+    const emulatorMissing = !s.emulator_available;
+    if (grabMissing) {
         const banner = document.createElement('div');
-        banner.className = 'warning-banner';
+        banner.className = 'warning-banner' + (prevWarnings.grab ? '' : ' banner-enter');
         banner.innerHTML = '⚠ Global hotkeys unavailable.<br>Check system permissions (Accessibility / input group).';
         container.appendChild(banner);
     }
-    if (!s.emulator_available) {
+    if (emulatorMissing) {
         const banner = document.createElement('div');
-        banner.className = 'warning-banner';
+        banner.className = 'warning-banner' + (prevWarnings.emulator ? '' : ' banner-enter');
         banner.innerHTML = '⚠ Input emulation unavailable.<br>Check system permissions.';
         container.appendChild(banner);
     }
+    prevWarnings = { grab: grabMissing, emulator: emulatorMissing };
 }
 
 const NAMED_ACTIONS = [
@@ -583,11 +605,15 @@ function renderTcpServer(s) {
     portInput.type = 'text';
     portInput.value = s.ipc_port_text;
     portInput.style.width = '80px';
-    if (s.ipc_port_invalid) portInput.classList.add('invalid');
+    if (s.ipc_port_invalid) {
+        portInput.classList.add('invalid');
+        if (!prevPortInvalid) portInput.classList.add('shake-once');
+    }
     portInput.addEventListener('input', () => invoke('set_ipc_port_text', { text: portInput.value }));
     portRow.appendChild(portLabel);
     portRow.appendChild(portInput);
     section.appendChild(portRow);
+    prevPortInvalid = s.ipc_port_invalid;
 
     // Status + toggle row
     const statusRow = document.createElement('div');

@@ -238,10 +238,11 @@ const HEADER_H = 34;
 const FOOTER_H = 44;
 const ROW_H = 60;
 const EMPTY_H = 52;
+const STRAND_WIDTH = 520; // wide enough that no instruction row's fields wrap to a second line
 
 function estimateStrandSize(strand) {
     const bodyH = strand.instructions.length ? strand.instructions.length * ROW_H : EMPTY_H;
-    return { width: 360, height: HEADER_H + bodyH + FOOTER_H };
+    return { width: STRAND_WIDTH, height: HEADER_H + bodyH + FOOTER_H };
 }
 
 // Bounds of the last render, needed to convert pointer/client coordinates
@@ -646,7 +647,7 @@ function defaultInstruction(type) {
     switch (type) {
         case 'Wait':      return { type: 'Wait', duration: 1000, randomness: 0 };
         case 'Text':      return { type: 'Text', text: 'text' };
-        case 'Key':       return { type: 'Key', key: 'KeyA', direction: 'Click' };
+        case 'Key':       return { type: 'Key', key: 'a', direction: 'Click' };
         case 'Button':    return { type: 'Button', button: 'Left', direction: 'Click' };
         case 'MoveMouse': return { type: 'MoveMouse', x: 0, y: 0, coordinate: 'Relative' };
         case 'Scroll':    return { type: 'Scroll', amount: 4, axis: 'Vertical' };
@@ -658,7 +659,11 @@ function defaultInstruction(type) {
 
 async function addInstructionAt(strandId, index, type) {
     const ins = defaultInstruction(type);
-    await invoke('add_instruction', { strandId, index, instruction: ins });
+    try {
+        await invoke('add_instruction', { strandId, index, instruction: ins });
+    } catch (err) {
+        console.error('add_instruction failed:', err);
+    }
 }
 
 // ═══ Drag & drop (pick up a block, snap onto another strand, or drop free) ═══
@@ -747,7 +752,7 @@ function startDrag(e, candidate) {
 
     const cardEl = document.querySelector(`.strand-card[data-strand-id="${cssEscape(strandId)}"]`);
     const rowEls = cardEl ? Array.from(cardEl.querySelectorAll('.instruction-row')).slice(index) : [];
-    const cardRect = cardEl ? cardEl.getBoundingClientRect() : { width: 360, left: e.clientX, top: e.clientY };
+    const cardRect = cardEl ? cardEl.getBoundingClientRect() : { width: STRAND_WIDTH, left: e.clientX, top: e.clientY };
     const anchorRect = rowEls[0] ? rowEls[0].getBoundingClientRect() : cardRect;
 
     const ghost = document.createElement('div');

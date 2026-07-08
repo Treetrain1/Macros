@@ -448,9 +448,10 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .instruction-content {
   flex: 1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 .instruction-label {
   color: var(--text-dim);

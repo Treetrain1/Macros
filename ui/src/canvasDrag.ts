@@ -346,7 +346,12 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     const body = card.querySelector('.strand-body');
     const rows = Array.from(card.querySelectorAll('.instruction-row'));
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
-    boundaries.push(rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
+    const marker = card.querySelector('.root-marker');
+    boundaries.push(rows.length
+      ? rows[rows.length - 1].getBoundingClientRect().bottom
+      : marker
+        ? marker.getBoundingClientRect().bottom + 4
+        : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
     for (let idx = 0; idx < boundaries.length; idx++) {
       const y = boundaries[idx];
       const dist = Math.abs(e.clientY - y);

@@ -519,15 +519,42 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   cursor: grab;
   touch-action: none;
   transition: filter var(--dur-fast) var(--ease-standard);
-  filter: drop-shadow(var(--shadow-sm));
+  filter:
+    drop-shadow(1.5px 0 0 var(--border))
+    drop-shadow(-1.5px 0 0 var(--border))
+    drop-shadow(0 1.5px 0 var(--border))
+    drop-shadow(0 -1.5px 0 var(--border));
+}
+.instruction-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg2);
+  pointer-events: none;
+  clip-path: polygon(
+    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)),
+    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
+    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
+    24.5px 100%, 17.5px 100%,
+    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
+    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    7.5px calc(100% - var(--connector-notch-depth)),
+    4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
 }
 .instruction-row:hover {
   filter:
     drop-shadow(var(--shadow-sm))
-    drop-shadow(2px 0 0 var(--accent))
-    drop-shadow(-2px 0 0 var(--accent))
-    drop-shadow(0 2px 0 var(--accent))
-    drop-shadow(0 -2px 0 var(--accent));
+    drop-shadow(1.5px 0 0 var(--accent))
+    drop-shadow(-1.5px 0 0 var(--accent))
+    drop-shadow(0 1.5px 0 var(--accent))
+    drop-shadow(0 -1.5px 0 var(--accent));
 }
 
 /* The clipped puzzle-piece silhouette itself — background, blur, and the

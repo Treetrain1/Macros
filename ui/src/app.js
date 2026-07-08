@@ -838,9 +838,10 @@ function startDrag(e, candidate) {
     if (wholeStrandGrab) {
         drag.resolvedId = strandId;
     } else {
+        const localDrag = drag;
         drag.resolvingPromise = invoke('split_strand', { strandId, index, x: strand.x + 24, y: strand.y + 24 })
-            .then(newId => { drag.resolvedId = newId; return newId; })
-            .catch(err => { console.error('split_strand failed:', err); drag = null; ghost.remove(); });
+            .then(newId => { localDrag.resolvedId = newId; return newId; })
+            .catch(err => { console.error('split_strand failed:', err); });
     }
 
     positionGhost(e);

@@ -133,6 +133,7 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
 
 function onCanvasWheel(e: WheelEvent) {
   if (!e.ctrlKey) return;
+  if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
   e.preventDefault();
   const scrollEl = document.getElementById('canvas-scroll');
   if (!scrollEl) return;
@@ -170,6 +171,7 @@ function capturePointer(e: PointerEvent) {
 
 function beginPan(e: PointerEvent) {
   if (e.button !== 1) return;
+  if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
   e.preventDefault();
   capturePointer(e);
   const scrollEl = document.getElementById('canvas-scroll');
@@ -597,9 +599,9 @@ let listenersAttached = false;
 export function attachDragListeners() {
   if (listenersAttached) return;
   listenersAttached = true;
-  document.getElementById('canvas-scroll')?.addEventListener('pointerdown', beginPan);
+  document.addEventListener('pointerdown', beginPan);
   document.addEventListener('pointermove', onPointerMove);
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', onPointerUp);
-  document.getElementById('canvas-scroll')?.addEventListener('wheel', onCanvasWheel, { passive: false });
+  document.addEventListener('wheel', onCanvasWheel, { passive: false });
 }

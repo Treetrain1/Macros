@@ -946,6 +946,11 @@ function setupStaticListeners() {
     }, { placeholder: 'Select macro…', ariaLabel: 'Select macro for hotkey' });
     document.getElementById('pending-macro-select-container').appendChild(pendingMacroDropdown);
     document.getElementById('add-macro-hotkey-btn').onclick = () => invoke('add_macro_hotkey');
+
+    // Populate settings section icons from lucide-static
+    document.querySelectorAll('[data-icon]').forEach(el => {
+        el.replaceWith(iconEl(el.dataset.icon));
+    });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@ import mouse from 'lucide-static/icons/mouse.svg?raw';
 import terminal from 'lucide-static/icons/terminal.svg?raw';
 import messageSquare from 'lucide-static/icons/message-square.svg?raw';
 import cornerDownRight from 'lucide-static/icons/corner-down-right.svg?raw';
+import keyboard from 'lucide-static/icons/keyboard.svg?raw';
 
 export const ICONS = {
     'chevron-up': chevronUp,
@@ -63,6 +64,7 @@ export const ICONS = {
     'terminal': terminal,
     'message-square': messageSquare,
     'corner-down-right': cornerDownRight,
+    'keyboard': keyboard,
 };
 
 /** Icon name for each instruction type, used by the Add-at-end split button. */

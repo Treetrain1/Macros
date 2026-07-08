@@ -1,4 +1,5 @@
 import './style.css';
+import { iconEl, setBtnContent } from './icons.js';
 
 // Tauri v2 API
 const { invoke } = window.__TAURI__.core;
@@ -18,6 +19,25 @@ let appVersion = '';
 let prevInvalidKeys = new Set();
 let prevPortInvalid = false;
 let prevWarnings = { grab: false, emulator: false };
+
+// ─── Theme ────────────────────────────────────────────────────────────────
+let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+
+function setTheme(theme) {
+    currentTheme = theme;
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('macros-theme', theme); } catch (_) {}
+    updateThemeToggleIcon();
+}
+
+function updateThemeToggleIcon() {
+    const btn = document.getElementById('theme-toggle-btn');
+    if (!btn) return;
+    setBtnContent(btn, { icon: currentTheme === 'light' ? 'moon' : 'sun' });
+    const label = currentTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+}
 
 // ─── Initialisation ──────────────────────────────────────────────────────────
 async function init() {
@@ -105,7 +125,9 @@ function renderMacroSelector(s) {
     const hasSelected = s.macro_selected != null;
     removeBtn.disabled = !hasSelected;
     removeBtn.classList.toggle('confirm-armed', s.confirm_remove_macro);
-    removeBtn.textContent = s.confirm_remove_macro ? '⚠ Confirm delete?' : '✕ Remove';
+    setBtnContent(removeBtn, s.confirm_remove_macro
+        ? { icon: 'alert-triangle', text: 'Confirm delete?' }
+        : { icon: 'trash', text: 'Remove' });
 }
 
 function renderRunControls(s) {
@@ -114,11 +136,9 @@ function renderRunControls(s) {
     const recordBtn = document.getElementById('record-btn');
 
     runBtn.disabled = s.macro_selected == null;
-    if (s.loop_mode_enabled) {
-        runBtn.textContent = '🔁 Start loop';
-    } else {
-        runBtn.textContent = '▶ Run macro';
-    }
+    setBtnContent(runBtn, s.loop_mode_enabled
+        ? { icon: 'repeat', text: 'Start loop' }
+        : { icon: 'play', text: 'Run macro' });
 
     if (loopCheck.checked !== s.loop_mode_enabled) {
         loopCheck.checked = s.loop_mode_enabled;
@@ -126,15 +146,15 @@ function renderRunControls(s) {
 
     const phase = s.recording_phase;
     if (phase.phase === 'Countdown') {
-        recordBtn.textContent = `⏸ Recording in ${phase.countdown}s…`;
+        setBtnContent(recordBtn, { icon: 'pause', text: `Recording in ${phase.countdown}s…` });
         recordBtn.className = 'btn-record btn-record-countdown';
         recordBtn.disabled = false;
     } else if (phase.phase === 'Active') {
-        recordBtn.textContent = '⏹ Stop recording (Esc)';
+        setBtnContent(recordBtn, { icon: 'square', text: 'Stop recording (Esc)' });
         recordBtn.className = 'btn-active-record';
         recordBtn.disabled = false;
     } else {
-        recordBtn.textContent = '⏺ Record';
+        setBtnContent(recordBtn, { icon: 'circle', text: 'Record' });
         recordBtn.className = 'btn-record';
         recordBtn.disabled = s.macro_selected == null;
     }
@@ -144,11 +164,14 @@ function renderRunControls(s) {
 
 function renderEditor(s) {
     const editorEl = document.getElementById('macro-editor');
+    const emptyStateEl = document.getElementById('no-macro-state');
     if (s.current_macro == null) {
         editorEl.classList.add('hidden');
+        emptyStateEl.classList.remove('hidden');
         return;
     }
     editorEl.classList.remove('hidden');
+    emptyStateEl.classList.add('hidden');
 
     // Title
     const titleInput = document.getElementById('macro-title');
@@ -161,9 +184,9 @@ function renderEditor(s) {
     document.getElementById('redo-btn').disabled = !s.can_redo;
     const clearBtn = document.getElementById('clear-instructions-btn');
     clearBtn.classList.toggle('confirm-armed', s.confirm_clear_instructions);
-    clearBtn.textContent = s.confirm_clear_instructions
-        ? '⚠ Confirm clear (5s)?'
-        : '✕ Clear instructions';
+    setBtnContent(clearBtn, s.confirm_clear_instructions
+        ? { icon: 'alert-triangle', text: 'Confirm clear (5s)?' }
+        : { icon: 'trash', text: 'Clear instructions' });
 
     renderInstructions(s);
 }
@@ -173,6 +196,14 @@ function renderInstructions(s) {
     const inner = document.getElementById('instructions-inner');
     const instructions = s.current_macro?.instructions ?? [];
     const len = instructions.length;
+
+    if (len === 0) {
+        inner.style.paddingTop = '';
+        inner.style.paddingBottom = '';
+        inner.replaceChildren(buildEmptyInstructionsState());
+        prevInvalidKeys = new Set();
+        return;
+    }
 
     const scrollTop = scrollEl.scrollTop;
     const viewportH = scrollEl.clientHeight || 600;
@@ -221,6 +252,19 @@ function getInvalidText(invalidBuffers, prevInvalidKeys, idx, fieldId) {
     return { text: entry.text, invalid: true, isNew };
 }
 
+function buildEmptyInstructionsState() {
+    const wrap = document.createElement('div');
+    wrap.className = 'empty-state empty-state-inline';
+    wrap.appendChild(iconEl('inbox'));
+    const title = document.createElement('p');
+    title.textContent = 'No instructions yet';
+    const sub = document.createElement('span');
+    sub.textContent = 'Add one below, or hit Record to capture actions live.';
+    wrap.appendChild(title);
+    wrap.appendChild(sub);
+    return wrap;
+}
+
 function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
     const row = document.createElement('div');
     row.className = 'instruction-row';
@@ -235,18 +279,24 @@ function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidK
     controls.className = 'row-controls';
 
     const upBtn = document.createElement('button');
-    upBtn.textContent = '▲';
+    upBtn.className = 'btn-icon';
+    upBtn.appendChild(iconEl('chevron-up'));
     upBtn.title = 'Move up';
+    upBtn.setAttribute('aria-label', 'Move up');
     upBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: -1 });
 
     const downBtn = document.createElement('button');
-    downBtn.textContent = '▼';
+    downBtn.className = 'btn-icon';
+    downBtn.appendChild(iconEl('chevron-down'));
     downBtn.title = 'Move down';
+    downBtn.setAttribute('aria-label', 'Move down');
     downBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: 1 });
 
     const removeBtn = document.createElement('button');
-    removeBtn.textContent = '✕';
+    removeBtn.className = 'btn-icon btn-danger';
+    removeBtn.appendChild(iconEl('x'));
     removeBtn.title = 'Remove instruction';
+    removeBtn.setAttribute('aria-label', 'Remove instruction');
     removeBtn.onclick = () => invoke('remove_instruction', { index: i });
 
     const addSel = document.createElement('select');
@@ -311,7 +361,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
             label.textContent = 'Key:';
             const isCapturing = keyCaptureIdx === i;
             const captureBtn = document.createElement('button');
-            captureBtn.className = 'key-capture-btn';
+            captureBtn.className = 'btn-chip key-capture-btn' + (isCapturing ? ' capturing' : '');
             captureBtn.textContent = isCapturing ? 'Press any key…' : ins.key;
             captureBtn.onclick = () => invoke('start_key_capture', { index: i });
 
@@ -469,18 +519,24 @@ function renderWarnings(s) {
     const grabMissing = !s.grab_available;
     const emulatorMissing = !s.emulator_available;
     if (grabMissing) {
-        const banner = document.createElement('div');
-        banner.className = 'warning-banner' + (prevWarnings.grab ? '' : ' banner-enter');
-        banner.innerHTML = '⚠ Global hotkeys unavailable.<br>Check system permissions (Accessibility / input group).';
-        container.appendChild(banner);
+        container.appendChild(buildWarningBanner(prevWarnings.grab,
+            'Global hotkeys unavailable.<br>Check system permissions (Accessibility / input group).'));
     }
     if (emulatorMissing) {
-        const banner = document.createElement('div');
-        banner.className = 'warning-banner' + (prevWarnings.emulator ? '' : ' banner-enter');
-        banner.innerHTML = '⚠ Input emulation unavailable.<br>Check system permissions.';
-        container.appendChild(banner);
+        container.appendChild(buildWarningBanner(prevWarnings.emulator,
+            'Input emulation unavailable.<br>Check system permissions.'));
     }
     prevWarnings = { grab: grabMissing, emulator: emulatorMissing };
+}
+
+function buildWarningBanner(alreadyShown, html) {
+    const banner = document.createElement('div');
+    banner.className = 'warning-banner' + (alreadyShown ? '' : ' banner-enter');
+    banner.appendChild(iconEl('alert-triangle'));
+    const text = document.createElement('span');
+    text.innerHTML = html;
+    banner.appendChild(text);
+    return banner;
 }
 
 const NAMED_ACTIONS = [
@@ -509,6 +565,7 @@ function renderGlobalHotkeys(s) {
         labelEl.textContent = label;
 
         const comboBtn = document.createElement('button');
+        comboBtn.className = 'btn-chip' + (isCapturing ? ' capturing' : '');
         if (isCapturing) {
             comboBtn.textContent = 'Press combo…';
             comboBtn.disabled = false;
@@ -525,7 +582,10 @@ function renderGlobalHotkeys(s) {
 
         // Clear button
         const clearBtn = document.createElement('button');
-        clearBtn.textContent = '✕';
+        clearBtn.className = 'btn-icon btn-danger';
+        clearBtn.appendChild(iconEl('x'));
+        clearBtn.title = 'Clear hotkey';
+        clearBtn.setAttribute('aria-label', 'Clear hotkey');
         clearBtn.style.display = (isCapturing || comboDisplay == null) ? 'none' : '';
         clearBtn.onclick = () => invoke('clear_named_hotkey', { action: { type } });
 
@@ -551,11 +611,15 @@ function renderPerMacroHotkeys(s) {
         name.textContent = b.macro_name ?? '(deleted)';
 
         const comboBtn = document.createElement('button');
+        comboBtn.className = 'btn-chip';
         comboBtn.textContent = b.combo_display;
         // Re-capture not wired for per-macro (matches existing app behaviour)
 
         const removeBtn = document.createElement('button');
-        removeBtn.textContent = '✕';
+        removeBtn.className = 'btn-icon btn-danger';
+        removeBtn.appendChild(iconEl('x'));
+        removeBtn.title = 'Remove hotkey';
+        removeBtn.setAttribute('aria-label', 'Remove hotkey');
         removeBtn.onclick = () => invoke('remove_hotkey_binding', { index: b.binding_index });
 
         row.appendChild(name);
@@ -579,6 +643,7 @@ function renderPerMacroHotkeys(s) {
     const isCapturingPending = s.combo_capture?.kind === 'Pending';
     const pendingCombo = s.pending_macro_hotkey?.combo_display;
     const pendingComboBtn = document.getElementById('pending-combo-btn');
+    pendingComboBtn.classList.toggle('capturing', isCapturingPending);
     if (isCapturingPending) {
         pendingComboBtn.textContent = 'Press combo…';
     } else {
@@ -642,12 +707,18 @@ function renderTcpServer(s) {
     const autoLabel = document.createElement('span');
     autoLabel.className = 'settings-row-label';
     autoLabel.textContent = 'Automatically start server on app launch';
+    const autoSwitch = document.createElement('label');
+    autoSwitch.className = 'switch';
     const autoCheck = document.createElement('input');
     autoCheck.type = 'checkbox';
     autoCheck.checked = s.ipc_auto_start;
     autoCheck.onchange = () => invoke('set_ipc_auto_start', { enabled: autoCheck.checked });
+    const autoTrack = document.createElement('span');
+    autoTrack.className = 'switch-track';
+    autoSwitch.appendChild(autoCheck);
+    autoSwitch.appendChild(autoTrack);
     autoRow.appendChild(autoLabel);
-    autoRow.appendChild(autoCheck);
+    autoRow.appendChild(autoSwitch);
     section.appendChild(autoRow);
 }
 
@@ -747,6 +818,12 @@ function setupStaticListeners() {
 
     // Settings back button
     document.getElementById('back-btn').onclick = () => invoke('close_settings');
+
+    // Theme toggle
+    document.getElementById('theme-toggle-btn').onclick = () => {
+        setTheme(currentTheme === 'light' ? 'dark' : 'light');
+    };
+    updateThemeToggleIcon();
 
     // Per-macro hotkey add form
     document.getElementById('pending-macro-select').addEventListener('change', e => {

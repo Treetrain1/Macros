@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      lucide-static:
+        specifier: ^1.23.0
+        version: 1.23.0
       vite:
         specifier: ^6.0.0
         version: 6.4.3
@@ -330,6 +333,9 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  lucide-static@1.23.0:
+    resolution: {integrity: sha512-V4tqLEHfvsptGaAZMD8sFJKeGsz2nTAU0+ctxTX3afao/5bs+mhrvvGDmvQmyI7YhQwpIFodZmnkPTMYyGzH4Q==}
+
   nanoid@3.3.15:
     resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -591,6 +597,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  lucide-static@1.23.0: {}
 
   nanoid@3.3.15: {}
 

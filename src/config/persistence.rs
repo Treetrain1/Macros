@@ -1,4 +1,3 @@
-use super::APP_ID;
 use crate::macros::Macro;
 use cosmic::cosmic_config::{Config, ConfigGet, ConfigSet};
 use std::fs;
@@ -10,10 +9,40 @@ const MACRO_FILE_EXTENSION: &str = "json";
 const LEGACY_MACROS_KEY: &str = "macros";
 const LEGACY_SELECTED_MACRO_KEY: &str = "selected_macro";
 
+// Directory name under the XDG config dir where macro files live. Kept
+// separate from `APP_ID` (which is reverse-DNS, used for the cosmic
+// Application/config identity) so the on-disk config path stays plain.
+const CONFIG_DIR_NAME: &str = "Macros";
+// Historical directory name, back when the app used a reverse-DNS-style
+// config dir. Renamed on startup by `migrate_legacy_config_dir`.
+const LEGACY_CONFIG_DIR_NAME: &str = "com.treetrain1.Macros";
+
 fn app_config_dir() -> Result<PathBuf, String> {
     let mut config_dir = dirs::config_dir().ok_or_else(|| "Unable to resolve config directory".to_string())?;
-    config_dir.push(APP_ID);
+    config_dir.push(CONFIG_DIR_NAME);
     Ok(config_dir)
+}
+
+/// One-time migration: rename `~/.config/com.treetrain1.Macros` to
+/// `~/.config/Macros` for users upgrading from the old reverse-DNS config
+/// path. No-op if the legacy dir is absent or the new dir already exists.
+pub(crate) fn migrate_legacy_config_dir() {
+    let Some(base) = dirs::config_dir() else {
+        return;
+    };
+    let old_dir = base.join(LEGACY_CONFIG_DIR_NAME);
+    let new_dir = base.join(CONFIG_DIR_NAME);
+
+    if old_dir.exists() && !new_dir.exists() {
+        if let Err(err) = fs::rename(&old_dir, &new_dir) {
+            warn!(
+                "Failed to migrate config dir '{}' to '{}': {}",
+                old_dir.display(),
+                new_dir.display(),
+                err
+            );
+        }
+    }
 }
 
 fn ensure_macros_dir() -> Result<PathBuf, String> {

@@ -300,11 +300,9 @@ impl InputBackend for MacosBackend {
 
 // ── Hardware event timestamp ────────────────────────────────────────────────
 
-// `core-graphics` 0.23 does not bind `CGEventGetTimestamp` or
-// `CGEventCreateScrollWheelEvent2`; declare them ourselves.
+// `core-graphics` 0.23 does not bind `CGEventCreateScrollWheelEvent2`;
+// declare it ourselves.
 unsafe extern "C" {
-    fn CGEventGetTimestamp(event: core_graphics::sys::CGEventRef) -> u64;
-
     // kCGScrollEventUnitPixel = 0, kCGScrollEventUnitLine = 1
     fn CGEventCreateScrollWheelEvent2(
         source: core_graphics::sys::CGEventSourceRef,
@@ -314,18 +312,6 @@ unsafe extern "C" {
         wheel2: i32,
         wheel3: i32,
     ) -> core_graphics::sys::CGEventRef;
-}
-
-/// OS-assigned timestamp (mach_absolute_time-based ns since boot, NOT
-/// Unix time) for when CoreGraphics generated this event — not when our
-/// CFRunLoop callback happened to run. Stuffed into a `SystemTime` purely
-/// as an opaque carrier for `CaptureTimestamp::Hardware`: the recorder
-/// only ever diffs two `Hardware` values from the same session via
-/// `duration_since`, never reads it as real wall-clock time (same
-/// convention evdev's hardware timestamps already rely on).
-fn cgevent_hardware_timestamp(event: &CGEvent) -> std::time::SystemTime {
-    let ns = unsafe { CGEventGetTimestamp(event.as_ptr()) };
-    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(ns)
 }
 
 // ── Accessibility permission ──────────────────────────────────────────────────
@@ -407,14 +393,14 @@ pub(super) fn start_capture_thread(
                                 (CGEventFlags::CGEventFlagAlternate, MacroKey::Alt),
                                 (CGEventFlags::CGEventFlagCommand,   MacroKey::Meta),
                             ];
-                            let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
+                            let ts = CaptureTimestamp::Now;
                             if let Ok(mut cb) = cb_kb.lock() {
                                 for (flag, key) in pairs {
                                     let was = prev.contains(*flag);
-                                    let now = cur.contains(*flag);
-                                    if !was && now {
+                                    let now_f = cur.contains(*flag);
+                                    if !was && now_f {
                                         cb(CaptureEvent::KeyPress(key.clone()), ts);
-                                    } else if was && !now {
+                                    } else if was && !now_f {
                                         cb(CaptureEvent::KeyRelease(key.clone()), ts);
                                     }
                                 }
@@ -436,8 +422,7 @@ pub(super) fn start_capture_thread(
 
                         if let Some(ev) = capture_ev {
                             if let Ok(mut cb) = cb_kb.lock() {
-                                let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
-                                if matches!(cb(ev, ts), CaptureDecision::Suppress) {
+                                if matches!(cb(ev, CaptureTimestamp::Now), CaptureDecision::Suppress) {
                                     return None;
                                 }
                             }
@@ -503,8 +488,7 @@ pub(super) fn start_capture_thread(
 
                         if let Some(ev) = capture_ev {
                             if let Ok(mut cb) = cb_mouse.lock() {
-                                let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
-                                cb(ev, ts); // CaptureDecision is ignored for listen-only taps
+                                cb(ev, CaptureTimestamp::Now); // CaptureDecision is ignored for listen-only taps
                             }
                         }
                         Some(event.clone())

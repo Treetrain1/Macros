@@ -1,5 +1,5 @@
 name := "macros"
-appid := "com.treetrain1.Macros"
+appid := "dev.ethanstokes.Macros"
 
 # Variables
 TARGET := "target/release/macros"

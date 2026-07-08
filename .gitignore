@@ -16,6 +16,16 @@ Cargo.lock
 # Inno Setup installer output
 dist/
 
+# Flatpak build output
+packaging/flatpak/macros
+packaging/flatpak/.flatpak-builder/
+flatpak-build/
+flatpak-repo/
+
+# AppImage build output
+AppDir/
+*.AppImage
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

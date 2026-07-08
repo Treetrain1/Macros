@@ -425,77 +425,70 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   transform-origin: 0 0;
 }
 
-.canvas-add-strand {
-  position: absolute;
-  right: var(--spacing);
-  bottom: var(--spacing);
-  z-index: 4;
-  width: var(--btn-h-md);
-  height: var(--btn-h-md);
-  border-radius: 50%;
-  box-shadow: var(--shadow-md);
-}
-
 /* ── Strand card ──────────────────────────────────────────────────────────── */
+/* A strand is nothing but its blocks: `.strand-card` is a bare positioning
+   container with no border/background of its own, and no fixed/uniform
+   width — every instruction below is its own bordered box (see
+   .instruction-row), sized only to its own content and stacked with a small
+   gap, so some end up longer than others. */
 .strand-card {
   position: absolute;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
 }
-.strand-card.is-root { border-color: var(--accent); box-shadow: var(--shadow-md), var(--glow-accent); }
 
-.strand-header {
+.strand-body { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+/* The root strand's only piece of chrome: a small fixed marker sitting above
+   its stack. It's the one thing on the whole canvas that gets outlined —
+   the strand itself is never outlined, just this. */
+.root-marker {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  background: var(--glass-bg);
-  border-bottom: 1px solid var(--glass-border);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-.strand-header:active { cursor: grabbing; }
-.strand-grip { display: flex; opacity: 0.5; flex-shrink: 0; }
-.strand-grip svg { width: 13px; height: 13px; }
-.strand-header-label {
-  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--glass-bg-strong);
+  box-shadow: var(--shadow-sm), var(--glow-accent);
+  color: var(--accent);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
+  letter-spacing: 0.05em;
 }
-.strand-card.is-root .strand-header-label { color: var(--accent); }
-.strand-remove-btn { flex-shrink: 0; width: 22px; height: 22px; min-width: 0; padding: 0; }
+.root-marker svg { width: 12px; height: 12px; }
 
-.strand-body { display: flex; flex-direction: column; }
 .strand-empty-hint {
   padding: var(--spacing-sm) var(--spacing);
   font-size: 12px;
   color: var(--text-dim);
   font-style: italic;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius);
+  background: var(--glass-bg);
 }
+.strand-card:not(.is-root) .strand-empty-hint { cursor: grab; touch-action: none; }
+.strand-card:not(.is-root) .strand-empty-hint:active { cursor: grabbing; }
 
 /* ── Instruction Row ─────────────────────────────────────────────────────── */
+/* Each instruction is its own box — its own shape, sized to its own content,
+   not one shared strip inside a bigger shared card. */
 .instruction-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px var(--spacing);
-  border-bottom: 1px solid var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-sm);
   min-height: 60px;
-  transition: background var(--dur-fast) var(--ease-standard);
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
-.instruction-row:hover { background: var(--hover-overlay); }
-.instruction-row:last-child { border-bottom: none; }
+.instruction-row:hover { background: var(--hover-overlay); border-color: var(--accent); }
 
 .row-grip {
   display: flex;
@@ -508,45 +501,35 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .row-grip svg { width: 13px; height: 13px; }
 
 .instruction-content {
-  flex: 1;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  min-width: 0;
 }
 .instruction-label {
   color: var(--text-dim);
   white-space: nowrap;
   font-size: 12px;
-  min-width: 70px;
 }
+/* Inputs size themselves via the `size` attribute (see autosizeInput in
+   app.js) instead of a fixed pixel width, so a block only grows as wide as
+   what's actually typed into it. */
 .instruction-content input[type="text"],
 .instruction-content input[type="number"] {
-  width: 80px;
-}
-.instruction-content .key-capture-btn { min-width: 100px; }
-
-.row-controls {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  flex-shrink: 0;
+  width: auto;
 }
 
 /* ── Drag ghost + snap indicator ─────────────────────────────────────────── */
+/* Deliberately bare — the dragged content itself is a real .strand-card /
+   .instruction-row clone, so it already looks exactly like it does at rest.
+   This wrapper only positions it and lifts it above everything else. */
 .strand-drag-ghost {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 20;
   pointer-events: none;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-lg);
-  background: var(--glass-bg-strong);
-  box-shadow: var(--shadow-md), var(--glow-accent);
   opacity: 0.92;
-  overflow: hidden;
 }
 .strand-snap-indicator {
   position: fixed;
@@ -722,12 +705,8 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* Disable interactive elements while recording */
-#macro-editor.recording .row-controls button,
 #macro-editor.recording .row-grip,
-#macro-editor.recording .strand-grip,
-#macro-editor.recording .strand-header,
-#macro-editor.recording .strand-remove-btn,
-#macro-editor.recording #add-strand-btn,
+#macro-editor.recording .strand-empty-hint,
 #macro-editor.recording .palette-block,
 #macro-editor.recording #undo-btn,
 #macro-editor.recording #redo-btn,

@@ -232,16 +232,6 @@ const ROOT_ID = 'root';
 
 // ═══ Canvas (Scratch-like strand layout) ═══════════════════════════════════
 
-const HEADER_H = 34;
-const ROW_H = 60;
-const EMPTY_H = 52;
-const STRAND_WIDTH = 520; // wide enough that no instruction row's fields wrap to a second line
-
-function estimateStrandSize(strand) {
-    const bodyH = strand.instructions.length ? strand.instructions.length * ROW_H : EMPTY_H;
-    return { width: STRAND_WIDTH, height: HEADER_H + bodyH };
-}
-
 // Bounds of the last render, needed to convert pointer/client coordinates
 // back into canvas (strand.x/y) space when a drag ends on empty canvas.
 let lastBounds = { minX: 0, minY: 0 };
@@ -267,18 +257,30 @@ function renderCanvas(s) {
     const invalidBuffers = s.invalid_field_buffers ?? [];
     const currentInvalidKeys = new Set(invalidBuffers.map(b => `${b.strand_id}:${b.instruction_index}:${b.field_id}`));
 
-    // Compute a bounding box (always including the origin so strand (0,0)
-    // stays reachable) so the canvas can be scrolled out to whichever
-    // stray strand is farthest away, in any direction.
-    let minX = 0, minY = 0, maxX = 0, maxY = 0;
-    const sizes = new Map();
+    // Each strand-card sizes itself to its own content (no universal strand
+    // width), so bounds can't be estimated up front — build every card first
+    // (unpositioned), measure its natural size, then place it. This all
+    // happens in one synchronous pass before the browser paints.
+    inner.replaceChildren();
+    const cardEls = new Map();
     for (const strand of strands) {
-        const size = estimateStrandSize(strand);
-        sizes.set(strand.id, size);
+        if (drag && drag.resolvedId === strand.id) continue; // being dragged — the ghost stands in for it
+        const card = buildStrandCard(strand, s, invalidBuffers, currentInvalidKeys);
+        inner.appendChild(card);
+        cardEls.set(strand.id, card);
+    }
+
+    // Bounding box (always including the origin so strand (0,0) stays
+    // reachable) so the canvas can be scrolled out to whichever stray strand
+    // is farthest away, in any direction.
+    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+    for (const strand of strands) {
+        const card = cardEls.get(strand.id);
+        if (!card) continue;
         minX = Math.min(minX, strand.x);
         minY = Math.min(minY, strand.y);
-        maxX = Math.max(maxX, strand.x + size.width);
-        maxY = Math.max(maxY, strand.y + size.height);
+        maxX = Math.max(maxX, strand.x + card.offsetWidth);
+        maxY = Math.max(maxY, strand.y + card.offsetHeight);
     }
     lastBounds = { minX, minY };
 
@@ -290,14 +292,11 @@ function renderCanvas(s) {
     sizer.style.width = (innerW * canvasZoom) + 'px';
     sizer.style.height = (innerH * canvasZoom) + 'px';
 
-    inner.replaceChildren();
     for (const strand of strands) {
-        if (drag && drag.resolvedId === strand.id) continue; // being dragged — the ghost stands in for it
-        const size = sizes.get(strand.id);
-        const card = buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys);
+        const card = cardEls.get(strand.id);
+        if (!card) continue;
         card.style.left = (strand.x - minX + CANVAS_PAD) + 'px';
         card.style.top = (strand.y - minY + CANVAS_PAD) + 'px';
-        inner.appendChild(card);
     }
 
     restoreFocusedInput(savedFocus);
@@ -318,43 +317,31 @@ function renderCanvas(s) {
     }
 }
 
-function buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys) {
+// A strand is just its blocks: `.strand-card` is a bare positioning
+// container with no visuals of its own — every instruction is its own
+// bordered box, stacked vertically, each sized to only its own content. The
+// only strand-level chrome is the root strand's small "Root" marker block,
+// which sits above its stack and is the one thing that gets an accent
+// outline (nothing else about the strand is outlined).
+function buildStrandCard(strand, s, invalidBuffers, currentInvalidKeys) {
     const card = document.createElement('div');
     card.className = 'strand-card' + (strand.id === ROOT_ID ? ' is-root' : '');
     card.dataset.strandId = strand.id;
-    card.style.width = size.width + 'px';
-
-    const header = document.createElement('div');
-    header.className = 'strand-header';
-    const grip = document.createElement('span');
-    grip.className = 'strand-grip';
-    grip.appendChild(iconEl('move'));
-    header.appendChild(grip);
-    const label = document.createElement('span');
-    label.className = 'strand-header-label';
-    label.textContent = strand.id === ROOT_ID ? 'Main (runs)' : 'Detached strand';
-    header.appendChild(label);
-    if (strand.id !== ROOT_ID) {
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'btn-icon btn-danger strand-remove-btn';
-        removeBtn.appendChild(iconEl('x'));
-        removeBtn.title = 'Delete this strand';
-        removeBtn.setAttribute('aria-label', 'Delete this strand');
-        removeBtn.onclick = () => invoke('remove_strand', { strandId: strand.id });
-        header.appendChild(removeBtn);
-    }
-    header.addEventListener('pointerdown', e => {
-        if (e.target.closest('button')) return;
-        beginPickup(e, strand.id, 0);
-    });
-    card.appendChild(header);
 
     const body = document.createElement('div');
     body.className = 'strand-body';
+
+    if (strand.id === ROOT_ID) {
+        body.appendChild(buildRootMarker());
+    }
+
     if (strand.instructions.length === 0) {
         const hint = document.createElement('div');
         hint.className = 'strand-empty-hint';
         hint.textContent = 'Empty — drag an instruction here from the sidebar.';
+        if (strand.id !== ROOT_ID) {
+            hint.addEventListener('pointerdown', e => beginPickup(e, strand.id, 0));
+        }
         body.appendChild(hint);
     } else {
         strand.instructions.forEach((ins, i) => {
@@ -364,6 +351,16 @@ function buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys) {
     card.appendChild(body);
 
     return card;
+}
+
+function buildRootMarker() {
+    const marker = document.createElement('div');
+    marker.className = 'root-marker';
+    marker.appendChild(iconEl('play'));
+    const label = document.createElement('span');
+    label.textContent = 'Root';
+    marker.appendChild(label);
+    return marker;
 }
 
 function findStrand(strandId) {
@@ -406,28 +403,9 @@ function buildInstructionRow(strandId, i, ins, keyCapture, invalidBuffers, prevI
     buildInstructionContent(content, strandId, i, ins, keyCapture, invalidBuffers, prevInvalidKeys);
     row.appendChild(content);
 
-    // Reordering/removal now happen by dragging the block (grip) — onto
-    // another spot to move it, or onto the sidebar to delete it. Only the
-    // insert-after picker remains as a button-based control.
-    const controls = document.createElement('div');
-    controls.className = 'row-controls';
-
-    const insertAfterDd = dropdown(
-        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
-        '',
-        insType => addInstructionAt(strandId, i + 1, insType),
-        {
-            iconOnly: true,
-            triggerIcon: 'corner-down-right',
-            className: 'btn-icon',
-            ariaLabel: 'Insert instruction after this one',
-            title: 'Insert instruction after this one',
-            resetAfterSelect: true,
-        }
-    );
-
-    controls.appendChild(insertAfterDd);
-    row.appendChild(controls);
+    // Reordering/removal/inserting now all happen by dragging blocks (the
+    // grip above, or a fresh block from the sidebar palette) rather than
+    // per-row buttons.
     return row;
 }
 
@@ -547,11 +525,21 @@ function buildInstructionContent(content, strandId, i, ins, keyCapture, invalidB
 
 // ─── Widget helpers ───────────────────────────────────────────────────────────
 
+// Sizes an <input> to its own content in characters (via the `size`
+// attribute) instead of a fixed pixel width, so each block is only as wide
+// as what's actually typed into it — starting short and growing as the
+// user types more.
+function autosizeInput(inp, minChars) {
+    const resize = () => { inp.size = Math.max(minChars, inp.value.length); };
+    resize();
+    inp.addEventListener('input', resize);
+}
+
 function textInput(value, onChange, strandId, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
-    inp.style.flex = '1';
+    autosizeInput(inp, 6);
     if (strandId != null && ix != null && field != null) { inp.dataset.strand = strandId; inp.dataset.ix = String(ix); inp.dataset.field = field; }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
@@ -561,7 +549,7 @@ function numInput(value, invalid, isNew, onChange, strandId, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
-    inp.style.width = '72px';
+    autosizeInput(inp, 3);
     if (invalid) {
         inp.classList.add('invalid');
         if (isNew) inp.classList.add('shake-once');
@@ -687,22 +675,30 @@ function setSidebarArmed(armed) {
     document.getElementById('instruction-sidebar').classList.toggle('trash-armed', armed);
 }
 
+// Dragging a palette entry previews the actual instruction block it'll
+// create (not the sidebar chip) — dropped on empty canvas it becomes exactly
+// that: a single ordinary-looking block, nothing else.
 function beginPaletteDrag(e, insType) {
     if (state.recording_phase?.phase === 'Active') return;
     if (e.button !== undefined && e.button !== 0) return;
     e.preventDefault();
 
     const ghost = document.createElement('div');
-    ghost.className = 'strand-drag-ghost palette-drag-ghost';
-    ghost.style.width = e.currentTarget.getBoundingClientRect().width + 'px';
-    ghost.appendChild(e.currentTarget.cloneNode(true));
+    ghost.className = 'strand-drag-ghost';
+    const ghostCard = document.createElement('div');
+    ghostCard.className = 'strand-card';
+    const ghostBody = document.createElement('div');
+    ghostBody.className = 'strand-body';
+    ghostBody.appendChild(buildInstructionRow('__palette__', 0, defaultInstruction(insType), null, [], new Set()));
+    ghostCard.appendChild(ghostBody);
+    ghost.appendChild(ghostCard);
     document.body.appendChild(ghost);
 
     paletteDrag = {
         pointerId: e.pointerId,
         insType,
-        offsetX: e.clientX - e.currentTarget.getBoundingClientRect().left,
-        offsetY: e.clientY - e.currentTarget.getBoundingClientRect().top,
+        offsetX: 14,
+        offsetY: 14,
         ghostEl: ghost,
         snap: null,
     };
@@ -755,27 +751,39 @@ function onPointerMove(e) {
     dragCandidate = null;
 }
 
+// The ghost is built from real `.strand-card`/`.instruction-row` clones (not
+// a specially-styled wrapper), so a block being dragged looks exactly like
+// it does at rest — the block is the strand, dragging just moves it.
 function startDrag(e, candidate) {
     const { strandId, index, pointerId } = candidate;
     const strand = findStrand(strandId);
     if (!strand) return;
 
     const cardEl = document.querySelector(`.strand-card[data-strand-id="${cssEscape(strandId)}"]`);
-    const rowEls = cardEl ? Array.from(cardEl.querySelectorAll('.instruction-row')).slice(index) : [];
-    const cardRect = cardEl ? cardEl.getBoundingClientRect() : { width: STRAND_WIDTH, left: e.clientX, top: e.clientY };
-    const anchorRect = rowEls[0] ? rowEls[0].getBoundingClientRect() : cardRect;
+    const wholeStrandGrab = strandId !== ROOT_ID && index === 0;
 
     const ghost = document.createElement('div');
     ghost.className = 'strand-drag-ghost';
-    ghost.style.width = cardRect.width + 'px';
-    if (rowEls.length) {
+    let anchorRect = cardEl ? cardEl.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
+
+    if (wholeStrandGrab) {
+        if (cardEl) {
+            ghost.appendChild(cardEl.cloneNode(true));
+            cardEl.style.visibility = 'hidden';
+        }
+    } else {
+        const rowEls = cardEl ? Array.from(cardEl.querySelectorAll('.instruction-row')).slice(index) : [];
+        if (rowEls[0]) anchorRect = rowEls[0].getBoundingClientRect();
+        const ghostCard = document.createElement('div');
+        ghostCard.className = 'strand-card';
+        const ghostBody = document.createElement('div');
+        ghostBody.className = 'strand-body';
         rowEls.forEach(el => {
             el.style.visibility = 'hidden';
-            ghost.appendChild(el.cloneNode(true));
+            ghostBody.appendChild(el.cloneNode(true));
         });
-    } else if (cardEl) {
-        ghost.appendChild(cardEl.cloneNode(true));
-        cardEl.style.visibility = 'hidden';
+        ghostCard.appendChild(ghostBody);
+        ghost.appendChild(ghostCard);
     }
     document.body.appendChild(ghost);
 
@@ -789,7 +797,6 @@ function startDrag(e, candidate) {
         snap: null,
     };
 
-    const wholeStrandGrab = strandId !== ROOT_ID && index === 0;
     if (wholeStrandGrab) {
         drag.resolvedId = strandId;
     } else {
@@ -1231,9 +1238,6 @@ function setupStaticListeners() {
     document.getElementById('redo-btn').onclick = () => invoke('redo');
     document.getElementById('clear-instructions-btn').onclick = () => invoke('clear_instructions');
     document.getElementById('save-macro-btn').onclick = () => invoke('save_macro');
-
-    // Add a new detached strand to the canvas
-    document.getElementById('add-strand-btn').onclick = () => invoke('add_strand');
 
     // Settings back button
     document.getElementById('back-btn').onclick = () => invoke('close_settings');

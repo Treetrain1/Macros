@@ -6,7 +6,7 @@ use crate::app::key_mapping::{
 use crate::app::message::Message;
 use crate::app::message::Message::*;
 use crate::app::state::{ComboCapture, FieldId, Page, RecordingPhase, UpdateCheckState};
-use crate::app::view::CLEAR_CONFIRM_TIMEOUT_SECS;
+use crate::app::view::{CLEAR_CONFIRM_TIMEOUT_SECS, REMOVE_CONFIRM_TIMEOUT_SECS};
 use crate::app::App;
 use crate::config::{self, get_macros_from_config, save_config_value, set_selected_macro_id};
 use crate::hotkey_types::{HotkeyBinding, HotkeyAction, KeyCombo};
@@ -289,18 +289,16 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         ClearInstructions => {
             if !app.editor_ui.confirm_clear_instructions {
                 app.editor_ui.confirm_clear_instructions = true;
+                app.editor_ui.clear_confirm_remaining_secs = CLEAR_CONFIRM_TIMEOUT_SECS as u8;
                 app.editor_ui.clear_confirm_generation =
                     app.editor_ui.clear_confirm_generation.wrapping_add(1);
                 let generation = app.editor_ui.clear_confirm_generation;
                 return Task::perform(
                     async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(
-                            CLEAR_CONFIRM_TIMEOUT_SECS,
-                        ))
-                        .await;
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         generation
                     },
-                    |generation| ClearInstructionsTimeout(generation).into(),
+                    |generation| ClearInstructionsTick(generation).into(),
                 );
             } else {
                 push_undo(app);
@@ -309,12 +307,31 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     app.editor_ui.invalid_field_buffers.clear();
                     auto_save_current_macro(app);
                     app.editor_ui.confirm_clear_instructions = false;
+                    app.editor_ui.clear_confirm_remaining_secs = 0;
+                }
+            }
+        }
+        ClearInstructionsTick(generation) => {
+            if generation == app.editor_ui.clear_confirm_generation {
+                if app.editor_ui.clear_confirm_remaining_secs > 1 {
+                    app.editor_ui.clear_confirm_remaining_secs -= 1;
+                    return Task::perform(
+                        async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            generation
+                        },
+                        |gen| ClearInstructionsTick(gen).into(),
+                    );
+                } else {
+                    app.editor_ui.confirm_clear_instructions = false;
+                    app.editor_ui.clear_confirm_remaining_secs = 0;
                 }
             }
         }
         ClearInstructionsTimeout(generation) => {
             if generation == app.editor_ui.clear_confirm_generation {
                 app.editor_ui.confirm_clear_instructions = false;
+                app.editor_ui.clear_confirm_remaining_secs = 0;
             }
         }
         SaveMacro => {
@@ -349,6 +366,17 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
         RemoveMacro => {
             if !app.editor_ui.confirm_remove_macro {
                 app.editor_ui.confirm_remove_macro = true;
+                app.editor_ui.remove_confirm_remaining_secs = REMOVE_CONFIRM_TIMEOUT_SECS as u8;
+                app.editor_ui.remove_confirm_generation =
+                    app.editor_ui.remove_confirm_generation.wrapping_add(1);
+                let generation = app.editor_ui.remove_confirm_generation;
+                return Task::perform(
+                    async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        generation
+                    },
+                    |generation| RemoveMacroTick(generation).into(),
+                );
             } else {
                 if let Some(mac) = app.macro_lib.current_macro.clone() {
                     if let Err(err) = mac.clone().remove() {
@@ -361,7 +389,25 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
                     }
                 }
                 app.editor_ui.confirm_remove_macro = false;
+                app.editor_ui.remove_confirm_remaining_secs = 0;
                 app.editor_ui.invalid_field_buffers.clear();
+            }
+        }
+        RemoveMacroTick(generation) => {
+            if generation == app.editor_ui.remove_confirm_generation {
+                if app.editor_ui.remove_confirm_remaining_secs > 1 {
+                    app.editor_ui.remove_confirm_remaining_secs -= 1;
+                    return Task::perform(
+                        async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            generation
+                        },
+                        |gen| RemoveMacroTick(gen).into(),
+                    );
+                } else {
+                    app.editor_ui.confirm_remove_macro = false;
+                    app.editor_ui.remove_confirm_remaining_secs = 0;
+                }
             }
         }
         ToggleLoopMode(enabled) => {
@@ -482,7 +528,7 @@ pub(crate) fn handle_update(app: &mut App, message: Message) -> Task<Message> {
             app.editor_ui.recording_countdown_generation =
                 app.editor_ui.recording_countdown_generation.wrapping_add(1);
             let countdown_gen = app.editor_ui.recording_countdown_generation;
-            app.editor_ui.recording_phase = RecordingPhase::Countdown(5);
+            app.editor_ui.recording_phase = RecordingPhase::Countdown(3);
             return Task::perform(
                 async move {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;

@@ -13,7 +13,8 @@ use std::sync::Arc;
 use tauri::{Runtime, State};
 use tracing::warn;
 
-const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
+const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 3;
+const REMOVE_CONFIRM_TIMEOUT_SECS: u64 = 3;
 const UNDO_STACK_LIMIT: usize = 50;
 
 fn push_undo(s: &mut crate::state::AppState) {
@@ -107,20 +108,43 @@ pub(crate) fn remove_macro<R: Runtime>(state: State<SharedState>, app: tauri::Ap
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if !s.confirm_remove_macro {
         s.confirm_remove_macro = true;
+        s.remove_confirm_remaining_secs = REMOVE_CONFIRM_TIMEOUT_SECS as u8;
+        s.remove_confirm_generation = s.remove_confirm_generation.wrapping_add(1);
+        let timeout_gen = s.remove_confirm_generation;
         emit_state_updated(&app, &s);
-        return Ok(());
-    }
-    if let Some(mac) = s.current_macro.take() {
-        if let Err(e) = mac.remove() {
-            warn!("Failed to remove macro: {e}");
+        drop(s);
+
+        let state_clone = Arc::clone(&*state);
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            for remaining in (1..=REMOVE_CONFIRM_TIMEOUT_SECS).rev() {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if let Ok(mut s) = state_clone.lock() {
+                    if s.remove_confirm_generation != timeout_gen {
+                        break;
+                    }
+                    s.remove_confirm_remaining_secs = remaining as u8 - 1;
+                    if remaining == 1 {
+                        s.confirm_remove_macro = false;
+                    }
+                    emit_state_updated(&app_clone, &s);
+                }
+            }
+        });
+    } else {
+        if let Some(mac) = s.current_macro.take() {
+            if let Err(e) = mac.remove() {
+                warn!("Failed to remove macro: {e}");
+            }
         }
+        s.confirm_remove_macro = false;
+        s.remove_confirm_remaining_secs = 0;
+        s.macro_selected = None;
+        s.invalid_field_buffers.clear();
+        refresh_macro_list(&mut s);
+        config::set_selected_macro_id(None);
+        emit_state_updated(&app, &s);
     }
-    s.confirm_remove_macro = false;
-    s.macro_selected = None;
-    s.invalid_field_buffers.clear();
-    refresh_macro_list(&mut s);
-    config::set_selected_macro_id(None);
-    emit_state_updated(&app, &s);
     Ok(())
 }
 
@@ -282,6 +306,7 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if !s.confirm_clear_instructions {
         s.confirm_clear_instructions = true;
+        s.clear_confirm_remaining_secs = CLEAR_CONFIRM_TIMEOUT_SECS as u8;
         s.clear_confirm_generation = s.clear_confirm_generation.wrapping_add(1);
         let timeout_gen = s.clear_confirm_generation;
         emit_state_updated(&app, &s);
@@ -290,10 +315,16 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
         let state_clone = Arc::clone(&*state);
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(CLEAR_CONFIRM_TIMEOUT_SECS)).await;
-            if let Ok(mut s) = state_clone.lock() {
-                if s.clear_confirm_generation == timeout_gen {
-                    s.confirm_clear_instructions = false;
+            for remaining in (1..=CLEAR_CONFIRM_TIMEOUT_SECS).rev() {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if let Ok(mut s) = state_clone.lock() {
+                    if s.clear_confirm_generation != timeout_gen {
+                        break;
+                    }
+                    s.clear_confirm_remaining_secs = remaining as u8 - 1;
+                    if remaining == 1 {
+                        s.confirm_clear_instructions = false;
+                    }
                     emit_state_updated(&app_clone, &s);
                 }
             }
@@ -305,6 +336,7 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
             s.invalid_field_buffers.clear();
             auto_save(&s);
             s.confirm_clear_instructions = false;
+            s.clear_confirm_remaining_secs = 0;
         }
         emit_state_updated(&app, &s);
     }
@@ -449,14 +481,14 @@ pub(crate) fn start_recording<R: Runtime>(state: State<SharedState>, app: tauri:
     if s.current_macro.is_none() { return Ok(()); }
     s.recording_countdown_generation = s.recording_countdown_generation.wrapping_add(1);
     let countdown_gen = s.recording_countdown_generation;
-    s.recording_phase = RecordingPhase::Countdown(5);
+    s.recording_phase = RecordingPhase::Countdown(3);
     emit_state_updated(&app, &s);
     drop(s);
 
     let state_clone = Arc::clone(&*state);
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        for n in (0u8..5).rev() {
+        for n in (0u8..3).rev() {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             let mut s = match state_clone.lock() {
                 Ok(g) => g,

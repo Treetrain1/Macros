@@ -7,6 +7,7 @@ use crate::macros::Macro;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Estimated pixel height per instruction row including column spacing.
@@ -17,6 +18,7 @@ const BUFFER: usize = 5;
 pub(crate) fn macro_editor<'a>(
     mac: &'a Macro,
     confirm_clear_instructions: bool,
+    clear_confirm_remaining_secs: u8,
     key_capture_index: Option<usize>,
     can_undo: bool,
     can_redo: bool,
@@ -26,9 +28,9 @@ pub(crate) fn macro_editor<'a>(
     invalid_field_buffers: &'a HashMap<(usize, FieldId), String>,
 ) -> Element<'a, Message> {
     let clear_instructions_label = if confirm_clear_instructions {
-        "Confirm clear (5s)"
+        Cow::Owned(format!("Confirm clear ({clear_confirm_remaining_secs}s)"))
     } else {
-        "Clear instructions"
+        Cow::Borrowed("Clear instructions")
     };
 
     let undo_button = {
@@ -106,9 +108,9 @@ pub(crate) fn macro_editor<'a>(
                     cosmic::widget::tooltip::Position::Top
                 ),
                 cosmic::widget::tooltip(
-                    icon_label_button("dialog-warning-symbolic", clear_instructions_label, 6, Some(ClearInstructions)),
+                    icon_label_button("dialog-warning-symbolic", clear_instructions_label.as_ref(), 6, Some(ClearInstructions)),
                     cosmic::widget::container(if confirm_clear_instructions {
-                        "Click again within 5 seconds to remove every instruction in this macro"
+                        "Click again to remove every instruction in this macro"
                     } else {
                         "Arms removal for every instruction in this macro"
                     }),

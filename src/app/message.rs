@@ -24,10 +24,12 @@ pub(crate) enum Message {
     /// Parameters: (index, direction) where direction is -1 for up, 1 for down
     ReorderInstruction(usize, isize),
     ClearInstructions,
+    ClearInstructionsTick(u64),
     ClearInstructionsTimeout(u64),
     SaveMacro,
     NewMacro,
     RemoveMacro,
+    RemoveMacroTick(u64),
     Undo,
     Redo,
     StartRecording,

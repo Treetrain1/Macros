@@ -13,7 +13,8 @@ use editor::macro_editor;
 
 pub(crate) const DEFAULT_WAIT_TIME: f64 = 1000.0;
 pub(crate) const DEFAULT_SCROLL_AMOUNT: i32 = 4;
-pub(crate) const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 5;
+pub(crate) const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 3;
+pub(crate) const REMOVE_CONFIRM_TIMEOUT_SECS: u64 = 3;
 
 pub(crate) const ICON_DARK: cosmic::iced::Color = cosmic::iced::Color { r: 0.38, g: 0.38, b: 0.38, a: 1.0 };
 pub(crate) const ICON_RED: cosmic::iced::Color = cosmic::iced::Color { r: 0.80, g: 0.11, b: 0.16, a: 1.0 };
@@ -44,7 +45,7 @@ pub(crate) fn custom_icon(name: &str) -> widget::icon::Handle {
 
 pub(crate) fn icon_label_button<'a>(
     icon: &str,
-    label: &'static str,
+    label: &'a str,
     spacing: u16,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
@@ -83,6 +84,7 @@ fn build_main_view(app: &App) -> Element<'_, Message> {
         &app.macro_lib.macro_strs,
         app.macro_lib.macro_selected,
         app.editor_ui.confirm_remove_macro,
+        app.editor_ui.remove_confirm_remaining_secs,
         &spacing,
     ));
 
@@ -98,6 +100,7 @@ fn build_main_view(app: &App) -> Element<'_, Message> {
         content = content.push(macro_editor(
             mac,
             app.editor_ui.confirm_clear_instructions,
+            app.editor_ui.clear_confirm_remaining_secs,
             app.editor_ui.key_capture_index,
             !app.editor_ui.undo_stack.is_empty(),
             !app.editor_ui.redo_stack.is_empty(),

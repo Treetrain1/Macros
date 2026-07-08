@@ -60,12 +60,12 @@ impl cosmic::Application for App {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
-        if !matches!(message, Message::RemoveMacro) {
+        if !matches!(message, Message::RemoveMacro | Message::RemoveMacroTick(_)) {
             self.editor_ui.confirm_remove_macro = false;
         }
         if !matches!(
             message,
-            Message::ClearInstructions | Message::ClearInstructionsTimeout(_)
+            Message::ClearInstructions | Message::ClearInstructionsTick(_) | Message::ClearInstructionsTimeout(_)
         ) {
             self.editor_ui.confirm_clear_instructions = false;
         }

@@ -136,7 +136,10 @@ pub(crate) enum ComboCapture {
 
 pub(crate) struct EditorUiState {
     pub(crate) confirm_remove_macro: bool,
+    pub(crate) remove_confirm_remaining_secs: u8,
+    pub(crate) remove_confirm_generation: u64,
     pub(crate) confirm_clear_instructions: bool,
+    pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,
     pub(crate) key_capture_index: Option<usize>,
     pub(crate) undo_stack: Vec<Vec<Instruction>>,
@@ -165,7 +168,10 @@ impl EditorUiState {
     pub(crate) fn new() -> Self {
         Self {
             confirm_remove_macro: false,
+            remove_confirm_remaining_secs: 0,
+            remove_confirm_generation: 0,
             confirm_clear_instructions: false,
+            clear_confirm_remaining_secs: 0,
             clear_confirm_generation: 0,
             key_capture_index: None,
             undo_stack: vec![],
@@ -188,7 +194,9 @@ impl EditorUiState {
 
     pub(crate) fn reset_confirms(&mut self) {
         self.confirm_remove_macro = false;
+        self.remove_confirm_remaining_secs = 0;
         self.confirm_clear_instructions = false;
+        self.clear_confirm_remaining_secs = 0;
         self.key_capture_index = None;
     }
 

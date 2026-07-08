@@ -5,11 +5,13 @@ use crate::app::state::RecordingPhase;
 use cosmic::iced::widget::button;
 use cosmic::iced::{Alignment, Length};
 use cosmic::{widget, Element};
+use std::borrow::Cow;
 
 pub(crate) fn macro_selector_row<'a>(
     macro_strs: &'a [String],
     macro_selected: Option<usize>,
     confirm_remove_macro: bool,
+    remove_confirm_remaining_secs: u8,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Element<'a, Message> {
     let compact_icon_button = |name: &str| {
@@ -31,10 +33,32 @@ pub(crate) fn macro_selector_row<'a>(
     let has_selected = macro_selected.is_some();
 
     let new_macro_button = symbol_label_button("＋", "New macro").on_press(NewMacro);
-    let remove_macro_button = if has_selected {
-        compact_icon_button("remove.svg").on_press(RemoveMacro)
+    let remove_label: Cow<'static, str> = if confirm_remove_macro {
+        Cow::Owned(format!("Delete ({remove_confirm_remaining_secs}s)"))
     } else {
-        compact_icon_button("remove.svg")
+        Cow::Borrowed("Delete")
+    };
+    let remove_macro_button = if has_selected {
+        button(
+            cosmic::widget::row![
+                widget::icon::icon(custom_icon("remove.svg")).size(16),
+                cosmic::widget::text(remove_label.as_ref()),
+            ]
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center),
+        )
+        .padding([8, 12])
+        .on_press(RemoveMacro)
+    } else {
+        button(
+            cosmic::widget::row![
+                widget::icon::icon(custom_icon("remove.svg")).size(16),
+                cosmic::widget::text(remove_label.as_ref()),
+            ]
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center),
+        )
+        .padding([8, 12])
     };
 
     let settings_button = widget::button::icon(

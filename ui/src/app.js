@@ -125,8 +125,8 @@ function renderMacroSelector(s) {
     removeBtn.disabled = !hasSelected;
     removeBtn.classList.toggle('confirm-armed', s.confirm_remove_macro);
     setBtnContent(removeBtn, s.confirm_remove_macro
-        ? { icon: 'alert-triangle', text: 'Confirm delete?' }
-        : { icon: 'trash', text: 'Remove' });
+        ? { icon: 'alert-triangle', text: `Delete (${s.confirm_remove_macro_remaining_secs ?? 3}s)?` }
+        : { icon: 'trash', text: 'Delete' });
 }
 
 function renderRunControls(s) {
@@ -184,7 +184,7 @@ function renderEditor(s) {
     const clearBtn = document.getElementById('clear-instructions-btn');
     clearBtn.classList.toggle('confirm-armed', s.confirm_clear_instructions);
     setBtnContent(clearBtn, s.confirm_clear_instructions
-        ? { icon: 'alert-triangle', text: 'Confirm clear (5s)?' }
+        ? { icon: 'alert-triangle', text: `Confirm clear (${s.confirm_clear_instructions_remaining_secs ?? 5}s)?` }
         : { icon: 'trash', text: 'Clear instructions' });
 
     renderInstructions(s);

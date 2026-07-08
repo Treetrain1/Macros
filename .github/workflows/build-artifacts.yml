@@ -100,9 +100,11 @@ jobs:
           wget -q -O linuxdeploy.AppImage "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.linux_arch }}.AppImage"
           wget -q -O linuxdeploy-plugin-appimage.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-${{ matrix.linux_arch }}.AppImage"
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-appimage.AppImage
+          # linuxdeploy expects the binary name to match the Exec entry in the desktop file
+          cp ${{ matrix.artifact_name }} macros
           ./linuxdeploy.AppImage \
             --appdir AppDir \
-            --executable ${{ matrix.artifact_name }} \
+            --executable ./macros \
             --desktop-file res/macros.desktop \
             --icon-file res/icons/macros.png \
             --output appimage

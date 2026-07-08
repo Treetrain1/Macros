@@ -5,7 +5,7 @@
     "frontendDist": "../ui/dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "Macros",

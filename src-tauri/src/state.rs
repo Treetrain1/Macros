@@ -116,6 +116,7 @@ pub(crate) struct StateDto {
     pub(crate) macro_names: Vec<String>,
     pub(crate) macro_selected: Option<usize>,
     pub(crate) current_macro: Option<MacroDto>,
+    pub(crate) macros_data: Vec<MacroDto>,
     pub(crate) loop_mode_enabled: bool,
     pub(crate) is_looping: bool,
     pub(crate) ipc_active_port: Option<u16>,
@@ -363,6 +364,13 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         },
     });
 
+    let macros_data: Vec<MacroDto> = s.macros_list.iter().map(|mac| MacroDto {
+        id: mac.id.clone(),
+        name: mac.name.clone(),
+        description: mac.description.clone(),
+        instructions: mac.code.iter().map(instruction_to_dto).collect(),
+    }).collect();
+
     let macros_list = &s.macros_list;
     let hotkey_bindings: Vec<HotkeyBindingDto> = s.hotkey_bindings.iter().enumerate().map(|(i, b)| {
         let macro_name = if let HotkeyAction::RunSpecificMacro(ref id) = b.action {
@@ -407,6 +415,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         macro_names: s.macro_strs.clone(),
         macro_selected: s.macro_selected,
         current_macro,
+        macros_data,
         loop_mode_enabled: s.loop_mode_enabled,
         is_looping,
         ipc_active_port: s.ipc_active_port,

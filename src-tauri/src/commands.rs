@@ -66,8 +66,7 @@ pub(crate) fn get_state(state: State<SharedState>) -> Result<StateDto, String> {
 #[tauri::command]
 pub(crate) fn select_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let macros = config::get_macros_from_config();
-    if let Some(mac) = macros.get(index) {
+    if let Some(mac) = s.macros_list.get(index).cloned() {
         s.macro_selected = Some(index);
         s.current_macro = Some(mac.clone());
         config::set_selected_macro_id(Some(&mac.id));
@@ -846,18 +845,15 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 let emulator = Arc::clone(emulator);
                 let is_looping = Arc::clone(&s.is_looping);
                 let loop_mode = s.loop_mode_enabled;
-                let macros_list = s.macros_list.clone();
-                let selected_id = config::get_selected_macro_id();
-                drop(s);
                 let mac = match &action {
-                    HotkeyAction::RunMacro => {
-                        selected_id.and_then(|id| macros_list.iter().find(|m| m.id == id).cloned())
-                    }
+                    HotkeyAction::RunMacro => s.current_macro.clone(),
                     HotkeyAction::RunSpecificMacro(id) => {
-                        macros_list.iter().find(|m| &m.id == id).cloned()
+                        let macs = s.macros_list.clone();
+                        macs.iter().find(|m| &m.id == id).cloned()
                     }
                     _ => None,
                 };
+                drop(s);
                 if let Some(mac) = mac {
                     run_macro_task(mac, emulator, is_looping, loop_mode);
                 }

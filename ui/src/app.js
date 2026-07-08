@@ -225,7 +225,7 @@ function renderInstructions(s) {
     if (len === 0) {
         inner.style.paddingTop = '';
         inner.style.paddingBottom = '';
-        if (!inner.querySelector('.empty-state')) {
+        if (!inner.querySelector('.empty-state') || inner.querySelector('[data-index]')) {
             inner.replaceChildren(buildEmptyInstructionsState());
         }
         prevInvalidKeys = new Set();
@@ -260,6 +260,9 @@ function renderInstructions(s) {
             existingRows.delete(idx);
         }
     }
+
+    // Remove any leftover empty-state from a previous empty-macro render
+    inner.querySelector('.empty-state')?.remove();
 
     // Update visible rows in place and insert new ones, maintaining DOM order
     let prevRow = null;
@@ -873,7 +876,18 @@ function setupStaticListeners() {
     // Macro selector
     macroDropdown = dropdown([], '', val => {
         if (val === '') return;
-        invoke('select_macro', { index: parseInt(val) });
+        const idx = parseInt(val);
+        const cached = state.macros_data?.[idx];
+        if (cached) {
+            state.macro_selected = idx;
+            state.current_macro = cached;
+            state.can_undo = false;
+            state.can_redo = false;
+            state.invalid_field_buffers = [];
+            state.key_capture_index = null;
+            render(state);
+        }
+        invoke('select_macro', { index: idx });
     }, { placeholder: '— no macro selected —', ariaLabel: 'Select macro', className: 'macro-select-trigger' });
     macroDropdown.querySelector('.dd-trigger').setAttribute('aria-labelledby', 'macro-dropdown-label');
     document.getElementById('macro-dropdown-container').appendChild(macroDropdown);

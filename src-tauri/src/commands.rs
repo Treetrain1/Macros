@@ -410,17 +410,38 @@ pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
 
 // ─── Strands (canvas) ──────────────────────────────────────────────────────
 
+/// Creates a new detached strand. `x`/`y` default to an auto-picked spot
+/// next to the farthest-right strand (used by the plain "add strand"
+/// button); an explicit position is passed when this is the result of
+/// dropping a palette block onto empty canvas. An initial `instruction` can
+/// be supplied so a palette-block drop is one atomic, one-undo-step call
+/// instead of create-then-move-then-add.
 #[tauri::command]
-pub(crate) fn add_strand<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+pub(crate) fn add_strand<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    x: Option<i32>,
+    y: Option<i32>,
+    instruction: Option<InstructionDto>,
+) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let ins = match instruction {
+        Some(dto) => vec![dto_to_instruction(&dto).ok_or("Unknown instruction type")?],
+        None => vec![],
+    };
     push_undo(&mut s);
-    if let Some(mac) = &mut s.current_macro {
-        let (x, y) = next_strand_position(mac);
-        mac.strands.push(Strand { id: uuid::Uuid::new_v4().simple().to_string(), x, y, instructions: vec![] });
-        auto_save(&s);
-    }
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let (default_x, default_y) = next_strand_position(mac);
+    let new_id = uuid::Uuid::new_v4().simple().to_string();
+    mac.strands.push(Strand {
+        id: new_id.clone(),
+        x: x.unwrap_or(default_x),
+        y: y.unwrap_or(default_y),
+        instructions: ins,
+    });
+    auto_save(&s);
     emit_state_updated(&app, &s);
-    Ok(())
+    Ok(new_id)
 }
 
 #[tauri::command]

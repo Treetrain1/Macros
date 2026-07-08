@@ -21,8 +21,6 @@ let prevWarnings = { grab: false, emulator: false };
 let macroDropdown = null;
 let prevMacroOptionsKey = '';
 let pendingMacroDropdown = null;
-// Remembers the last instruction type picked in each strand's add-split-button.
-const addInstructionTypeByStrand = new Map();
 
 // ─── Canvas (Scratch-like strand layout) ──────────────────────────────────────
 // Strand x/y from the backend are canvas-space coordinates that can go
@@ -235,14 +233,13 @@ const ROOT_ID = 'root';
 // ═══ Canvas (Scratch-like strand layout) ═══════════════════════════════════
 
 const HEADER_H = 34;
-const FOOTER_H = 44;
 const ROW_H = 60;
 const EMPTY_H = 52;
 const STRAND_WIDTH = 520; // wide enough that no instruction row's fields wrap to a second line
 
 function estimateStrandSize(strand) {
     const bodyH = strand.instructions.length ? strand.instructions.length * ROW_H : EMPTY_H;
-    return { width: STRAND_WIDTH, height: HEADER_H + bodyH + FOOTER_H };
+    return { width: STRAND_WIDTH, height: HEADER_H + bodyH };
 }
 
 // Bounds of the last render, needed to convert pointer/client coordinates
@@ -357,7 +354,7 @@ function buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys) {
     if (strand.instructions.length === 0) {
         const hint = document.createElement('div');
         hint.className = 'strand-empty-hint';
-        hint.textContent = 'Empty — add an instruction below.';
+        hint.textContent = 'Empty — drag an instruction here from the sidebar.';
         body.appendChild(hint);
     } else {
         strand.instructions.forEach((ins, i) => {
@@ -366,44 +363,7 @@ function buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys) {
     }
     card.appendChild(body);
 
-    card.appendChild(buildStrandAddButton(strand.id));
-
     return card;
-}
-
-function buildStrandAddButton(strandId) {
-    const footer = document.createElement('div');
-    footer.className = 'strand-footer';
-
-    const group = document.createElement('div');
-    group.className = 'dd-split-group';
-
-    const currentType = addInstructionTypeByStrand.get(strandId) ?? 'Wait';
-
-    const mainBtn = document.createElement('button');
-    mainBtn.className = 'btn-primary dd-split-main strand-add-btn';
-    mainBtn.title = 'Add instruction at end of this strand';
-    setBtnContent(mainBtn, { icon: INSTRUCTION_TYPE_ICONS[currentType], text: `Add ${INSTRUCTION_TYPE_LABELS[currentType]}` });
-    mainBtn.onclick = () => {
-        const strand = findStrand(strandId);
-        addInstructionAt(strandId, strand?.instructions?.length ?? 0, currentType);
-    };
-
-    const typeDropdown = dropdown(
-        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
-        currentType,
-        val => {
-            addInstructionTypeByStrand.set(strandId, val);
-            const strand = findStrand(strandId);
-            addInstructionAt(strandId, strand?.instructions?.length ?? 0, val);
-        },
-        { iconOnly: true, triggerIcon: 'chevron-down', className: 'dd-split-chevron btn-primary', ariaLabel: 'Choose instruction type to add' }
-    );
-
-    group.appendChild(mainBtn);
-    group.appendChild(typeDropdown);
-    footer.appendChild(group);
-    return footer;
 }
 
 function findStrand(strandId) {
@@ -446,30 +406,11 @@ function buildInstructionRow(strandId, i, ins, keyCapture, invalidBuffers, prevI
     buildInstructionContent(content, strandId, i, ins, keyCapture, invalidBuffers, prevInvalidKeys);
     row.appendChild(content);
 
-    // Controls: Up, Down, Remove, Add-after
+    // Reordering/removal now happen by dragging the block (grip) — onto
+    // another spot to move it, or onto the sidebar to delete it. Only the
+    // insert-after picker remains as a button-based control.
     const controls = document.createElement('div');
     controls.className = 'row-controls';
-
-    const upBtn = document.createElement('button');
-    upBtn.className = 'btn-icon';
-    upBtn.appendChild(iconEl('chevron-up'));
-    upBtn.title = 'Move up';
-    upBtn.setAttribute('aria-label', 'Move up');
-    upBtn.onclick = () => invoke('reorder_instruction', { strandId, index: i, direction: -1 });
-
-    const downBtn = document.createElement('button');
-    downBtn.className = 'btn-icon';
-    downBtn.appendChild(iconEl('chevron-down'));
-    downBtn.title = 'Move down';
-    downBtn.setAttribute('aria-label', 'Move down');
-    downBtn.onclick = () => invoke('reorder_instruction', { strandId, index: i, direction: 1 });
-
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'btn-icon btn-danger';
-    removeBtn.appendChild(iconEl('x'));
-    removeBtn.title = 'Remove instruction';
-    removeBtn.setAttribute('aria-label', 'Remove instruction');
-    removeBtn.onclick = () => invoke('remove_instruction', { strandId, index: i });
 
     const insertAfterDd = dropdown(
         Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
@@ -485,9 +426,6 @@ function buildInstructionRow(strandId, i, ins, keyCapture, invalidBuffers, prevI
         }
     );
 
-    controls.appendChild(upBtn);
-    controls.appendChild(downBtn);
-    controls.appendChild(removeBtn);
     controls.appendChild(insertAfterDd);
     row.appendChild(controls);
     return row;
@@ -723,6 +661,58 @@ function onCanvasWheel(e) {
     scrollEl.scrollTop = canvasPtY * canvasZoom - (e.clientY - rect.top);
 }
 
+// ── Instruction sidebar (palette + trash) ───────────────────────────────────
+
+function buildSidebarPalette() {
+    const palette = document.getElementById('sidebar-palette');
+    palette.replaceChildren();
+    for (const type of Object.keys(INSTRUCTION_TYPE_LABELS)) {
+        const block = document.createElement('div');
+        block.className = 'palette-block';
+        block.appendChild(iconEl(INSTRUCTION_TYPE_ICONS[type]));
+        const label = document.createElement('span');
+        label.textContent = INSTRUCTION_TYPE_LABELS[type];
+        block.appendChild(label);
+        block.addEventListener('pointerdown', e => beginPaletteDrag(e, type));
+        palette.appendChild(block);
+    }
+}
+
+function isOverSidebar(e) {
+    const rect = document.getElementById('instruction-sidebar').getBoundingClientRect();
+    return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+}
+
+function setSidebarArmed(armed) {
+    document.getElementById('instruction-sidebar').classList.toggle('trash-armed', armed);
+}
+
+function beginPaletteDrag(e, insType) {
+    if (state.recording_phase?.phase === 'Active') return;
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+
+    const ghost = document.createElement('div');
+    ghost.className = 'strand-drag-ghost palette-drag-ghost';
+    ghost.style.width = e.currentTarget.getBoundingClientRect().width + 'px';
+    ghost.appendChild(e.currentTarget.cloneNode(true));
+    document.body.appendChild(ghost);
+
+    paletteDrag = {
+        pointerId: e.pointerId,
+        insType,
+        offsetX: e.clientX - e.currentTarget.getBoundingClientRect().left,
+        offsetY: e.clientY - e.currentTarget.getBoundingClientRect().top,
+        ghostEl: ghost,
+        snap: null,
+    };
+    positionGhost(e);
+}
+
+// ═══ Drag & drop (pick up a block, snap onto another strand, or drop free) ═══
+
+let paletteDrag = null; // dragging a fresh instruction in from the sidebar palette
+
 function onPointerMove(e) {
     if (pan) {
         if (e.pointerId !== pan.pointerId) return;
@@ -731,10 +721,30 @@ function onPointerMove(e) {
         scrollEl.scrollTop = pan.startScrollTop - (e.clientY - pan.startY);
         return;
     }
+    if (paletteDrag) {
+        if (e.pointerId !== paletteDrag.pointerId) return;
+        positionGhost(e);
+        if (isOverSidebar(e)) {
+            paletteDrag.snap = null;
+            clearSnapIndicator();
+        } else {
+            updateSnapTarget(e, paletteDrag, null);
+        }
+        return;
+    }
     if (drag) {
         if (e.pointerId !== drag.pointerId) return;
         positionGhost(e);
-        updateSnapTarget(e);
+        if (isOverSidebar(e)) {
+            drag.overTrash = true;
+            drag.snap = null;
+            clearSnapIndicator();
+            setSidebarArmed(true);
+        } else {
+            drag.overTrash = false;
+            setSidebarArmed(false);
+            updateSnapTarget(e, drag, drag.resolvedId ?? dragCandidate?.strandId);
+        }
         return;
     }
     if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
@@ -799,14 +809,21 @@ function positionGhost(e) {
     ghostRafPending = true;
     requestAnimationFrame(() => {
         ghostRafPending = false;
-        if (!drag || !lastPointerEvent) return;
-        drag.ghostEl.style.transform = `translate(${lastPointerEvent.clientX - drag.offsetX}px, ${lastPointerEvent.clientY - drag.offsetY}px)`;
+        const active = drag || paletteDrag;
+        if (!active || !lastPointerEvent) return;
+        active.ghostEl.style.transform = `translate(${lastPointerEvent.clientX - active.offsetX}px, ${lastPointerEvent.clientY - active.offsetY}px)`;
     });
 }
 
 let snapIndicatorEl = null;
-function updateSnapTarget(e) {
-    const excludeId = drag.resolvedId ?? dragCandidate?.strandId;
+function clearSnapIndicator() {
+    if (snapIndicatorEl) { snapIndicatorEl.remove(); snapIndicatorEl = null; }
+}
+
+// Shared by both strand-drags (snapping an existing block elsewhere) and
+// palette-drags (dropping a brand new instruction onto a strand); writes the
+// result onto `target.snap` and updates the shared snap-line indicator.
+function updateSnapTarget(e, target, excludeId) {
     const cards = Array.from(document.querySelectorAll('.strand-card'));
     let best = null;
     for (const card of cards) {
@@ -825,7 +842,7 @@ function updateSnapTarget(e) {
             }
         });
     }
-    drag.snap = best ? { targetId: best.targetId, index: best.index } : null;
+    target.snap = best ? { targetId: best.targetId, index: best.index } : null;
 
     if (best) {
         if (!snapIndicatorEl) {
@@ -836,9 +853,8 @@ function updateSnapTarget(e) {
         snapIndicatorEl.style.left = best.left + 'px';
         snapIndicatorEl.style.top = (best.y - 2) + 'px';
         snapIndicatorEl.style.width = best.width + 'px';
-    } else if (snapIndicatorEl) {
-        snapIndicatorEl.remove();
-        snapIndicatorEl = null;
+    } else {
+        clearSnapIndicator();
     }
 }
 
@@ -859,17 +875,45 @@ function onPointerUp(e) {
     if (dragCandidate && dragCandidate.pointerId === e.pointerId) {
         dragCandidate = null;
     }
+
+    if (paletteDrag && paletteDrag.pointerId === e.pointerId) {
+        const finished = paletteDrag;
+        paletteDrag = null;
+        clearSnapIndicator();
+        finished.ghostEl.remove();
+
+        if (!isOverSidebar(e)) {
+            const ins = defaultInstruction(finished.insType);
+            (async () => {
+                try {
+                    if (finished.snap) {
+                        await invoke('add_instruction', { strandId: finished.snap.targetId, index: finished.snap.index, instruction: ins });
+                    } else {
+                        const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
+                        await invoke('add_strand', { x, y, instruction: ins });
+                    }
+                } catch (err) {
+                    console.error('palette drop failed:', err);
+                }
+            })();
+        }
+        return;
+    }
+
     if (!drag || drag.pointerId !== e.pointerId) return;
 
     const finished = drag;
     drag = null;
-    if (snapIndicatorEl) { snapIndicatorEl.remove(); snapIndicatorEl = null; }
+    clearSnapIndicator();
+    setSidebarArmed(false);
     finished.ghostEl.remove();
 
     (async () => {
         const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
         if (!id) { render(state); return; }
-        if (finished.snap) {
+        if (finished.overTrash) {
+            await invoke('remove_strand', { strandId: id });
+        } else if (finished.snap) {
             await invoke('merge_strand', { draggedId: id, targetId: finished.snap.targetId, index: finished.snap.index });
         } else {
             const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
@@ -1138,6 +1182,7 @@ function renderUpdates(s) {
 function setupStaticListeners() {
     // Pointer-based drag & drop for the strand canvas
     attachDragListeners();
+    buildSidebarPalette();
 
     // Macro selector
     macroDropdown = dropdown([], '', val => {

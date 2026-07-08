@@ -61,16 +61,22 @@
     </div>
 
     <div class="editor-content-area">
-      <div class="canvas-scroll" id="canvas-scroll">
-        <div class="canvas-sizer" id="canvas-sizer">
-          <div class="canvas-inner" id="canvas-inner"></div>
-        </div>
+      <div class="instruction-sidebar" id="instruction-sidebar">
+        <div class="sidebar-trash-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg><span>Drag a strand here to delete it</span></div>
+        <div class="sidebar-palette" id="sidebar-palette"></div>
       </div>
-      <button id="add-strand-btn" class="btn-icon canvas-add-strand" title="Add new instruction strand" aria-label="Add new instruction strand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
-      <div id="recording-overlay" class="recording-overlay hidden">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
-        <span>Recording…</span>
-        <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
+      <div class="canvas-wrap">
+        <div class="canvas-scroll" id="canvas-scroll">
+          <div class="canvas-sizer" id="canvas-sizer">
+            <div class="canvas-inner" id="canvas-inner"></div>
+          </div>
+        </div>
+        <button id="add-strand-btn" class="btn-icon canvas-add-strand" title="Add new detached strand" aria-label="Add new detached strand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+        <div id="recording-overlay" class="recording-overlay hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
+          <span>Recording…</span>
+          <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
+        </div>
       </div>
     </div>
 

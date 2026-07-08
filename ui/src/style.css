@@ -315,10 +315,79 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .editor-content-area {
   flex: 1;
-  position: relative;
+  display: flex;
   overflow: hidden;
   min-height: 0;
 }
+
+.canvas-wrap {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Instruction sidebar (palette + trash) ───────────────────────────────── */
+.instruction-sidebar {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  overflow: hidden;
+}
+.sidebar-trash-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  padding: var(--spacing-sm);
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.sidebar-trash-hint svg { width: 18px; height: 18px; opacity: 0.6; }
+.instruction-sidebar.trash-armed {
+  background: rgba(var(--red-rgb), 0.14);
+}
+.instruction-sidebar.trash-armed .sidebar-trash-hint {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.18);
+}
+.instruction-sidebar.trash-armed .sidebar-trash-hint svg { opacity: 1; }
+
+.sidebar-palette {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.palette-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.palette-block:hover { border-color: var(--accent); }
+.palette-block:active { cursor: grabbing; }
+.palette-block svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-dim); }
 
 /* ── Canvas (Scratch-like strand layout) ─────────────────────────────────── */
 .canvas-scroll {
@@ -414,13 +483,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   color: var(--text-dim);
   font-style: italic;
 }
-
-.strand-footer {
-  padding: 6px 8px;
-  border-top: 1px solid var(--glass-border);
-}
-.strand-footer .dd-split-group { width: 100%; }
-.strand-add-btn { font-size: 12px; }
 
 /* ── Instruction Row ─────────────────────────────────────────────────────── */
 .instruction-row {
@@ -661,12 +723,12 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 /* Disable interactive elements while recording */
 #macro-editor.recording .row-controls button,
-#macro-editor.recording .strand-footer button,
 #macro-editor.recording .row-grip,
 #macro-editor.recording .strand-grip,
 #macro-editor.recording .strand-header,
 #macro-editor.recording .strand-remove-btn,
 #macro-editor.recording #add-strand-btn,
+#macro-editor.recording .palette-block,
 #macro-editor.recording #undo-btn,
 #macro-editor.recording #redo-btn,
 #macro-editor.recording #clear-instructions-btn,

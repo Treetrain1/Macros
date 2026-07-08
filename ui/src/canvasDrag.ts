@@ -83,7 +83,6 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   inner.style.transform = `scale(${canvasZoom})`;
   sizer.style.width = `${innerW * canvasZoom}px`;
   sizer.style.height = `${innerH * canvasZoom}px`;
-
   // A strand placed beyond the previous extent (e.g. a palette drop out in
   // blank space) pushes minX/minY outward, which shifts every card's
   // rendered position by the same amount. Without this, that shift happens
@@ -100,6 +99,21 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     if (!card) continue;
     card.style.left = `${strand.x - minX + CANVAS_PAD}px`;
     card.style.top = `${strand.y - minY + CANVAS_PAD}px`;
+  }
+
+  // A split-drag's new strand renders here as a real, fully visible card at
+  // the split point the instant its state update lands — which can be well
+  // before the user drops anywhere. Left alone, that reads as "the block
+  // isn't following the cursor": a separate ghost clone quietly tracks the
+  // pointer while this solid, static card just sits there until drop calls
+  // moveStrand. Hide it for the duration, same idea as the whole-strand-grab
+  // case where the real card itself becomes the ghost.
+  if (drag && !drag.restoreCard && drag.resolvedId) {
+    const newCard = cardEls.get(drag.resolvedId);
+    if (newCard && newCard !== drag.hiddenNewCardEl) {
+      newCard.style.visibility = 'hidden';
+      drag.hiddenNewCardEl = newCard;
+    }
   }
 
   if (macroId !== currentMacroId) {
@@ -202,13 +216,28 @@ interface DragState {
   resolvingPromise: Promise<string | void> | null;
   snap: { targetId: string; index: number } | null;
   overTrash?: boolean;
-  // Real DOM nodes hidden (visibility: hidden) while the ghost stands in for
-  // them. Vue reuses these exact nodes by key on the next patch and never
-  // touches this inline style itself, so it MUST be restored explicitly on
-  // every drag end (move/merge/trash/error) or the block stays invisible
-  // forever — only a full remount (undo/redo, reload) would ever clear it.
-  hiddenCardEl: HTMLElement | null;
+  // The real DOM node(s) being dragged are physically relocated into the
+  // ghost (not cloned/hidden), so the strand itself visibly follows the
+  // pointer. Vue reuses these exact nodes by key on the next patch and never
+  // touches their position in the tree itself, so they MUST be moved back to
+  // where they came from explicitly on every drag end (move/merge/trash/
+  // error) or Vue's next patch gets confused about where they live — only a
+  // full remount (undo/redo, reload) would otherwise reset them.
+  restoreCard: { el: HTMLElement; parent: Node; next: Node | null } | null;
+  // Partial (split) drags can't use the same real-node move: splitStrand
+  // fires at pickup and its response — which makes Vue patch the old
+  // strand's row list — can land mid-drag, while these rows are sitting
+  // detached inside the ghost. Vue would then unmount them from the wrong
+  // (ghost) parent, and restoring them afterwards would resurrect an
+  // orphaned zombie node Vue no longer tracks. So these stay hidden clones
+  // instead, same as before the real-node-move change.
   hiddenRowEls: HTMLElement[];
+  // Once a split resolves, its brand-new strand renders as a real, fully
+  // visible card at the split point almost immediately (the backend event
+  // round trip is near-instant) — long before drop. positionCanvas hides it
+  // for us each render (see there); tracked here purely so pointerup knows
+  // what to unhide.
+  hiddenNewCardEl: HTMLElement | null;
 }
 let drag: DragState | null = null;
 
@@ -351,9 +380,9 @@ function clientToCanvas(clientX: number, clientY: number): [number, number] {
   ];
 }
 
-// The ghost is built from real `.strand-card`/`.instruction-row` clones (not
-// a specially-styled wrapper), so a block being dragged looks exactly like
-// it does at rest — the block is the strand, dragging just moves it.
+// The ghost is the real `.strand-card`/`.instruction-row` node(s), physically
+// moved into it (not cloned, not hidden) — so the block being dragged is
+// literally the strand itself following the pointer, not a stand-in.
 function startDrag(e: PointerEvent, candidate: DragCandidate) {
   const { strandId, index, pointerId } = candidate;
   const strand = findStrand(strandId);
@@ -365,14 +394,20 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   const ghost = document.createElement('div');
   ghost.className = 'strand-drag-ghost';
   let anchorRect: { left: number; top: number } = cardEl ? cardEl.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
-  let hiddenCardEl: HTMLElement | null = null;
+  let restoreCard: DragState['restoreCard'] = null;
   let hiddenRowEls: HTMLElement[] = [];
 
   if (wholeStrandGrab) {
     if (cardEl) {
-      ghost.appendChild(cardEl.cloneNode(true) as HTMLElement);
-      cardEl.style.visibility = 'hidden';
-      hiddenCardEl = cardEl;
+      restoreCard = { el: cardEl, parent: cardEl.parentNode as Node, next: cardEl.nextSibling };
+      // The card's left/top are canvas-space coordinates meant for its usual
+      // absolutely-positioned home; inside the fixed-position ghost they'd
+      // just add an unwanted offset on top of the pointer-tracked transform,
+      // so drop them while it's on loan and let the ghost alone place it.
+      cardEl.style.position = 'static';
+      cardEl.style.left = '';
+      cardEl.style.top = '';
+      ghost.appendChild(cardEl);
     }
   } else {
     const rowEls = cardEl ? Array.from(cardEl.querySelectorAll<HTMLElement>('.instruction-row')).slice(index) : [];
@@ -382,8 +417,14 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     const ghostBody = document.createElement('div');
     ghostBody.className = 'strand-body';
     rowEls.forEach(el => {
+      // Clone first, hide second — cloneNode copies the inline style
+      // attribute verbatim, so hiding the original before cloning made the
+      // clone itself invisible too, leaving the ghost blank for the whole
+      // drag.
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.style.visibility = '';
+      ghostBody.appendChild(clone);
       el.style.visibility = 'hidden';
-      ghostBody.appendChild(el.cloneNode(true) as HTMLElement);
     });
     ghostCard.appendChild(ghostBody);
     ghost.appendChild(ghostCard);
@@ -399,8 +440,9 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     resolvedId: null,
     resolvingPromise: null,
     snap: null,
-    hiddenCardEl,
+    restoreCard,
     hiddenRowEls,
+    hiddenNewCardEl: null,
   };
   drag = newDrag;
 
@@ -510,12 +552,21 @@ function onPointerUp(e: PointerEvent) {
   drag = null;
   clearSnapIndicator();
   setSidebarArmed(false);
-  finished.ghostEl.remove();
-  // Restore unconditionally (move/merge/trash/error) — the backend round
-  // trip that would otherwise reveal these nodes again is async and, for
-  // trash/merge, may never touch them at all.
-  if (finished.hiddenCardEl) finished.hiddenCardEl.style.visibility = '';
+  // Move the real card back to where it came from before removing the
+  // (now-empty) ghost wrapper — unconditionally (move/merge/trash/error), so
+  // Vue finds it exactly where its vnode tree still expects it on the next
+  // patch. The backend round trip that would otherwise settle this is async
+  // and, for trash/merge, may never re-render this node at all.
+  if (finished.restoreCard) {
+    finished.restoreCard.el.style.position = '';
+    finished.restoreCard.parent.insertBefore(finished.restoreCard.el, finished.restoreCard.next);
+  }
+  // The split-drag rows were only ever hidden (their DOM parent never
+  // changed), so just make them visible again — see the hiddenRowEls comment
+  // on DragState for why they can't be physically moved like the card above.
   for (const el of finished.hiddenRowEls) el.style.visibility = '';
+  if (finished.hiddenNewCardEl) finished.hiddenNewCardEl.style.visibility = '';
+  finished.ghostEl.remove();
 
   void (async () => {
     const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);

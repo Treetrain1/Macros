@@ -6,10 +6,6 @@ import { dropdown, closeAllDropdowns } from './dropdown.js';
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-// ─── Virtual scroll constants (mirror the Rust impl) ────────────────────────
-const ROW_H = 60;
-const BUFFER = 5;
-
 // ─── App state (full snapshot from backend) ──────────────────────────────────
 let state = {};
 let appVersion = '';
@@ -25,8 +21,15 @@ let prevWarnings = { grab: false, emulator: false };
 let macroDropdown = null;
 let prevMacroOptionsKey = '';
 let pendingMacroDropdown = null;
-let addInstructionType = 'Wait';
-let addInstructionMainBtn = null;
+// Remembers the last instruction type picked in each strand's add-split-button.
+const addInstructionTypeByStrand = new Map();
+
+// ─── Canvas (Scratch-like strand layout) ──────────────────────────────────────
+// Strand x/y from the backend are canvas-space coordinates that can go
+// negative; canvas-inner is sized to the strands' bounding box each render
+// (see renderCanvas), offset by this padding so cards never touch the edge.
+const CANVAS_PAD = 400;
+let currentMacroId = null; // used to detect "switched macro" so we can re-center the canvas scroll
 
 // ─── Theme ────────────────────────────────────────────────────────────────
 let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
@@ -73,7 +76,7 @@ async function init() {
 
 // ─── Keyboard capture (key instructions + hotkey combo capture) ──────────────
 document.addEventListener('keydown', async e => {
-    if (state.key_capture_index != null) {
+    if (state.key_capture != null) {
         e.preventDefault();
         await invoke('key_capture_event', { code: e.code, key: e.key });
         return;
@@ -169,6 +172,7 @@ function renderEditor(s) {
         emptyStateEl.classList.remove('hidden');
         document.getElementById('recording-overlay').classList.add('hidden');
         editorEl.classList.remove('recording');
+        currentMacroId = null;
         return;
     }
     editorEl.classList.remove('hidden');
@@ -194,13 +198,14 @@ function renderEditor(s) {
         ? { icon: 'alert-triangle', text: `Confirm clear (${s.confirm_clear_instructions_remaining_secs ?? 5}s)?` }
         : { icon: 'trash', text: 'Clear instructions' });
 
-    renderInstructions(s);
+    renderCanvas(s);
 }
 
 function saveFocusedInput() {
     const el = document.activeElement;
-    if (!el || el.dataset.ix === undefined || el.dataset.field === undefined) return null;
+    if (!el || el.dataset.strand === undefined || el.dataset.ix === undefined || el.dataset.field === undefined) return null;
     return {
+        strand: el.dataset.strand,
         ix: el.dataset.ix,
         field: el.dataset.field,
         start: el.selectionStart,
@@ -210,9 +215,9 @@ function saveFocusedInput() {
 
 function restoreFocusedInput(saved) {
     if (!saved) return;
-    const inner = document.getElementById('instructions-inner');
+    const inner = document.getElementById('canvas-inner');
     if (!inner) return;
-    const el = inner.querySelector(`[data-ix="${saved.ix}"][data-field="${saved.field}"]`);
+    const el = inner.querySelector(`[data-strand="${cssEscape(saved.strand)}"][data-ix="${saved.ix}"][data-field="${saved.field}"]`);
     if (el) {
         el.focus();
         if (saved.start != null) {
@@ -221,100 +226,178 @@ function restoreFocusedInput(saved) {
     }
 }
 
-function renderInstructions(s) {
-    const scrollEl = document.getElementById('instructions-scroll');
-    const inner = document.getElementById('instructions-inner');
-    const instructions = s.current_macro?.instructions ?? [];
-    const len = instructions.length;
+function cssEscape(s) {
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+const ROOT_ID = 'root';
+
+// ═══ Canvas (Scratch-like strand layout) ═══════════════════════════════════
+
+const HEADER_H = 34;
+const FOOTER_H = 44;
+const ROW_H = 60;
+const EMPTY_H = 52;
+
+function estimateStrandSize(strand) {
+    const bodyH = strand.instructions.length ? strand.instructions.length * ROW_H : EMPTY_H;
+    return { width: 360, height: HEADER_H + bodyH + FOOTER_H };
+}
+
+// Bounds of the last render, needed to convert pointer/client coordinates
+// back into canvas (strand.x/y) space when a drag ends on empty canvas.
+let lastBounds = { minX: 0, minY: 0 };
+
+function renderCanvas(s) {
+    const inner = document.getElementById('canvas-inner');
+    const scrollEl = document.getElementById('canvas-scroll');
+    const strands = s.current_macro?.strands ?? [];
+    const macroId = s.current_macro?.id ?? null;
 
     const savedFocus = saveFocusedInput();
 
-    if (len === 0) {
-        inner.style.paddingTop = '';
-        inner.style.paddingBottom = '';
-        if (!inner.querySelector('.empty-state') || inner.querySelector('[data-index]')) {
-            inner.replaceChildren(buildEmptyInstructionsState());
-        }
-        prevInvalidKeys = new Set();
-        return;
-    }
-
-    const scrollTop = scrollEl.scrollTop;
-    const viewportH = scrollEl.clientHeight || 600;
-
-    const rawStart = Math.floor(scrollTop / ROW_H);
-    const visibleCount = Math.ceil(viewportH / ROW_H) + 1;
-    const startIdx = Math.max(0, rawStart - BUFFER);
-    const endIdx = Math.min(len, rawStart + visibleCount + BUFFER);
-
-    inner.style.paddingTop = (startIdx * ROW_H) + 'px';
-    inner.style.paddingBottom = (Math.max(0, len - endIdx) * ROW_H) + 'px';
-
     const invalidBuffers = s.invalid_field_buffers ?? [];
-    const currentInvalidKeys = new Set(invalidBuffers.map(b => `${b.instruction_index}:${b.field_id}`));
+    const currentInvalidKeys = new Set(invalidBuffers.map(b => `${b.strand_id}:${b.instruction_index}:${b.field_id}`));
 
-    // Map existing rows by data-index
-    const existingRows = new Map();
-    for (const child of inner.children) {
-        const idx = parseInt(child.dataset.index);
-        if (!isNaN(idx)) existingRows.set(idx, child);
+    // Compute a bounding box (always including the origin so strand (0,0)
+    // stays reachable) so the canvas can be scrolled out to whichever
+    // stray strand is farthest away, in any direction.
+    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+    const sizes = new Map();
+    for (const strand of strands) {
+        const size = estimateStrandSize(strand);
+        sizes.set(strand.id, size);
+        minX = Math.min(minX, strand.x);
+        minY = Math.min(minY, strand.y);
+        maxX = Math.max(maxX, strand.x + size.width);
+        maxY = Math.max(maxY, strand.y + size.height);
     }
+    lastBounds = { minX, minY };
 
-    // Remove rows that scrolled out of view
-    for (const [idx, row] of existingRows) {
-        if (idx < startIdx || idx >= endIdx) {
-            row.remove();
-            existingRows.delete(idx);
-        }
-    }
+    inner.style.width = (maxX - minX + 2 * CANVAS_PAD) + 'px';
+    inner.style.height = (maxY - minY + 2 * CANVAS_PAD) + 'px';
 
-    // Remove any leftover empty-state from a previous empty-macro render
-    inner.querySelector('.empty-state')?.remove();
-
-    // Update visible rows in place and insert new ones, maintaining DOM order
-    let prevRow = null;
-    for (let i = startIdx; i < endIdx; i++) {
-        const existing = existingRows.get(i);
-        if (existing) {
-            updateInstructionRowContent(existing, i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys);
-            existingRows.delete(i);
-            prevRow = existing;
-        } else {
-            const newRow = buildInstructionRow(i, instructions[i], s.key_capture_index, invalidBuffers, prevInvalidKeys);
-            if (prevRow) {
-                prevRow.after(newRow);
-            } else {
-                inner.prepend(newRow);
-            }
-            prevRow = newRow;
-        }
+    inner.replaceChildren();
+    for (const strand of strands) {
+        if (drag && drag.resolvedId === strand.id) continue; // being dragged — the ghost stands in for it
+        const size = sizes.get(strand.id);
+        const card = buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys);
+        card.style.left = (strand.x - minX + CANVAS_PAD) + 'px';
+        card.style.top = (strand.y - minY + CANVAS_PAD) + 'px';
+        inner.appendChild(card);
     }
 
     restoreFocusedInput(savedFocus);
-
     prevInvalidKeys = currentInvalidKeys;
-}
 
-let scrollRafPending = false;
-function attachScrollListener() {
-    const scrollEl = document.getElementById('instructions-scroll');
-    if (scrollEl) {
-        scrollEl.addEventListener('scroll', () => {
-            if (!scrollRafPending) {
-                scrollRafPending = true;
-                requestAnimationFrame(() => {
-                    scrollRafPending = false;
-                    if (state.current_macro) renderInstructions(state);
-                });
+    if (macroId !== currentMacroId) {
+        currentMacroId = macroId;
+        const root = strands.find(st => st.id === ROOT_ID);
+        requestAnimationFrame(() => {
+            if (root) {
+                scrollEl.scrollLeft = Math.max(0, root.x - minX + CANVAS_PAD - 60);
+                scrollEl.scrollTop = Math.max(0, root.y - minY + CANVAS_PAD - 60);
+            } else {
+                scrollEl.scrollLeft = 0;
+                scrollEl.scrollTop = 0;
             }
         });
     }
 }
 
-function getInvalidText(invalidBuffers, prevInvalidKeys, idx, fieldId) {
-    const entry = invalidBuffers?.find(b => b.instruction_index === idx && b.field_id === fieldId);
+function buildStrandCard(strand, size, s, invalidBuffers, currentInvalidKeys) {
+    const card = document.createElement('div');
+    card.className = 'strand-card' + (strand.id === ROOT_ID ? ' is-root' : '');
+    card.dataset.strandId = strand.id;
+    card.style.width = size.width + 'px';
+
+    const header = document.createElement('div');
+    header.className = 'strand-header';
+    const grip = document.createElement('span');
+    grip.className = 'strand-grip';
+    grip.appendChild(iconEl('move'));
+    header.appendChild(grip);
+    const label = document.createElement('span');
+    label.className = 'strand-header-label';
+    label.textContent = strand.id === ROOT_ID ? 'Main (runs)' : 'Detached strand';
+    header.appendChild(label);
+    if (strand.id !== ROOT_ID) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-icon btn-danger strand-remove-btn';
+        removeBtn.appendChild(iconEl('x'));
+        removeBtn.title = 'Delete this strand';
+        removeBtn.setAttribute('aria-label', 'Delete this strand');
+        removeBtn.onclick = () => invoke('remove_strand', { strandId: strand.id });
+        header.appendChild(removeBtn);
+    }
+    header.addEventListener('pointerdown', e => {
+        if (e.target.closest('button')) return;
+        beginPickup(e, strand.id, 0);
+    });
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'strand-body';
+    if (strand.instructions.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'strand-empty-hint';
+        hint.textContent = 'Empty — add an instruction below.';
+        body.appendChild(hint);
+    } else {
+        strand.instructions.forEach((ins, i) => {
+            body.appendChild(buildInstructionRow(strand.id, i, ins, s.key_capture, invalidBuffers, prevInvalidKeys));
+        });
+    }
+    card.appendChild(body);
+
+    card.appendChild(buildStrandAddButton(strand.id));
+
+    return card;
+}
+
+function buildStrandAddButton(strandId) {
+    const footer = document.createElement('div');
+    footer.className = 'strand-footer';
+
+    const group = document.createElement('div');
+    group.className = 'dd-split-group';
+
+    const currentType = addInstructionTypeByStrand.get(strandId) ?? 'Wait';
+
+    const mainBtn = document.createElement('button');
+    mainBtn.className = 'btn-primary dd-split-main strand-add-btn';
+    mainBtn.title = 'Add instruction at end of this strand';
+    setBtnContent(mainBtn, { icon: INSTRUCTION_TYPE_ICONS[currentType], text: `Add ${INSTRUCTION_TYPE_LABELS[currentType]}` });
+    mainBtn.onclick = () => {
+        const strand = findStrand(strandId);
+        addInstructionAt(strandId, strand?.instructions?.length ?? 0, currentType);
+    };
+
+    const typeDropdown = dropdown(
+        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
+        currentType,
+        val => {
+            addInstructionTypeByStrand.set(strandId, val);
+            const strand = findStrand(strandId);
+            addInstructionAt(strandId, strand?.instructions?.length ?? 0, val);
+        },
+        { iconOnly: true, triggerIcon: 'chevron-down', className: 'dd-split-chevron btn-primary', ariaLabel: 'Choose instruction type to add' }
+    );
+
+    group.appendChild(mainBtn);
+    group.appendChild(typeDropdown);
+    footer.appendChild(group);
+    return footer;
+}
+
+function findStrand(strandId) {
+    return state.current_macro?.strands?.find(st => st.id === strandId);
+}
+
+function getInvalidText(invalidBuffers, prevInvalidKeys, strandId, idx, fieldId) {
+    const entry = invalidBuffers?.find(b => b.strand_id === strandId && b.instruction_index === idx && b.field_id === fieldId);
     if (!entry) return null;
-    const isNew = !prevInvalidKeys.has(`${idx}:${fieldId}`);
+    const isNew = !prevInvalidKeys.has(`${strandId}:${idx}:${fieldId}`);
     const trimmed = entry.text.trim();
     let invalid = true;
     if (trimmed !== '') {
@@ -330,35 +413,21 @@ function getInvalidText(invalidBuffers, prevInvalidKeys, idx, fieldId) {
     return { text: entry.text, invalid, isNew };
 }
 
-function buildEmptyInstructionsState() {
-    const wrap = document.createElement('div');
-    wrap.className = 'empty-state empty-state-inline';
-    wrap.appendChild(iconEl('inbox'));
-    const title = document.createElement('p');
-    title.textContent = 'No instructions yet';
-    const sub = document.createElement('span');
-    sub.textContent = 'Add one below, or hit Record to capture actions live.';
-    wrap.appendChild(title);
-    wrap.appendChild(sub);
-    return wrap;
-}
-
-function updateInstructionRowContent(row, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
-    const oldContent = row.querySelector('.instruction-content');
-    const newContent = document.createElement('div');
-    newContent.className = 'instruction-content';
-    buildInstructionContent(newContent, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys);
-    oldContent.replaceWith(newContent);
-}
-
-function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
+function buildInstructionRow(strandId, i, ins, keyCapture, invalidBuffers, prevInvalidKeys) {
     const row = document.createElement('div');
     row.className = 'instruction-row';
     row.dataset.index = String(i);
 
+    const grip = document.createElement('span');
+    grip.className = 'row-grip';
+    grip.appendChild(iconEl('move'));
+    grip.title = 'Drag to move or detach';
+    grip.addEventListener('pointerdown', e => beginPickup(e, strandId, i));
+    row.appendChild(grip);
+
     const content = document.createElement('div');
     content.className = 'instruction-content';
-    buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys);
+    buildInstructionContent(content, strandId, i, ins, keyCapture, invalidBuffers, prevInvalidKeys);
     row.appendChild(content);
 
     // Controls: Up, Down, Remove, Add-after
@@ -370,26 +439,26 @@ function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidK
     upBtn.appendChild(iconEl('chevron-up'));
     upBtn.title = 'Move up';
     upBtn.setAttribute('aria-label', 'Move up');
-    upBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: -1 });
+    upBtn.onclick = () => invoke('reorder_instruction', { strandId, index: i, direction: -1 });
 
     const downBtn = document.createElement('button');
     downBtn.className = 'btn-icon';
     downBtn.appendChild(iconEl('chevron-down'));
     downBtn.title = 'Move down';
     downBtn.setAttribute('aria-label', 'Move down');
-    downBtn.onclick = () => invoke('reorder_instruction', { index: i, direction: 1 });
+    downBtn.onclick = () => invoke('reorder_instruction', { strandId, index: i, direction: 1 });
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'btn-icon btn-danger';
     removeBtn.appendChild(iconEl('x'));
     removeBtn.title = 'Remove instruction';
     removeBtn.setAttribute('aria-label', 'Remove instruction');
-    removeBtn.onclick = () => invoke('remove_instruction', { index: i });
+    removeBtn.onclick = () => invoke('remove_instruction', { strandId, index: i });
 
     const insertAfterDd = dropdown(
         Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
         '',
-        insType => addInstructionAt(i + 1, insType),
+        insType => addInstructionAt(strandId, i + 1, insType),
         {
             iconOnly: true,
             triggerIcon: 'corner-down-right',
@@ -408,19 +477,19 @@ function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidK
     return row;
 }
 
-function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers, prevInvalidKeys) {
+function buildInstructionContent(content, strandId, i, ins, keyCapture, invalidBuffers, prevInvalidKeys) {
     const label = document.createElement('span');
     label.className = 'instruction-label';
 
     switch (ins.type) {
         case 'Wait': {
             label.textContent = 'Wait (ms):';
-            const durBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitDuration');
-            const randBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'WaitRandomness');
+            const durBuf = getInvalidText(invalidBuffers, prevInvalidKeys, strandId, i, 'WaitDuration');
+            const randBuf = getInvalidText(invalidBuffers, prevInvalidKeys, strandId, i, 'WaitRandomness');
             const durInput = numInput(durBuf?.text ?? String(ins.duration), durBuf?.invalid, durBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'WaitDuration', text: v }), i, 'WaitDuration');
+                invoke('edit_instruction_field', { strandId, index: i, fieldId: 'WaitDuration', text: v }), strandId, i, 'WaitDuration');
             const randInput = numInput(randBuf?.text ?? String(ins.randomness), randBuf?.invalid, randBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'WaitRandomness', text: v }), i, 'WaitRandomness');
+                invoke('edit_instruction_field', { strandId, index: i, fieldId: 'WaitRandomness', text: v }), strandId, i, 'WaitRandomness');
             const randLabel = document.createElement('span');
             randLabel.className = 'instruction-label';
             randLabel.textContent = '± random:';
@@ -433,21 +502,21 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Text': {
             label.textContent = 'Text:';
             const inp = textInput(ins.text, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Text', text: v } }), i, 'Text');
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Text', text: v } }), strandId, i, 'Text');
             content.appendChild(label);
             content.appendChild(inp);
             break;
         }
         case 'Key': {
             label.textContent = 'Key:';
-            const isCapturing = keyCaptureIdx === i;
+            const isCapturing = keyCapture?.strand_id === strandId && keyCapture?.index === i;
             const captureBtn = document.createElement('button');
             captureBtn.className = 'btn-chip key-capture-btn' + (isCapturing ? ' capturing' : '');
             captureBtn.textContent = isCapturing ? 'Press any key…' : ins.key;
-            captureBtn.onclick = () => invoke('start_key_capture', { index: i });
+            captureBtn.onclick = () => invoke('start_key_capture', { strandId, index: i });
 
             const dirSel = directionSelect(ins.direction, dir =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Key', key: ins.key, direction: dir } }));
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Key', key: ins.key, direction: dir } }));
             content.appendChild(label);
             content.appendChild(captureBtn);
             content.appendChild(dirSel);
@@ -457,9 +526,9 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
             label.textContent = 'Mouse:';
             const buttons = ['Left', 'Right', 'Middle', 'Side', 'Extra'];
             const btnSel = enumSelect(buttons, ins.button, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Button', button: v, direction: ins.direction } }));
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Button', button: v, direction: ins.direction } }));
             const dirSel = directionSelect(ins.direction, dir =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Button', button: ins.button, direction: dir } }));
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Button', button: ins.button, direction: dir } }));
             content.appendChild(label);
             content.appendChild(btnSel);
             content.appendChild(dirSel);
@@ -467,16 +536,16 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         }
         case 'MoveMouse': {
             label.textContent = 'Move mouse:';
-            const xBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseX');
-            const yBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'MoveMouseY');
+            const xBuf = getInvalidText(invalidBuffers, prevInvalidKeys, strandId, i, 'MoveMouseX');
+            const yBuf = getInvalidText(invalidBuffers, prevInvalidKeys, strandId, i, 'MoveMouseY');
             const xInput = numInput(xBuf?.text ?? String(ins.x), xBuf?.invalid, xBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseX', text: v }), i, 'MoveMouseX');
+                invoke('edit_instruction_field', { strandId, index: i, fieldId: 'MoveMouseX', text: v }), strandId, i, 'MoveMouseX');
             const yInput = numInput(yBuf?.text ?? String(ins.y), yBuf?.invalid, yBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'MoveMouseY', text: v }), i, 'MoveMouseY');
+                invoke('edit_instruction_field', { strandId, index: i, fieldId: 'MoveMouseY', text: v }), strandId, i, 'MoveMouseY');
             xInput.placeholder = 'X';
             yInput.placeholder = 'Y';
             const coordSel = enumSelect(['Absolute', 'Relative'], ins.coordinate, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'MoveMouse', x: ins.x, y: ins.y, coordinate: v } }));
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'MoveMouse', x: ins.x, y: ins.y, coordinate: v } }));
             content.appendChild(label);
             content.appendChild(xInput);
             content.appendChild(yInput);
@@ -485,11 +554,11 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         }
         case 'Scroll': {
             label.textContent = 'Scroll:';
-            const amtBuf = getInvalidText(invalidBuffers, prevInvalidKeys, i, 'ScrollAmount');
+            const amtBuf = getInvalidText(invalidBuffers, prevInvalidKeys, strandId, i, 'ScrollAmount');
             const amtInput = numInput(amtBuf?.text ?? String(ins.amount), amtBuf?.invalid, amtBuf?.isNew, v =>
-                invoke('edit_instruction_field', { index: i, fieldId: 'ScrollAmount', text: v }), i, 'ScrollAmount');
+                invoke('edit_instruction_field', { strandId, index: i, fieldId: 'ScrollAmount', text: v }), strandId, i, 'ScrollAmount');
             const axisSel = enumSelect(['Vertical', 'Horizontal'], ins.axis, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Scroll', amount: ins.amount, axis: v } }));
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Scroll', amount: ins.amount, axis: v } }));
             content.appendChild(label);
             content.appendChild(amtInput);
             content.appendChild(axisSel);
@@ -498,7 +567,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Command': {
             label.textContent = 'Command:';
             const inp = textInput(ins.command, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Command', command: v } }), i, 'Command');
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Command', command: v } }), strandId, i, 'Command');
             inp.placeholder = 'bash -c …';
             content.appendChild(label);
             content.appendChild(inp);
@@ -507,7 +576,7 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
         case 'Comment': {
             label.textContent = '//';
             const inp = textInput(ins.comment, v =>
-                invoke('edit_instruction', { index: i, instruction: { type: 'Comment', comment: v } }), i, 'Comment');
+                invoke('edit_instruction', { strandId, index: i, instruction: { type: 'Comment', comment: v } }), strandId, i, 'Comment');
             inp.placeholder = 'Comment';
             inp.style.fontStyle = 'italic';
             inp.style.color = 'var(--text-dim)';
@@ -524,17 +593,17 @@ function buildInstructionContent(content, i, ins, keyCaptureIdx, invalidBuffers,
 
 // ─── Widget helpers ───────────────────────────────────────────────────────────
 
-function textInput(value, onChange, ix, field) {
+function textInput(value, onChange, strandId, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
     inp.style.flex = '1';
-    if (ix != null && field != null) { inp.dataset.ix = String(ix); inp.dataset.field = field; }
+    if (strandId != null && ix != null && field != null) { inp.dataset.strand = strandId; inp.dataset.ix = String(ix); inp.dataset.field = field; }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
 }
 
-function numInput(value, invalid, isNew, onChange, ix, field) {
+function numInput(value, invalid, isNew, onChange, strandId, ix, field) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = value;
@@ -543,7 +612,7 @@ function numInput(value, invalid, isNew, onChange, ix, field) {
         inp.classList.add('invalid');
         if (isNew) inp.classList.add('shake-once');
     }
-    if (ix != null && field != null) { inp.dataset.ix = String(ix); inp.dataset.field = field; }
+    if (strandId != null && ix != null && field != null) { inp.dataset.strand = strandId; inp.dataset.ix = String(ix); inp.dataset.field = field; }
     inp.addEventListener('input', () => onChange(inp.value));
     return inp;
 }
@@ -572,51 +641,172 @@ function defaultInstruction(type) {
     }
 }
 
-async function addInstructionAt(index, type) {
+async function addInstructionAt(strandId, index, type) {
     const ins = defaultInstruction(type);
-    await invoke('add_instruction', { index, instruction: ins });
+    await invoke('add_instruction', { strandId, index, instruction: ins });
 }
 
-// Split button: left segment adds `addInstructionType` immediately, the
-// chevron opens a picker that both changes the type and adds one right away.
-function buildAddInstructionRow() {
-    const row = document.getElementById('add-instruction-row');
-    row.replaceChildren();
+// ═══ Drag & drop (pick up a block, snap onto another strand, or drop free) ═══
 
-    const group = document.createElement('div');
-    group.className = 'dd-split-group';
+const SNAP_THRESHOLD = 28;
+let dragCandidate = null; // pointerdown seen, waiting to see if it turns into a drag
+let drag = null;          // an active drag, once the pointer has moved past the threshold
 
-    addInstructionMainBtn = document.createElement('button');
-    addInstructionMainBtn.className = 'btn-primary dd-split-main';
-    addInstructionMainBtn.title = 'Add instruction at end';
-    updateAddInstructionMainBtn();
-    addInstructionMainBtn.onclick = () => {
-        const len = state.current_macro?.instructions?.length ?? 0;
-        addInstructionAt(len, addInstructionType);
+function beginPickup(e, strandId, index) {
+    if (state.recording_phase?.phase === 'Active') return;
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    dragCandidate = { strandId, index, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
+}
+
+function attachDragListeners() {
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+}
+
+function onPointerMove(e) {
+    if (drag) {
+        if (e.pointerId !== drag.pointerId) return;
+        positionGhost(e);
+        updateSnapTarget(e);
+        return;
+    }
+    if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
+    const dx = e.clientX - dragCandidate.startX;
+    const dy = e.clientY - dragCandidate.startY;
+    if (Math.hypot(dx, dy) < 4) return;
+    startDrag(e, dragCandidate);
+    dragCandidate = null;
+}
+
+function startDrag(e, candidate) {
+    const { strandId, index, pointerId } = candidate;
+    const strand = findStrand(strandId);
+    if (!strand) return;
+
+    const cardEl = document.querySelector(`.strand-card[data-strand-id="${cssEscape(strandId)}"]`);
+    const rowEls = cardEl ? Array.from(cardEl.querySelectorAll('.instruction-row')).slice(index) : [];
+    const cardRect = cardEl ? cardEl.getBoundingClientRect() : { width: 360, left: e.clientX, top: e.clientY };
+    const anchorRect = rowEls[0] ? rowEls[0].getBoundingClientRect() : cardRect;
+
+    const ghost = document.createElement('div');
+    ghost.className = 'strand-drag-ghost';
+    ghost.style.width = cardRect.width + 'px';
+    if (rowEls.length) {
+        rowEls.forEach(el => {
+            el.style.visibility = 'hidden';
+            ghost.appendChild(el.cloneNode(true));
+        });
+    } else if (cardEl) {
+        ghost.appendChild(cardEl.cloneNode(true));
+        cardEl.style.visibility = 'hidden';
+    }
+    document.body.appendChild(ghost);
+
+    drag = {
+        pointerId,
+        offsetX: e.clientX - anchorRect.left,
+        offsetY: e.clientY - anchorRect.top,
+        ghostEl: ghost,
+        resolvedId: null,
+        resolvingPromise: null,
+        snap: null,
     };
 
-    const typeDropdown = dropdown(
-        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
-        addInstructionType,
-        val => {
-            addInstructionType = val;
-            updateAddInstructionMainBtn();
-            const len = state.current_macro?.instructions?.length ?? 0;
-            addInstructionAt(len, val);
-        },
-        { iconOnly: true, triggerIcon: 'chevron-down', className: 'dd-split-chevron btn-primary', ariaLabel: 'Choose instruction type to add' }
-    );
+    const wholeStrandGrab = strandId !== ROOT_ID && index === 0;
+    if (wholeStrandGrab) {
+        drag.resolvedId = strandId;
+    } else {
+        drag.resolvingPromise = invoke('split_strand', { strandId, index, x: strand.x + 24, y: strand.y + 24 })
+            .then(newId => { drag.resolvedId = newId; return newId; })
+            .catch(err => { console.error('split_strand failed:', err); drag = null; ghost.remove(); });
+    }
 
-    group.appendChild(addInstructionMainBtn);
-    group.appendChild(typeDropdown);
-    row.appendChild(group);
+    positionGhost(e);
 }
 
-function updateAddInstructionMainBtn() {
-    setBtnContent(addInstructionMainBtn, {
-        icon: INSTRUCTION_TYPE_ICONS[addInstructionType],
-        text: `Add ${INSTRUCTION_TYPE_LABELS[addInstructionType]}`,
+let ghostRafPending = false;
+let lastPointerEvent = null;
+function positionGhost(e) {
+    lastPointerEvent = e;
+    if (ghostRafPending) return;
+    ghostRafPending = true;
+    requestAnimationFrame(() => {
+        ghostRafPending = false;
+        if (!drag || !lastPointerEvent) return;
+        drag.ghostEl.style.transform = `translate(${lastPointerEvent.clientX - drag.offsetX}px, ${lastPointerEvent.clientY - drag.offsetY}px)`;
     });
+}
+
+let snapIndicatorEl = null;
+function updateSnapTarget(e) {
+    const excludeId = drag.resolvedId ?? dragCandidate?.strandId;
+    const cards = Array.from(document.querySelectorAll('.strand-card'));
+    let best = null;
+    for (const card of cards) {
+        const id = card.dataset.strandId;
+        if (id === excludeId) continue;
+        const cardRect = card.getBoundingClientRect();
+        if (e.clientX < cardRect.left - 60 || e.clientX > cardRect.right + 60) continue;
+        const body = card.querySelector('.strand-body');
+        const rows = Array.from(card.querySelectorAll('.instruction-row'));
+        const boundaries = rows.map(r => r.getBoundingClientRect().top);
+        boundaries.push(rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : body.getBoundingClientRect().top + 8);
+        boundaries.forEach((y, idx) => {
+            const dist = Math.abs(e.clientY - y);
+            if (dist <= SNAP_THRESHOLD && (!best || dist < best.dist)) {
+                best = { targetId: id, index: idx, dist, y, left: cardRect.left, width: cardRect.width };
+            }
+        });
+    }
+    drag.snap = best ? { targetId: best.targetId, index: best.index } : null;
+
+    if (best) {
+        if (!snapIndicatorEl) {
+            snapIndicatorEl = document.createElement('div');
+            snapIndicatorEl.className = 'strand-snap-indicator';
+            document.body.appendChild(snapIndicatorEl);
+        }
+        snapIndicatorEl.style.left = best.left + 'px';
+        snapIndicatorEl.style.top = (best.y - 2) + 'px';
+        snapIndicatorEl.style.width = best.width + 'px';
+    } else if (snapIndicatorEl) {
+        snapIndicatorEl.remove();
+        snapIndicatorEl = null;
+    }
+}
+
+function clientToCanvas(clientX, clientY) {
+    const inner = document.getElementById('canvas-inner');
+    const rect = inner.getBoundingClientRect();
+    return [
+        Math.round(clientX - rect.left - CANVAS_PAD + lastBounds.minX),
+        Math.round(clientY - rect.top - CANVAS_PAD + lastBounds.minY),
+    ];
+}
+
+function onPointerUp(e) {
+    if (dragCandidate && dragCandidate.pointerId === e.pointerId) {
+        dragCandidate = null;
+    }
+    if (!drag || drag.pointerId !== e.pointerId) return;
+
+    const finished = drag;
+    drag = null;
+    if (snapIndicatorEl) { snapIndicatorEl.remove(); snapIndicatorEl = null; }
+    finished.ghostEl.remove();
+
+    (async () => {
+        const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
+        if (!id) { render(state); return; }
+        if (finished.snap) {
+            await invoke('merge_strand', { draggedId: id, targetId: finished.snap.targetId, index: finished.snap.index });
+        } else {
+            const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
+            await invoke('move_strand', { strandId: id, x, y });
+        }
+    })();
 }
 
 // ═══ Settings Page ════════════════════════════════════════════════════════════
@@ -877,8 +1067,8 @@ function renderUpdates(s) {
 // ─── Static event listeners ───────────────────────────────────────────────────
 
 function setupStaticListeners() {
-    // Scroll listener for virtual list
-    attachScrollListener();
+    // Pointer-based drag & drop for the strand canvas
+    attachDragListeners();
 
     // Macro selector
     macroDropdown = dropdown([], '', val => {
@@ -891,7 +1081,7 @@ function setupStaticListeners() {
             state.can_undo = false;
             state.can_redo = false;
             state.invalid_field_buffers = [];
-            state.key_capture_index = null;
+            state.key_capture = null;
             render(state);
         }
         invoke('select_macro', { index: idx });
@@ -928,8 +1118,8 @@ function setupStaticListeners() {
     document.getElementById('clear-instructions-btn').onclick = () => invoke('clear_instructions');
     document.getElementById('save-macro-btn').onclick = () => invoke('save_macro');
 
-    // Add instruction at end (split button: click adds the current type, chevron picks a new type)
-    buildAddInstructionRow();
+    // Add a new detached strand to the canvas
+    document.getElementById('add-strand-btn').onclick = () => invoke('add_strand');
 
     // Settings back button
     document.getElementById('back-btn').onclick = () => invoke('close_settings');

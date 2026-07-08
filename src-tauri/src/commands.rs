@@ -1,6 +1,6 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::{loop_control, thread, Instruction, Macro};
+use crate::macros::{loop_control, thread, Instruction, Macro, Strand, ROOT_STRAND_ID};
 use crate::input::types::InputToken;
 use crate::recording;
 use crate::state::{
@@ -22,9 +22,17 @@ fn push_undo(s: &mut crate::state::AppState) {
         if s.undo_stack.len() >= UNDO_STACK_LIMIT {
             s.undo_stack.remove(0);
         }
-        s.undo_stack.push(mac.code.clone());
+        s.undo_stack.push(mac.strands.clone());
         s.redo_stack.clear();
     }
+}
+
+/// Picks a default spawn position for a newly created/detached strand,
+/// offset from the farthest-right strand so new stacks don't pile up on top
+/// of existing ones.
+fn next_strand_position(mac: &Macro) -> (i32, i32) {
+    let max_x = mac.strands.iter().map(|s| s.x).max().unwrap_or(0);
+    (max_x + 260, 0)
 }
 
 fn refresh_macro_list(s: &mut crate::state::AppState) {
@@ -181,6 +189,7 @@ pub(crate) fn save_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppH
 pub(crate) fn add_instruction<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
+    strand_id: String,
     index: usize,
     instruction: InstructionDto,
 ) -> Result<(), String> {
@@ -188,10 +197,12 @@ pub(crate) fn add_instruction<R: Runtime>(
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
-        let idx = index.min(mac.code.len());
-        mac.code.insert(idx, ins);
-        s.invalid_field_buffers.clear();
-        auto_save(&s);
+        if let Some(strand) = mac.strand_mut(&strand_id) {
+            let idx = index.min(strand.instructions.len());
+            strand.instructions.insert(idx, ins);
+            s.invalid_field_buffers.clear();
+            auto_save(&s);
+        }
     }
     emit_state_updated(&app, &s);
     Ok(())
@@ -201,15 +212,18 @@ pub(crate) fn add_instruction<R: Runtime>(
 pub(crate) fn edit_instruction<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
+    strand_id: String,
     index: usize,
     instruction: InstructionDto,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
     if let Some(mac) = &mut s.current_macro {
-        if index < mac.code.len() {
-            mac.code[index] = ins;
-            auto_save(&s);
+        if let Some(strand) = mac.strand_mut(&strand_id) {
+            if index < strand.instructions.len() {
+                strand.instructions[index] = ins;
+                auto_save(&s);
+            }
         }
     }
     emit_state_updated(&app, &s);
@@ -220,6 +234,7 @@ pub(crate) fn edit_instruction<R: Runtime>(
 pub(crate) fn edit_instruction_field<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
+    strand_id: String,
     index: usize,
     field_id: String,
     text: String,
@@ -227,71 +242,80 @@ pub(crate) fn edit_instruction_field<R: Runtime>(
     let field: FieldId = field_id.parse().map_err(|e: String| e)?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &mut s.current_macro {
-        if let Some(current) = mac.code.get(index).cloned() {
-            let parsed_ok = match (&current, field) {
-                (Instruction::Wait(_, randomness), FieldId::WaitDuration) => {
-                    text.parse::<f64>().map(|v| mac.code[index] = Instruction::Wait(v, *randomness)).is_ok()
-                }
-                (Instruction::Wait(duration, _), FieldId::WaitRandomness) => {
-                    text.parse::<f64>().map(|v| mac.code[index] = Instruction::Wait(*duration, v)).is_ok()
-                }
-                (Instruction::Token(InputToken::MoveMouse(_, y, coord)), FieldId::MoveMouseX) => {
-                    text.parse::<i32>().map(|v| mac.code[index] = Instruction::Token(InputToken::MoveMouse(v, *y, coord.clone()))).is_ok()
-                }
-                (Instruction::Token(InputToken::MoveMouse(x, _, coord)), FieldId::MoveMouseY) => {
-                    text.parse::<i32>().map(|v| mac.code[index] = Instruction::Token(InputToken::MoveMouse(*x, v, coord.clone()))).is_ok()
-                }
-                (Instruction::Token(InputToken::Scroll(_, axis)), FieldId::ScrollAmount) => {
-                    text.parse::<i32>().map(|v| mac.code[index] = Instruction::Token(InputToken::Scroll(v, axis.clone()))).is_ok()
-                }
-                _ => false,
-            };
-            s.invalid_field_buffers.insert((index, field), text);
-            if parsed_ok {
-                auto_save(&s);
-            }
-        }
-    }
-    emit_state_updated(&app, &s);
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(mac) = &s.current_macro {
-        if !mac.code.is_empty() && index < mac.code.len() {
-            push_undo(&mut s);
-            if let Some(mac) = &mut s.current_macro {
-                mac.code.remove(index);
-                s.invalid_field_buffers.clear();
-                auto_save(&s);
-            }
-        }
-    }
-    emit_state_updated(&app, &s);
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize, direction: i32) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(mac) = &s.current_macro {
-        let len = mac.code.len();
-        if len > 1 && index < len {
-            let new_index = if direction < 0 {
-                if index > 0 { index - 1 } else { index }
-            } else if index < len - 1 {
-                index + 1
-            } else {
-                index
-            };
-            if new_index != index {
-                push_undo(&mut s);
-                if let Some(mac) = &mut s.current_macro {
-                    mac.code.swap(index, new_index);
-                    s.invalid_field_buffers.clear();
+        if let Some(strand) = mac.strand_mut(&strand_id) {
+            if let Some(current) = strand.instructions.get(index).cloned() {
+                let parsed_ok = match (&current, field) {
+                    (Instruction::Wait(_, randomness), FieldId::WaitDuration) => {
+                        text.parse::<f64>().map(|v| strand.instructions[index] = Instruction::Wait(v, *randomness)).is_ok()
+                    }
+                    (Instruction::Wait(duration, _), FieldId::WaitRandomness) => {
+                        text.parse::<f64>().map(|v| strand.instructions[index] = Instruction::Wait(*duration, v)).is_ok()
+                    }
+                    (Instruction::Token(InputToken::MoveMouse(_, y, coord)), FieldId::MoveMouseX) => {
+                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::MoveMouse(v, *y, coord.clone()))).is_ok()
+                    }
+                    (Instruction::Token(InputToken::MoveMouse(x, _, coord)), FieldId::MoveMouseY) => {
+                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::MoveMouse(*x, v, coord.clone()))).is_ok()
+                    }
+                    (Instruction::Token(InputToken::Scroll(_, axis)), FieldId::ScrollAmount) => {
+                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::Scroll(v, axis.clone()))).is_ok()
+                    }
+                    _ => false,
+                };
+                s.invalid_field_buffers.insert((strand_id.clone(), index, field), text);
+                if parsed_ok {
                     auto_save(&s);
+                }
+            }
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let should_remove = s.current_macro.as_ref()
+        .and_then(|mac| mac.strand(&strand_id))
+        .is_some_and(|strand| !strand.instructions.is_empty() && index < strand.instructions.len());
+    if should_remove {
+        push_undo(&mut s);
+        if let Some(mac) = &mut s.current_macro {
+            if let Some(strand) = mac.strand_mut(&strand_id) {
+                strand.instructions.remove(index);
+            }
+            s.invalid_field_buffers.clear();
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize, direction: i32) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &s.current_macro {
+        if let Some(strand) = mac.strand(&strand_id) {
+            let len = strand.instructions.len();
+            if len > 1 && index < len {
+                let new_index = if direction < 0 {
+                    if index > 0 { index - 1 } else { index }
+                } else if index < len - 1 {
+                    index + 1
+                } else {
+                    index
+                };
+                if new_index != index {
+                    push_undo(&mut s);
+                    if let Some(mac) = &mut s.current_macro {
+                        if let Some(strand) = mac.strand_mut(&strand_id) {
+                            strand.instructions.swap(index, new_index);
+                        }
+                        s.invalid_field_buffers.clear();
+                        auto_save(&s);
+                    }
                 }
             }
         }
@@ -331,7 +355,11 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     } else {
         push_undo(&mut s);
         if let Some(mac) = &mut s.current_macro {
-            mac.code.clear();
+            // Clearing wipes every strand — root and any detached ones —
+            // matching "start this macro over from scratch".
+            for strand in &mut mac.strands {
+                strand.instructions.clear();
+            }
             s.invalid_field_buffers.clear();
             auto_save(&s);
             s.confirm_clear_instructions = false;
@@ -345,13 +373,14 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
 #[tauri::command]
 pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(prev_code) = s.undo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| m.code.clone());
+    if let Some(prev_strands) = s.undo_stack.pop() {
+        let current = s.current_macro.as_ref().map(|m| m.strands.clone());
         if let Some(cur) = current {
             s.redo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
-            mac.code = prev_code;
+            mac.strands = prev_strands;
+            mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
         auto_save(&s);
@@ -363,13 +392,14 @@ pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
 #[tauri::command]
 pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(next_code) = s.redo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| m.code.clone());
+    if let Some(next_strands) = s.redo_stack.pop() {
+        let current = s.current_macro.as_ref().map(|m| m.strands.clone());
         if let Some(cur) = current {
             s.undo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
-            mac.code = next_code;
+            mac.strands = next_strands;
+            mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
         auto_save(&s);
@@ -378,12 +408,129 @@ pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
     Ok(())
 }
 
+// ─── Strands (canvas) ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub(crate) fn add_strand<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        let (x, y) = next_strand_position(mac);
+        mac.strands.push(Strand { id: uuid::Uuid::new_v4().simple().to_string(), x, y, instructions: vec![] });
+        auto_save(&s);
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn remove_strand<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String) -> Result<(), String> {
+    if strand_id == ROOT_STRAND_ID {
+        return Err("The root strand can't be removed".to_string());
+    }
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        mac.strands.retain(|strand| strand.id != strand_id);
+        s.invalid_field_buffers.retain(|(sid, _, _), _| sid != &strand_id);
+        auto_save(&s);
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Repositions a strand on the canvas — used while dragging a stack that
+/// ends up dropped on empty space rather than snapped onto another strand.
+#[tauri::command]
+pub(crate) fn move_strand<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, x: i32, y: i32) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(strand) = mac.strand_mut(&strand_id) {
+            strand.x = x;
+            strand.y = y;
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Detaches the instructions at and after `index` in `strand_id` into a new
+/// strand positioned at `(x, y)`, returning the new strand's id. This is how
+/// the frontend "picks up" a block: grabbing a block always splits it (and
+/// everything stacked below it) off first, then either drops it as a new
+/// stray strand or re-merges it elsewhere via `merge_strand`.
+#[tauri::command]
+pub(crate) fn split_strand<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    strand_id: String,
+    index: usize,
+    x: i32,
+    y: i32,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let strand = mac.strand_mut(&strand_id).ok_or("Unknown strand")?;
+    if index >= strand.instructions.len() {
+        return Err("Split index out of range".to_string());
+    }
+    let tail = strand.instructions.split_off(index);
+    let new_id = uuid::Uuid::new_v4().simple().to_string();
+    mac.strands.push(Strand { id: new_id.clone(), x, y, instructions: tail });
+    s.invalid_field_buffers.clear();
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(new_id)
+}
+
+/// Splices `dragged_id`'s instructions into `target_id` at `index` and
+/// deletes the (now empty) dragged strand — this is how two stacks snap
+/// together on the canvas. The root strand can only ever be a target, never
+/// the dragged strand, so it's never at risk of being deleted here.
+#[tauri::command]
+pub(crate) fn merge_strand<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    dragged_id: String,
+    target_id: String,
+    index: usize,
+) -> Result<(), String> {
+    if dragged_id == target_id {
+        return Err("Can't merge a strand into itself".to_string());
+    }
+    if dragged_id == ROOT_STRAND_ID {
+        return Err("The root strand can't be merged into another strand".to_string());
+    }
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let dragged_pos = mac.strands.iter().position(|s| s.id == dragged_id).ok_or("Unknown dragged strand")?;
+    let dragged = mac.strands.remove(dragged_pos);
+    let target = match mac.strand_mut(&target_id) {
+        Some(t) => t,
+        None => {
+            // Target vanished (e.g. concurrent edit) — put the dragged
+            // strand back rather than silently dropping its instructions.
+            mac.strands.push(dragged);
+            return Err("Unknown target strand".to_string());
+        }
+    };
+    let idx = index.min(target.instructions.len());
+    target.instructions.splice(idx..idx, dragged.instructions);
+    s.invalid_field_buffers.retain(|(sid, _, _), _| sid != &dragged_id);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 // ─── Key capture ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, index: usize) -> Result<(), String> {
+pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.key_capture_index = Some(index);
+    s.key_capture = Some((strand_id, index));
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -396,22 +543,22 @@ pub(crate) fn key_capture_event<R: Runtime>(
     key: String,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let Some(index) = s.key_capture_index else { return Ok(()); };
+    let Some((strand_id, index)) = s.key_capture.clone() else { return Ok(()); };
 
     let captured_key = crate::key_mapping::web_code_to_macro_key(&code)
         .or_else(|| crate::key_mapping::web_key_to_macro_key(&key));
 
     if let Some(mk) = captured_key {
-        if let Some(mac) = &s.current_macro {
-            if let Some(Instruction::Token(InputToken::Key(_, dir))) = mac.code.get(index).cloned() {
-                if let Some(mac) = &mut s.current_macro {
-                    mac.code[index] = Instruction::Token(InputToken::Key(mk, dir));
+        if let Some(mac) = &mut s.current_macro {
+            if let Some(strand) = mac.strand_mut(&strand_id) {
+                if let Some(Instruction::Token(InputToken::Key(_, dir))) = strand.instructions.get(index).cloned() {
+                    strand.instructions[index] = Instruction::Token(InputToken::Key(mk, dir));
                     auto_save(&s);
                 }
             }
         }
     }
-    s.key_capture_index = None;
+    s.key_capture = None;
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -534,7 +681,7 @@ fn stop_recording_impl(s: &mut crate::state::AppState) {
     if !instructions.is_empty() {
         push_undo(s);
         if let Some(mac) = &mut s.current_macro {
-            mac.code.extend(instructions);
+            mac.root_mut().instructions.extend(instructions);
             auto_save(s);
         }
     }

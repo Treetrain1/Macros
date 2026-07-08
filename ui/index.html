@@ -61,17 +61,16 @@
     </div>
 
     <div class="editor-content-area">
-      <div class="instructions-scroll" id="instructions-scroll">
-        <div class="instructions-inner" id="instructions-inner"></div>
+      <div class="canvas-scroll" id="canvas-scroll">
+        <div class="canvas-inner" id="canvas-inner"></div>
       </div>
+      <button id="add-strand-btn" class="btn-icon canvas-add-strand" title="Add new instruction strand" aria-label="Add new instruction strand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
       <div id="recording-overlay" class="recording-overlay hidden">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
         <span>Recording…</span>
         <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
       </div>
     </div>
-
-    <div class="add-instruction-row" id="add-instruction-row"></div>
 
     <div class="editor-toolbar">
       <button id="undo-btn" title="Undo last instruction change"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path><path d="M9 14 4 9l5-5"></path></svg><span>Undo</span></button>

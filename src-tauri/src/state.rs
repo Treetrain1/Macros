@@ -3,7 +3,7 @@ use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, 
 use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use crate::macros::backend::InputBackend;
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::{Instruction, Macro};
+use crate::macros::{Instruction, Macro, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -93,9 +93,9 @@ pub(crate) struct AppState {
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,
-    pub(crate) key_capture_index: Option<usize>,
-    pub(crate) undo_stack: Vec<Vec<Instruction>>,
-    pub(crate) redo_stack: Vec<Vec<Instruction>>,
+    pub(crate) key_capture: Option<(String, usize)>,
+    pub(crate) undo_stack: Vec<Vec<Strand>>,
+    pub(crate) redo_stack: Vec<Vec<Strand>>,
     pub(crate) recording_phase: RecordingPhase,
     pub(crate) recording_countdown_generation: u64,
     pub(crate) record_mouse_relative: bool,
@@ -103,7 +103,7 @@ pub(crate) struct AppState {
     pub(crate) combo_capture: Option<ComboCapture>,
     pub(crate) hotkey_bindings: Vec<HotkeyBinding>,
     pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
-    pub(crate) invalid_field_buffers: HashMap<(usize, FieldId), String>,
+    pub(crate) invalid_field_buffers: HashMap<(String, usize, FieldId), String>,
     pub(crate) ipc_port_text: String,
     pub(crate) ipc_port_invalid: bool,
     pub(crate) update_check_state: UpdateCheckState,
@@ -125,7 +125,7 @@ pub(crate) struct StateDto {
     pub(crate) confirm_remove_macro_remaining_secs: u8,
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) confirm_clear_instructions_remaining_secs: u8,
-    pub(crate) key_capture_index: Option<usize>,
+    pub(crate) key_capture: Option<KeyCaptureDto>,
     pub(crate) can_undo: bool,
     pub(crate) can_redo: bool,
     pub(crate) recording_phase: RecordingPhaseDto,
@@ -147,7 +147,21 @@ pub(crate) struct MacroDto {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) description: String,
+    pub(crate) strands: Vec<StrandDto>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct StrandDto {
+    pub(crate) id: String,
+    pub(crate) x: i32,
+    pub(crate) y: i32,
     pub(crate) instructions: Vec<InstructionDto>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct KeyCaptureDto {
+    pub(crate) strand_id: String,
+    pub(crate) index: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -203,6 +217,7 @@ pub(crate) struct PendingMacroHotkeyDto {
 
 #[derive(Serialize, Clone)]
 pub(crate) struct InvalidFieldDto {
+    pub(crate) strand_id: String,
     pub(crate) instruction_index: usize,
     pub(crate) field_id: String,
     pub(crate) text: String,
@@ -315,6 +330,24 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
     })
 }
 
+fn strand_to_dto(strand: &Strand) -> StrandDto {
+    StrandDto {
+        id: strand.id.clone(),
+        x: strand.x,
+        y: strand.y,
+        instructions: strand.instructions.iter().map(instruction_to_dto).collect(),
+    }
+}
+
+fn macro_to_dto(mac: &Macro) -> MacroDto {
+    MacroDto {
+        id: mac.id.clone(),
+        name: mac.name.clone(),
+        description: mac.description.clone(),
+        strands: mac.strands.iter().map(strand_to_dto).collect(),
+    }
+}
+
 fn hotkey_action_to_dto(action: &HotkeyAction) -> HotkeyActionDto {
     match action {
         HotkeyAction::RunMacro => HotkeyActionDto::RunMacro,
@@ -340,12 +373,7 @@ pub(crate) fn dto_to_hotkey_action(dto: &HotkeyActionDto) -> HotkeyAction {
 }
 
 pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
-    let current_macro = s.current_macro.as_ref().map(|mac| MacroDto {
-        id: mac.id.clone(),
-        name: mac.name.clone(),
-        description: mac.description.clone(),
-        instructions: mac.code.iter().map(instruction_to_dto).collect(),
-    });
+    let current_macro = s.current_macro.as_ref().map(macro_to_dto);
 
     let recording_phase = match &s.recording_phase {
         RecordingPhase::Idle => RecordingPhaseDto { phase: "Idle".to_string(), countdown: None },
@@ -364,12 +392,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         },
     });
 
-    let macros_data: Vec<MacroDto> = s.macros_list.iter().map(|mac| MacroDto {
-        id: mac.id.clone(),
-        name: mac.name.clone(),
-        description: mac.description.clone(),
-        instructions: mac.code.iter().map(instruction_to_dto).collect(),
-    }).collect();
+    let macros_data: Vec<MacroDto> = s.macros_list.iter().map(macro_to_dto).collect();
 
     let macros_list = &s.macros_list;
     let hotkey_bindings: Vec<HotkeyBindingDto> = s.hotkey_bindings.iter().enumerate().map(|(i, b)| {
@@ -392,13 +415,19 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         combo_display: combo.as_ref().map(|c| c.format()),
     });
 
-    let invalid_field_buffers: Vec<InvalidFieldDto> = s.invalid_field_buffers.iter().map(|((ins_idx, field), text)| {
+    let invalid_field_buffers: Vec<InvalidFieldDto> = s.invalid_field_buffers.iter().map(|((strand_id, ins_idx, field), text)| {
         InvalidFieldDto {
+            strand_id: strand_id.clone(),
             instruction_index: *ins_idx,
             field_id: field.to_string(),
             text: text.clone(),
         }
     }).collect();
+
+    let key_capture = s.key_capture.as_ref().map(|(strand_id, index)| KeyCaptureDto {
+        strand_id: strand_id.clone(),
+        index: *index,
+    });
 
     let is_looping = s.is_looping.lock().map(|g| *g).unwrap_or(false);
 
@@ -424,7 +453,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         confirm_remove_macro_remaining_secs: s.remove_confirm_remaining_secs,
         confirm_clear_instructions: s.confirm_clear_instructions,
         confirm_clear_instructions_remaining_secs: s.clear_confirm_remaining_secs,
-        key_capture_index: s.key_capture_index,
+        key_capture,
         can_undo: !s.undo_stack.is_empty(),
         can_redo: !s.redo_stack.is_empty(),
         recording_phase,

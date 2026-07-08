@@ -21,8 +21,8 @@
   <!-- Row 1: Macro Selector -->
   <div class="toolbar-row" id="selector-row">
     <div class="selector-left">
-      <label for="macro-dropdown">Select macro</label>
-      <select id="macro-dropdown"></select>
+      <label id="macro-dropdown-label">Select macro</label>
+      <div id="macro-dropdown-container"></div>
     </div>
     <div class="selector-right">
       <button id="new-macro-btn" title="Add a new macro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New macro</span></button>
@@ -64,20 +64,7 @@
       <div class="instructions-inner" id="instructions-inner"></div>
     </div>
 
-    <div class="add-instruction-row">
-      <label style="font-size:12px;color:var(--text-dim);white-space:nowrap;">Add at end:</label>
-      <select id="add-instruction-type">
-        <option value="Wait">Wait</option>
-        <option value="Text">Text</option>
-        <option value="Key">Key</option>
-        <option value="Button">Mouse Button</option>
-        <option value="MoveMouse">Move Mouse</option>
-        <option value="Scroll">Scroll</option>
-        <option value="Command">Command</option>
-        <option value="Comment">Comment</option>
-      </select>
-      <button id="add-instruction-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>Add</span></button>
-    </div>
+    <div class="add-instruction-row" id="add-instruction-row"></div>
 
     <div class="editor-toolbar">
       <button id="undo-btn" title="Undo last instruction change"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path><path d="M9 14 4 9l5-5"></path></svg><span>Undo</span></button>
@@ -111,7 +98,7 @@
       <div id="per-macro-hotkeys-list"></div>
       <div class="settings-row" id="add-hotkey-form">
         <div class="settings-row-label">Add hotkey:</div>
-        <select id="pending-macro-select"><option value="">Select macro…</option></select>
+        <div id="pending-macro-select-container"></div>
         <button id="pending-combo-btn" class="btn-chip">Set combo</button>
         <button id="add-macro-hotkey-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>Add</span></button>
       </div>
@@ -131,6 +118,7 @@
   </div>
 </div>
 
+<div id="dd-portal"></div>
 <script type="module" src="/src/app.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import './style.css';
-import { iconEl, setBtnContent } from './icons.js';
+import { iconEl, setBtnContent, INSTRUCTION_TYPE_ICONS, INSTRUCTION_TYPE_LABELS } from './icons.js';
+import { dropdown, closeAllDropdowns } from './dropdown.js';
 
 // Tauri v2 API
 const { invoke } = window.__TAURI__.core;
@@ -19,6 +20,13 @@ let appVersion = '';
 let prevInvalidKeys = new Set();
 let prevPortInvalid = false;
 let prevWarnings = { grab: false, emulator: false };
+
+// ─── Custom dropdowns (persistent instances, mounted once in setupStaticListeners) ──
+let macroDropdown = null;
+let prevMacroOptionsKey = '';
+let pendingMacroDropdown = null;
+let addInstructionType = 'Wait';
+let addInstructionMainBtn = null;
 
 // ─── Theme ────────────────────────────────────────────────────────────────
 let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
@@ -82,6 +90,7 @@ document.addEventListener('keydown', async e => {
 
 // ─── Master render ────────────────────────────────────────────────────────────
 function render(s) {
+    closeAllDropdowns();
     const onMain = s.page !== 'Settings';
     document.getElementById('main-page').classList.toggle('page-hidden', !onMain);
     document.getElementById('settings-page').classList.toggle('page-hidden', onMain);
@@ -102,24 +111,14 @@ function renderMain(s) {
 }
 
 function renderMacroSelector(s) {
-    const dropdown = document.getElementById('macro-dropdown');
-    const currentSelected = dropdown.value;
-
-    // Rebuild options only when the list changes
-    const prevOptions = [...dropdown.options].map(o => o.text).join('|');
-    const newOptions = (s.macro_names ?? []).join('|');
-    if (prevOptions !== newOptions) {
-        dropdown.innerHTML = '<option value="">— no macro selected —</option>';
-        (s.macro_names ?? []).forEach((name, idx) => {
-            const opt = document.createElement('option');
-            opt.value = idx;
-            opt.textContent = name;
-            dropdown.appendChild(opt);
-        });
+    const newOptionsKey = (s.macro_names ?? []).join('|');
+    if (newOptionsKey !== prevMacroOptionsKey) {
+        macroDropdown.ddSetOptions((s.macro_names ?? []).map((name, idx) => ({ value: String(idx), label: name })));
+        prevMacroOptionsKey = newOptionsKey;
     }
 
     const selectedVal = s.macro_selected != null ? String(s.macro_selected) : '';
-    if (dropdown.value !== selectedVal) dropdown.value = selectedVal;
+    if (macroDropdown.ddValue !== selectedVal) macroDropdown.ddValue = selectedVal;
 
     const removeBtn = document.getElementById('remove-macro-btn');
     const hasSelected = s.macro_selected != null;
@@ -299,30 +298,24 @@ function buildInstructionRow(i, ins, keyCaptureIdx, invalidBuffers, prevInvalidK
     removeBtn.setAttribute('aria-label', 'Remove instruction');
     removeBtn.onclick = () => invoke('remove_instruction', { index: i });
 
-    const addSel = document.createElement('select');
-    addSel.title = 'Insert instruction after this one';
-    addSel.innerHTML = `
-        <option value="">Insert after…</option>
-        <option value="Wait">Wait</option>
-        <option value="Text">Text</option>
-        <option value="Key">Key</option>
-        <option value="Button">Mouse Button</option>
-        <option value="MoveMouse">Move Mouse</option>
-        <option value="Scroll">Scroll</option>
-        <option value="Command">Command</option>
-        <option value="Comment">Comment</option>
-    `;
-    addSel.onchange = async () => {
-        if (!addSel.value) return;
-        const insType = addSel.value;
-        addSel.value = '';
-        await addInstructionAt(i + 1, insType);
-    };
+    const insertAfterDd = dropdown(
+        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
+        '',
+        insType => addInstructionAt(i + 1, insType),
+        {
+            iconOnly: true,
+            triggerIcon: 'corner-down-right',
+            className: 'btn-icon',
+            ariaLabel: 'Insert instruction after this one',
+            title: 'Insert instruction after this one',
+            resetAfterSelect: true,
+        }
+    );
 
     controls.appendChild(upBtn);
     controls.appendChild(downBtn);
     controls.appendChild(removeBtn);
-    controls.appendChild(addSel);
+    controls.appendChild(insertAfterDd);
     row.appendChild(controls);
     return row;
 }
@@ -470,16 +463,7 @@ function directionSelect(current, onChange) {
 }
 
 function enumSelect(options, current, onChange) {
-    const sel = document.createElement('select');
-    options.forEach(opt => {
-        const o = document.createElement('option');
-        o.value = opt;
-        o.textContent = opt;
-        if (opt === current) o.selected = true;
-        sel.appendChild(o);
-    });
-    sel.addEventListener('change', () => onChange(sel.value));
-    return sel;
+    return dropdown(options, current, onChange, { className: 'dd-compact' });
 }
 
 // ─── Add instruction at index ─────────────────────────────────────────────────
@@ -501,6 +485,48 @@ function defaultInstruction(type) {
 async function addInstructionAt(index, type) {
     const ins = defaultInstruction(type);
     await invoke('add_instruction', { index, instruction: ins });
+}
+
+// Split button: left segment adds `addInstructionType` immediately, the
+// chevron opens a picker that both changes the type and adds one right away.
+function buildAddInstructionRow() {
+    const row = document.getElementById('add-instruction-row');
+    row.replaceChildren();
+
+    const group = document.createElement('div');
+    group.className = 'dd-split-group';
+
+    addInstructionMainBtn = document.createElement('button');
+    addInstructionMainBtn.className = 'btn-primary dd-split-main';
+    addInstructionMainBtn.title = 'Add instruction at end';
+    updateAddInstructionMainBtn();
+    addInstructionMainBtn.onclick = () => {
+        const len = state.current_macro?.instructions?.length ?? 0;
+        addInstructionAt(len, addInstructionType);
+    };
+
+    const typeDropdown = dropdown(
+        Object.keys(INSTRUCTION_TYPE_LABELS).map(t => ({ value: t, label: INSTRUCTION_TYPE_LABELS[t] })),
+        addInstructionType,
+        val => {
+            addInstructionType = val;
+            updateAddInstructionMainBtn();
+            const len = state.current_macro?.instructions?.length ?? 0;
+            addInstructionAt(len, val);
+        },
+        { iconOnly: true, triggerIcon: 'chevron-down', className: 'dd-split-chevron btn-primary', ariaLabel: 'Choose instruction type to add' }
+    );
+
+    group.appendChild(addInstructionMainBtn);
+    group.appendChild(typeDropdown);
+    row.appendChild(group);
+}
+
+function updateAddInstructionMainBtn() {
+    setBtnContent(addInstructionMainBtn, {
+        icon: INSTRUCTION_TYPE_ICONS[addInstructionType],
+        text: `Add ${INSTRUCTION_TYPE_LABELS[addInstructionType]}`,
+    });
 }
 
 // ═══ Settings Page ════════════════════════════════════════════════════════════
@@ -629,16 +655,7 @@ function renderPerMacroHotkeys(s) {
     });
 
     // Update Add form
-    const pendingSel = document.getElementById('pending-macro-select');
-    const currentPendingVal = pendingSel.value;
-    pendingSel.innerHTML = '<option value="">Select macro…</option>';
-    (s.macro_names ?? []).forEach((name, idx) => {
-        const opt = document.createElement('option');
-        opt.value = idx;
-        opt.textContent = name;
-        pendingSel.appendChild(opt);
-    });
-    if (currentPendingVal) pendingSel.value = currentPendingVal;
+    pendingMacroDropdown.ddSetOptions((s.macro_names ?? []).map((name, idx) => ({ value: String(idx), label: name })));
 
     const isCapturingPending = s.combo_capture?.kind === 'Pending';
     const pendingCombo = s.pending_macro_hotkey?.combo_display;
@@ -774,11 +791,12 @@ function setupStaticListeners() {
     attachScrollListener();
 
     // Macro selector
-    document.getElementById('macro-dropdown').addEventListener('change', e => {
-        const val = e.target.value;
+    macroDropdown = dropdown([], '', val => {
         if (val === '') return;
         invoke('select_macro', { index: parseInt(val) });
-    });
+    }, { placeholder: '— no macro selected —', ariaLabel: 'Select macro', className: 'macro-select-trigger' });
+    macroDropdown.querySelector('.dd-trigger').setAttribute('aria-labelledby', 'macro-dropdown-label');
+    document.getElementById('macro-dropdown-container').appendChild(macroDropdown);
 
     // Macro CRUD buttons
     document.getElementById('new-macro-btn').onclick = () => invoke('new_macro');
@@ -809,12 +827,8 @@ function setupStaticListeners() {
     document.getElementById('clear-instructions-btn').onclick = () => invoke('clear_instructions');
     document.getElementById('save-macro-btn').onclick = () => invoke('save_macro');
 
-    // Add instruction at end
-    document.getElementById('add-instruction-btn').onclick = () => {
-        const type = document.getElementById('add-instruction-type').value;
-        const len = state.current_macro?.instructions?.length ?? 0;
-        addInstructionAt(len, type);
-    };
+    // Add instruction at end (split button: click adds the current type, chevron picks a new type)
+    buildAddInstructionRow();
 
     // Settings back button
     document.getElementById('back-btn').onclick = () => invoke('close_settings');
@@ -826,10 +840,10 @@ function setupStaticListeners() {
     updateThemeToggleIcon();
 
     // Per-macro hotkey add form
-    document.getElementById('pending-macro-select').addEventListener('change', e => {
-        const val = e.target.value;
+    pendingMacroDropdown = dropdown([], '', val => {
         invoke('set_pending_macro_idx', { index: val === '' ? null : parseInt(val) });
-    });
+    }, { placeholder: 'Select macro…', ariaLabel: 'Select macro for hotkey' });
+    document.getElementById('pending-macro-select-container').appendChild(pendingMacroDropdown);
     document.getElementById('add-macro-hotkey-btn').onclick = () => invoke('add_macro_hotkey');
 }
 

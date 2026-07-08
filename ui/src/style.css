@@ -203,6 +203,19 @@ button:disabled { opacity: 0.38; cursor: default; }
 }
 .btn-icon svg { width: 13px; height: 13px; }
 
+/* Every icon rendered via iconEl()/setBtnContent() is wrapped in this span.
+   Raw <svg> keeps default vertical-align:baseline, which reserves descender
+   space and throws off centering inside small buttons — reset it here once
+   so every icon button (up/down/remove, record, theme toggle, etc.) is
+   correctly centered without needing per-button fixes. */
+.btn-icon-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.btn-icon-glyph svg { display: block; }
+
 /* Chip-style buttons — display an editable value (key/hotkey combo capture) */
 .btn-chip {
   background: transparent;
@@ -292,7 +305,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex: 1;
 }
 .selector-left label { font-size: 12px; color: var(--text-dim); }
-.selector-left select { width: 200px; }
 
 .selector-right {
   display: flex;
@@ -378,7 +390,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .instruction-content input[type="number"] {
   width: 80px;
 }
-.instruction-content select { width: auto; }
 .instruction-content .key-capture-btn { min-width: 100px; }
 
 .row-controls {
@@ -387,7 +398,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   align-items: center;
   flex-shrink: 0;
 }
-.row-controls select { padding: 4px 6px; font-size: 12px; }
 
 /* ── Editor Bottom Toolbar ───────────────────────────────────────────────── */
 .editor-toolbar {
@@ -406,7 +416,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
-.add-instruction-row select { flex: 1; }
 
 /* ── Settings Page ───────────────────────────────────────────────────────── */
 #settings-page {
@@ -501,6 +510,12 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 /* ── Loop & Record indicator colors ─────────────────────────────────────── */
 .btn-record { color: var(--red); border-color: var(--red); }
 .btn-record:hover:not(:disabled) { background: rgba(var(--red-rgb), 0.12); }
+/* Lucide's "circle" is a hollow stroke ring by default — fill it so idle
+   Record reads as a proper solid record dot instead of an outline. */
+.btn-record .btn-icon-glyph svg circle,
+.btn-active-record .btn-icon-glyph svg circle {
+  fill: currentColor;
+}
 .btn-record-countdown { animation: recordPulseSoft 1s var(--ease-standard) infinite; }
 .btn-active-record {
   color: var(--text);
@@ -515,6 +530,95 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 @keyframes recordPulseSoft {
   0%, 100% { box-shadow: var(--bevel-top), var(--shadow-sm), 0 0 0 0 rgba(var(--red-rgb), 0.35); }
   50%      { box-shadow: var(--bevel-top), var(--shadow-sm), 0 0 0 5px rgba(var(--red-rgb), 0); }
+}
+
+/* ── Custom dropdown (replaces native <select> — see dropdown.js) ──────────── */
+.dd { display: contents; }
+
+.dd-trigger { justify-content: space-between; text-align: left; }
+.dd-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-trigger-placeholder { color: var(--text-dim); }
+.dd-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
+}
+.dd-trigger.dd-trigger-icon { justify-content: center; }
+.dd-trigger.dd-trigger-icon svg { width: 13px; height: 13px; }
+
+/* Compact variant used for short inline enum pickers (Click/Press/Release,
+   Left/Right/Middle, Vertical/Horizontal, etc.) */
+.dd-trigger.dd-compact {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.dd-trigger.dd-compact svg { width: 12px; height: 12px; }
+
+.macro-select-trigger { width: 200px; }
+
+#dd-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+.dd-panel {
+  position: absolute;
+  pointer-events: auto;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  animation: ddPanelEnter var(--dur-fast) var(--ease-standard);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+@keyframes ddPanelEnter {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.dd-option {
+  padding: 6px 10px;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dd-option[aria-selected="true"] { background: var(--hover-overlay); }
+.dd-option-current { color: var(--accent); font-weight: 600; }
+
+/* Split button: primary "add" action fused to a chevron that opens a type
+   picker (Add-at-end row). */
+.dd-split-group { display: flex; }
+/* Keep both halves flush on hover/press — the shared button:hover/:active
+   lift-and-scale would otherwise separate them into two visibly distinct
+   buttons instead of reading as one. */
+.dd-split-group button:hover:not(:disabled),
+.dd-split-group button:active:not(:disabled) {
+  transform: none;
+}
+.dd-split-group .dd-split-main {
+  flex: 1;
+  justify-content: flex-start;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.dd-split-group .dd-split-chevron {
+  min-width: var(--btn-h-md);
+  padding: 0 8px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
 }
 
 /* ── Confirm highlight ───────────────────────────────────────────────────── */
@@ -621,7 +725,7 @@ button.confirm-armed {
   .switch-track, .switch-track::before {
     transition: none !important;
   }
-  .warning-banner.banner-enter, button.confirm-armed, .shake-once, .empty-state {
+  .warning-banner.banner-enter, button.confirm-armed, .shake-once, .empty-state, .dd-panel {
     animation: none !important;
   }
 }

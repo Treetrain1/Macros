@@ -23,6 +23,14 @@ import moon from 'lucide-static/icons/moon.svg?raw';
 import refreshCw from 'lucide-static/icons/refresh-cw.svg?raw';
 import server from 'lucide-static/icons/server.svg?raw';
 import inbox from 'lucide-static/icons/inbox.svg?raw';
+import clock from 'lucide-static/icons/clock.svg?raw';
+import textCursor from 'lucide-static/icons/text-cursor.svg?raw';
+import mousePointerClick from 'lucide-static/icons/mouse-pointer-click.svg?raw';
+import move from 'lucide-static/icons/move.svg?raw';
+import mouse from 'lucide-static/icons/mouse.svg?raw';
+import terminal from 'lucide-static/icons/terminal.svg?raw';
+import messageSquare from 'lucide-static/icons/message-square.svg?raw';
+import cornerDownRight from 'lucide-static/icons/corner-down-right.svg?raw';
 
 export const ICONS = {
     'chevron-up': chevronUp,
@@ -47,6 +55,37 @@ export const ICONS = {
     'refresh-cw': refreshCw,
     'server': server,
     'inbox': inbox,
+    'clock': clock,
+    'text-cursor': textCursor,
+    'mouse-pointer-click': mousePointerClick,
+    'move': move,
+    'mouse': mouse,
+    'terminal': terminal,
+    'message-square': messageSquare,
+    'corner-down-right': cornerDownRight,
+};
+
+/** Icon name for each instruction type, used by the Add-at-end split button. */
+export const INSTRUCTION_TYPE_ICONS = {
+    Wait: 'clock',
+    Text: 'text-cursor',
+    Key: 'key',
+    Button: 'mouse-pointer-click',
+    MoveMouse: 'move',
+    Scroll: 'mouse',
+    Command: 'terminal',
+    Comment: 'message-square',
+};
+
+export const INSTRUCTION_TYPE_LABELS = {
+    Wait: 'Wait',
+    Text: 'Text',
+    Key: 'Key',
+    Button: 'Mouse Button',
+    MoveMouse: 'Move Mouse',
+    Scroll: 'Scroll',
+    Command: 'Command',
+    Comment: 'Comment',
 };
 
 /**

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
-import { Move } from 'lucide-vue-next';
 import type { InstructionDto } from '../types';
 import { beginPickup } from '../canvasDrag';
 import WaitFields from './fields/WaitFields.vue';
@@ -27,14 +26,16 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);
 
-function onGripPointerDown(e: PointerEvent) {
+function onRowPointerDown(e: PointerEvent) {
+  const target = e.target as Element | null;
+  if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
+  if (target instanceof HTMLElement && target.isContentEditable) return;
   beginPickup(e, props.strandId, props.index);
 }
 </script>
 
 <template>
-  <div class="instruction-row" :data-index="index">
-    <span class="row-grip" title="Drag to move or detach" @pointerdown="onGripPointerDown"><Move /></span>
+  <div class="instruction-row" :data-index="index" @pointerdown="onRowPointerDown">
     <div class="instruction-content">
       <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
     </div>

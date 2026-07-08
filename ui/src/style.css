@@ -490,15 +490,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 .instruction-row:hover { background: var(--hover-overlay); border-color: var(--accent); }
 
-.row-grip {
-  display: flex;
-  flex-shrink: 0;
-  opacity: 0.35;
-  cursor: grab;
-  touch-action: none;
-}
-.row-grip:hover { opacity: 0.8; }
-.row-grip svg { width: 13px; height: 13px; }
+.instruction-row { cursor: grab; touch-action: none; }
 
 .instruction-content {
   display: flex;
@@ -705,7 +697,6 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* Disable interactive elements while recording */
-#macro-editor.recording .row-grip,
 #macro-editor.recording .strand-empty-hint,
 #macro-editor.recording .palette-block,
 #macro-editor.recording #undo-btn,

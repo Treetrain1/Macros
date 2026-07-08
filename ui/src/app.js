@@ -167,10 +167,17 @@ function renderEditor(s) {
     if (s.current_macro == null) {
         editorEl.classList.add('hidden');
         emptyStateEl.classList.remove('hidden');
+        document.getElementById('recording-overlay').classList.add('hidden');
+        editorEl.classList.remove('recording');
         return;
     }
     editorEl.classList.remove('hidden');
     emptyStateEl.classList.add('hidden');
+
+    // Toggle recording overlay
+    const isRecording = s.recording_phase?.phase === 'Active';
+    editorEl.classList.toggle('recording', isRecording);
+    document.getElementById('recording-overlay').classList.toggle('hidden', !isRecording);
 
     // Title
     const titleInput = document.getElementById('macro-title');

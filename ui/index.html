@@ -60,8 +60,15 @@
       <input type="text" id="macro-title" placeholder="Macro name">
     </div>
 
-    <div class="instructions-scroll" id="instructions-scroll">
-      <div class="instructions-inner" id="instructions-inner"></div>
+    <div class="editor-content-area">
+      <div class="instructions-scroll" id="instructions-scroll">
+        <div class="instructions-inner" id="instructions-inner"></div>
+      </div>
+      <div id="recording-overlay" class="recording-overlay hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
+        <span>Recording…</span>
+        <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
+      </div>
     </div>
 
     <div class="add-instruction-row" id="add-instruction-row"></div>

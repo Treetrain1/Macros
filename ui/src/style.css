@@ -51,10 +51,6 @@
   --dur-base: 200ms;
   --dur-slow: 400ms;
 
-  /* ── Animated background blobs ─────────────────────────────────────────── */
-  --bg-blob-1: rgba(var(--accent-rgb), 0.32);
-  --bg-blob-2: rgba(var(--accent-rgb), 0.16);
-  --bg-blob-3: rgba(var(--yellow-rgb), 0.07);
 }
 
 :root[data-theme="light"] {
@@ -81,9 +77,6 @@
   --scrollbar-thumb: rgba(0, 0, 0, 0.15);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.28);
 
-  --bg-blob-1: rgba(var(--accent-rgb), 0.14);
-  --bg-blob-2: rgba(var(--accent-rgb), 0.08);
-  --bg-blob-3: rgba(var(--yellow-rgb), 0.06);
 }
 
 body {
@@ -96,27 +89,7 @@ body {
   overflow: hidden;
 }
 
-/* ── Animated background layer ──────────────────────────────────────────── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: -15%;
-  z-index: -1;
-  background:
-    radial-gradient(circle at 22% 28%, var(--bg-blob-1), transparent 55%),
-    radial-gradient(circle at 80% 75%, var(--bg-blob-2), transparent 55%),
-    radial-gradient(circle at 50% 50%, var(--bg-blob-3), transparent 60%),
-    var(--bg);
-  filter: blur(70px);
-  animation: bgDrift 30s var(--ease-standard) infinite alternate;
-  will-change: transform;
-}
 
-@keyframes bgDrift {
-  0%   { transform: translate3d(0, 0, 0) scale(1); }
-  50%  { transform: translate3d(-3%, 2%, 0) scale(1.08); }
-  100% { transform: translate3d(2%, -3%, 0) scale(1); }
-}
 
 .hidden { display: none !important; }
 
@@ -340,8 +313,16 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .editor-title-row label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .editor-title-row input { flex: 1; }
 
-.instructions-scroll {
+.editor-content-area {
   flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.instructions-scroll {
+  position: absolute;
+  inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -534,6 +515,54 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   50%      { box-shadow: var(--bevel-top), var(--shadow-sm), 0 0 0 5px rgba(var(--red-rgb), 0); }
 }
 
+/* ── Recording overlay ────────────────────────────────────────────────────── */
+.recording-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  animation: overlayFadeIn var(--dur-base) var(--ease-standard);
+}
+.recording-overlay svg {
+  width: 42px;
+  height: 42px;
+  color: var(--red);
+  animation: recordPulse 1.6s var(--ease-standard) infinite;
+}
+.recording-overlay span {
+  font-size: 14px;
+  font-weight: 600;
+}
+.recording-overlay-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Disable interactive elements while recording */
+#macro-editor.recording .row-controls button,
+#macro-editor.recording .add-instruction-row button,
+#macro-editor.recording #undo-btn,
+#macro-editor.recording #redo-btn,
+#macro-editor.recording #clear-instructions-btn,
+#macro-editor.recording #save-macro-btn {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
 /* ── Custom dropdown (replaces native <select> — see dropdown.js) ──────────── */
 .dd { display: contents; }
 
@@ -722,7 +751,6 @@ button.confirm-armed {
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  body::before { animation: none; }
   .btn-active-record, .btn-record-countdown { animation: none; }
   button, input, select, .instruction-row, #main-page, #settings-page,
   .switch-track, .switch-track::before {

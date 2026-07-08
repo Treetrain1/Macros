@@ -730,7 +730,7 @@ pub(crate) async fn start_ipc_server<R: Runtime>(state: State<'_, SharedState>, 
     if s.ipc_server.is_none() {
         if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
             let (tx, rx) = tokio::sync::watch::channel(false);
-            s.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port, rx)));
+            s.ipc_server = Some(tauri::async_runtime::spawn(crate::ipc::run_server(port, rx)));
             s.ipc_shutdown_tx = Some(tx);
             s.ipc_active_port = Some(port);
         }

@@ -107,7 +107,7 @@ pub fn run() {
                 if s.ipc_auto_start {
                     if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
                         let (tx, rx) = tokio::sync::watch::channel(false);
-                        s.ipc_server = Some(tokio::spawn(crate::ipc::run_server(port, rx)));
+                        s.ipc_server = Some(tauri::async_runtime::spawn(crate::ipc::run_server(port, rx)));
                         s.ipc_shutdown_tx = Some(tx);
                         s.ipc_active_port = Some(port);
                     }

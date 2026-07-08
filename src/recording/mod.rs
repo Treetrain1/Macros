@@ -39,6 +39,11 @@ static BASELINE_NOW: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 static BASELINE_HW: OnceLock<Mutex<Option<SystemTime>>> = OnceLock::new();
 static LAST_ELAPSED: OnceLock<Mutex<Option<Duration>>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
+// Offset added to every hardware-timestamped elapsed so the first event
+// correctly captures the gap between recording-start and the first input,
+// rather than collapsing to zero because the hardware baseline is lazily
+// initialised to that first event's own timestamp.
+static HW_ELAPSED_OFFSET: OnceLock<Mutex<Duration>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
 
@@ -152,6 +157,9 @@ pub(crate) fn reset_timing() {
     if let Ok(mut p) = LAST_MOUSE_POS.get_or_init(|| Mutex::new(None)).lock() {
         *p = None;
     }
+    if let Ok(mut o) = HW_ELAPSED_OFFSET.get_or_init(|| Mutex::new(Duration::ZERO)).lock() {
+        *o = Duration::ZERO;
+    }
 }
 
 /// Elapsed time since this recording session's first event, measured on
@@ -177,8 +185,26 @@ fn elapsed_since_session_start(ts: CaptureTimestamp) -> Duration {
                 Ok(g) => g,
                 Err(_) => return Duration::ZERO,
             };
-            let start = *baseline.get_or_insert(now);
-            now.duration_since(start).unwrap_or(Duration::ZERO)
+            if let Some(start) = *baseline {
+                let raw = now.duration_since(start).unwrap_or(Duration::ZERO);
+                if let Ok(off) = HW_ELAPSED_OFFSET.get_or_init(|| Mutex::new(Duration::ZERO)).lock() {
+                    raw + *off
+                } else {
+                    raw
+                }
+            } else {
+                // Lazily initialise the hardware baseline on the first event,
+                // then use the Instant-based elapsed (which was pre-anchored
+                // at reset_timing() time) as the offset so the first event
+                // correctly reflects the gap from recording-start.
+                *baseline = Some(now);
+                drop(baseline);
+                let instant_elapsed = elapsed_since_session_start(CaptureTimestamp::Now);
+                if let Ok(mut off) = HW_ELAPSED_OFFSET.get_or_init(|| Mutex::new(Duration::ZERO)).lock() {
+                    *off = instant_elapsed;
+                }
+                instant_elapsed
+            }
         }
     }
 }

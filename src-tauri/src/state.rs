@@ -83,7 +83,7 @@ pub(crate) struct AppState {
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,
-    pub(crate) ipc_server: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) ipc_server: Option<tauri::async_runtime::JoinHandle<()>>,
     pub(crate) ipc_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub(crate) ipc_active_port: Option<u16>,
     pub(crate) ipc_auto_start: bool,

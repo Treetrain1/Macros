@@ -166,6 +166,7 @@ button:disabled { opacity: 0.38; cursor: default; }
   color: #fff;
   font-weight: 600;
 }
+#run-macro-btn { min-width: 130px; }
 .btn-primary:hover:not(:disabled), #run-macro-btn:hover:not(:disabled), #save-macro-btn:hover:not(:disabled) {
   background: linear-gradient(160deg, #56aeff, #1c8fff);
   box-shadow: var(--bevel-top), var(--shadow-md), 0 0 16px rgba(var(--accent-rgb), 0.35);

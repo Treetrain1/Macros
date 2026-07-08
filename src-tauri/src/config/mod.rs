@@ -6,7 +6,7 @@ pub(crate) use persistence::get_macros_from_config;
 pub(crate) use selection::{get_macro_by_id, get_selected_macro_id, set_selected_macro_id};
 pub(crate) use settings::{load_settings, save_settings, update_settings, AppSettings};
 
-pub(crate) const APP_ID: &str = "com.treetrain1.Macros";
+pub(crate) const APP_ID: &str = "dev.ethanstokes.Macros";
 pub(crate) const GLOBAL_HOTKEYS_KEY: &str = "global_hotkeys";
 
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo, MOD_ALT, MOD_CTRL};

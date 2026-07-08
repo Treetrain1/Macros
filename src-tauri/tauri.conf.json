@@ -1,6 +1,5 @@
 {
   "productName": "Macros",
-  "version": "0.3.1",
   "identifier": "dev.ethanstokes.Macros",
   "build": {
     "frontendDist": "../ui/dist"

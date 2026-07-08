@@ -514,7 +514,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
    that shape's boundary instead of being cut off at it. */
 .instruction-row {
   display: block;
-  margin-bottom: calc(-1 * var(--connector-notch-depth));
+  margin-bottom: calc(-1 * var(--connector-notch-depth) + 2px);
   position: relative;
   cursor: grab;
   touch-action: none;

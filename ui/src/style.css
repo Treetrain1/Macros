@@ -23,6 +23,9 @@
   --spacing: 12px;
   --btn-h-sm: 26px;
   --btn-h-md: 32px;
+  --connector-cut-inset: 10px;
+  --connector-cut-width: 22px;
+  --connector-notch-depth: 8px;
 
   /* ── Glass surfaces ────────────────────────────────────────────────────── */
   --glass-bg: rgba(44, 44, 46, 0.55);
@@ -437,25 +440,51 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex-direction: column;
 }
 
-.strand-body { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.strand-body { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 
 /* The root strand's only piece of chrome: a small fixed marker sitting above
    its stack. It's the one thing on the whole canvas that gets outlined —
-   the strand itself is never outlined, just this. */
+   the strand itself is never outlined, just this. Like a Scratch "hat"
+   block, it plugs directly into the stack below via the same puzzle tab
+   every instruction row has on its own bottom edge (see the shared
+   --tab-path comment on .instruction-row) — it just never has a notch of
+   its own, since nothing ever attaches above it.
+
+   Split into two elements (see the comment on .instruction-row for why):
+   `.root-marker` is an unclipped wrapper that only holds layout + the
+   drop-shadow outline/glow; `.root-marker-shape` is the actual clipped,
+   colored puzzle-tab silhouette inside it. */
 .root-marker {
+  margin-bottom: calc(-1 * var(--connector-notch-depth));
+  position: relative;
+  filter:
+    drop-shadow(var(--shadow-sm))
+    drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.35))
+    drop-shadow(2px 0 0 var(--accent))
+    drop-shadow(-2px 0 0 var(--accent))
+    drop-shadow(0 2px 0 var(--accent))
+    drop-shadow(0 -2px 0 var(--accent));
+}
+.root-marker-shape {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--glass-bg-strong);
-  box-shadow: var(--shadow-sm), var(--glow-accent);
+  padding: 5px 10px calc(5px + var(--connector-notch-depth)) 10px;
+  background: var(--bg3);
   color: var(--accent);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  clip-path: polygon(
+    4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)), 30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
+    28.3px calc(100% - var(--connector-notch-depth) + 5.9px), 24.5px 100%, 17.5px 100%,
+    13.7px calc(100% - var(--connector-notch-depth) + 5.9px), 11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    7.5px calc(100% - var(--connector-notch-depth)), 4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
 }
 .root-marker svg { width: 12px; height: 12px; }
 
@@ -473,24 +502,101 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 /* ── Instruction Row ─────────────────────────────────────────────────────── */
 /* Each instruction is its own box — its own shape, sized to its own content,
-   not one shared strip inside a bigger shared card. */
+   not one shared strip inside a bigger shared card. Every row is a real
+   puzzle piece: its own *geometry* (clip-path, not a layered graphic) has a
+   trapezoid notch cut inward out of the top edge and a matching trapezoid
+   tab pushed outward past the bottom edge, both with slightly chamfered
+   corners instead of hard right angles. The notch/tab always render — even
+   on a lone block with nothing attached above or below — so a block's
+   shape never changes depending on who it's next to.
+
+   The trapezoid: 22px wide at the surface, tapering to 12px at 8px deep,
+   corners chamfered ~2.5px. Every coordinate below is that fixed shape
+   (plus a 4px chamfer on the row's four outer corners) hand-plotted in
+   px — it doesn't scale with --connector-cut-width/--connector-cut-inset,
+   those tokens only drive layout spacing (padding, tab reserve) elsewhere.
+
+   Rows stack with a plain `gap: 0` (see .strand-body). The tab needs real
+   pixels to occupy, so each row reserves --connector-notch-depth of
+   padding-bottom, then pulls back with a matching negative margin so nothing
+   about the layout looks any different from a gapless list — the two
+   canceling exactly is what makes two rows touch with zero visible seam
+   gap while still rendering the tab into the space it protrudes through.
+
+   A real `border` doesn't follow clip-path cuts, and a separate "ring"
+   pseudo-element behind the row (z-index: -1) doesn't work either — a
+   negative z-index only orders a pseudo-element *below the row's own
+   in-flow content*, never below the row's *own* background (that's always
+   painted first, per the stacking-context painting order), so a solid ring
+   sitting there just tints the whole translucent glass fill instead of
+   reading as a thin edge.
+
+   `filter: drop-shadow()` gets the shape right, but it has its own trap:
+   clip-path clips *everything* an element paints, including its own
+   filter output — a drop-shadow that would fall outside the clip-path
+   region is silently cut off entirely, not just at the true edge. So
+   clip-path and the drop-shadow outline can't live on the same element.
+   That's why the shape is split in two: `.instruction-row` (this element)
+   is an unclipped wrapper that only does layout + holds `filter`;
+   `.instruction-shape` (child, see below) is the actual clipped, colored
+   puzzle silhouette. Filter applies to an element's whole rendered
+   subtree, so the row's drop-shadow shadows its child's clipped shape,
+   and — because the row itself has no clip-path — is free to extend past
+   that shape's boundary instead of being cut off at it. */
 .instruction-row {
+  display: block;
+  margin-bottom: calc(-1 * var(--connector-notch-depth));
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+  transition: filter var(--dur-fast) var(--ease-standard);
+  filter: drop-shadow(var(--shadow-sm));
+}
+.instruction-row:hover {
+  filter:
+    drop-shadow(var(--shadow-sm))
+    drop-shadow(2px 0 0 var(--accent))
+    drop-shadow(-2px 0 0 var(--accent))
+    drop-shadow(0 2px 0 var(--accent))
+    drop-shadow(0 -2px 0 var(--accent));
+}
+
+/* The clipped puzzle-piece silhouette itself — background, blur, and the
+   notch/tab geometry all live here, filling the parent row exactly
+   (parent's padding-bottom above already reserves the tab's real pixels).
+   Same trapezoid described above: 22px wide at the surface, tapering to
+   12px at 8px deep, ~2.5px corner chamfers, plus a 4px chamfer on the
+   row's four outer corners. */
+.instruction-shape {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px var(--spacing);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
+  min-height: 60px;
+  padding: 6px var(--spacing) calc(6px + var(--connector-notch-depth))
+    calc(var(--connector-cut-inset) + var(--connector-cut-width) + 8px);
+  box-sizing: border-box;
   background: var(--glass-bg-strong);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--shadow-sm);
-  min-height: 60px;
-  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-}
-.instruction-row:hover { background: var(--hover-overlay); border-color: var(--accent); }
+  transition: background var(--dur-fast) var(--ease-standard);
 
-.instruction-row { cursor: grab; touch-action: none; }
+  clip-path: polygon(
+    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)),
+    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
+    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
+    24.5px 100%, 17.5px 100%,
+    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
+    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    7.5px calc(100% - var(--connector-notch-depth)),
+    4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
+}
+.instruction-row:hover .instruction-shape { background: var(--bg3); }
 
 .instruction-content {
   display: flex;

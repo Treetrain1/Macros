@@ -11,7 +11,7 @@ import ScrollFields from './fields/ScrollFields.vue';
 import CommandFields from './fields/CommandFields.vue';
 import CommentFields from './fields/CommentFields.vue';
 
-const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto }>();
+const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
 const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   Wait: WaitFields,
@@ -35,9 +35,11 @@ function onRowPointerDown(e: PointerEvent) {
 </script>
 
 <template>
-  <div class="instruction-row" :data-index="index" @pointerdown="onRowPointerDown">
-    <div class="instruction-content">
-      <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
+  <div class="instruction-row" :class="{ 'row-first': isFirst, 'row-last': isLast }" :data-index="index" @pointerdown="onRowPointerDown">
+    <div class="instruction-shape">
+      <div class="instruction-content">
+        <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
+      </div>
     </div>
   </div>
 </template>

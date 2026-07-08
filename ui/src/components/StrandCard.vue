@@ -17,8 +17,10 @@ function onEmptyHintPointerDown(e: PointerEvent) {
   <div class="strand-card" :class="{ 'is-root': isRoot }" :data-strand-id="strand.id">
     <div class="strand-body">
       <div v-if="isRoot" class="root-marker">
-        <Play />
-        <span>Root</span>
+        <div class="root-marker-shape">
+          <Play />
+          <span>Root</span>
+        </div>
       </div>
       <div v-if="strand.instructions.length === 0" class="strand-empty-hint" @pointerdown="onEmptyHintPointerDown">
         Empty — drag an instruction here from the sidebar.
@@ -29,6 +31,8 @@ function onEmptyHintPointerDown(e: PointerEvent) {
         :strand-id="strand.id"
         :index="i"
         :instruction="ins"
+        :is-first="i === 0"
+        :is-last="i === strand.instructions.length - 1"
       />
     </div>
   </div>

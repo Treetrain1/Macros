@@ -202,6 +202,13 @@ interface DragState {
   resolvingPromise: Promise<string | void> | null;
   snap: { targetId: string; index: number } | null;
   overTrash?: boolean;
+  // Real DOM nodes hidden (visibility: hidden) while the ghost stands in for
+  // them. Vue reuses these exact nodes by key on the next patch and never
+  // touches this inline style itself, so it MUST be restored explicitly on
+  // every drag end (move/merge/trash/error) or the block stays invisible
+  // forever — only a full remount (undo/redo, reload) would ever clear it.
+  hiddenCardEl: HTMLElement | null;
+  hiddenRowEls: HTMLElement[];
 }
 let drag: DragState | null = null;
 
@@ -358,11 +365,14 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   const ghost = document.createElement('div');
   ghost.className = 'strand-drag-ghost';
   let anchorRect: { left: number; top: number } = cardEl ? cardEl.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
+  let hiddenCardEl: HTMLElement | null = null;
+  let hiddenRowEls: HTMLElement[] = [];
 
   if (wholeStrandGrab) {
     if (cardEl) {
       ghost.appendChild(cardEl.cloneNode(true) as HTMLElement);
       cardEl.style.visibility = 'hidden';
+      hiddenCardEl = cardEl;
     }
   } else {
     const rowEls = cardEl ? Array.from(cardEl.querySelectorAll<HTMLElement>('.instruction-row')).slice(index) : [];
@@ -377,6 +387,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     });
     ghostCard.appendChild(ghostBody);
     ghost.appendChild(ghostCard);
+    hiddenRowEls = rowEls;
   }
   document.body.appendChild(ghost);
 
@@ -388,6 +399,8 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     resolvedId: null,
     resolvingPromise: null,
     snap: null,
+    hiddenCardEl,
+    hiddenRowEls,
   };
   drag = newDrag;
 
@@ -498,6 +511,11 @@ function onPointerUp(e: PointerEvent) {
   clearSnapIndicator();
   setSidebarArmed(false);
   finished.ghostEl.remove();
+  // Restore unconditionally (move/merge/trash/error) — the backend round
+  // trip that would otherwise reveal these nodes again is async and, for
+  // trash/merge, may never touch them at all.
+  if (finished.hiddenCardEl) finished.hiddenCardEl.style.visibility = '';
+  for (const el of finished.hiddenRowEls) el.style.visibility = '';
 
   void (async () => {
     const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
@@ -508,6 +526,15 @@ function onPointerUp(e: PointerEvent) {
       await mergeStrand(id, finished.snap.targetId, finished.snap.index);
     } else {
       const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
+      // Optimistic: apply locally so the card renders at the drop point
+      // immediately instead of sitting at its old position (or hidden, pre-
+      // fix) until the invoke + state-updated round trip lands — that lag
+      // is what read as the block "teleporting" once the mouse was let go.
+      const strand = findStrand(id);
+      if (strand) {
+        strand.x = x;
+        strand.y = y;
+      }
       await moveStrand(id, x, y);
     }
   })();

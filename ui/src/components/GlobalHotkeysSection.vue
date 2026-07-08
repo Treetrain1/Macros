@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound } from 'lucide-vue-next';
+import { Keyboard } from 'lucide-vue-next';
 import { state } from '../store';
 import { clearNamedHotkey, resetHotkeyToDefault, startComboCapture } from '../tauri';
 import { NAMED_ACTIONS, type NamedActionType } from '../constants';
@@ -15,7 +15,7 @@ function isCapturing(type: NamedActionType) {
 
 <template>
   <div class="settings-section">
-    <div class="settings-section-title"><KeyRound /><span>Global Hotkeys</span></div>
+    <div class="settings-section-title"><Keyboard /><span>Global Hotkeys</span></div>
     <div>
       <div v-for="{ label, type } in NAMED_ACTIONS" :key="type" class="settings-row">
         <span class="settings-row-label">{{ label }}</span>

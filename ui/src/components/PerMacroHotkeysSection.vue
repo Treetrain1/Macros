@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { KeyRound } from 'lucide-vue-next';
+import { Keyboard } from 'lucide-vue-next';
 import { state } from '../store';
 import { addMacroHotkey, removeHotkeyBinding, setPendingMacroIdx, startPendingComboCapture } from '../tauri';
 import AppDropdown from './AppDropdown.vue';
@@ -26,7 +26,7 @@ const canAdd = computed(() => state.pending_macro_hotkey?.macro_index != null &&
 
 <template>
   <div class="settings-section">
-    <div class="settings-section-title"><KeyRound /><span>Per-Macro Hotkeys</span></div>
+    <div class="settings-section-title"><Keyboard /><span>Per-Macro Hotkeys</span></div>
     <div>
       <div v-for="b in perMacroBindings" :key="b.binding_index" class="settings-row">
         <span class="settings-row-label">{{ b.macro_name ?? '(deleted)' }}</span>

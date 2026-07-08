@@ -27,6 +27,10 @@ let pendingMacroDropdown = null;
 // negative; canvas-inner is sized to the strands' bounding box each render
 // (see renderCanvas), offset by this padding so cards never touch the edge.
 const CANVAS_PAD = 400;
+// Bounds always extend at least this far past the origin in every direction,
+// so there's room to pan around the root strand even when it's the only
+// thing on the canvas.
+const ROOT_MARGIN = 1000;
 let currentMacroId = null; // used to detect "switched macro" so we can re-center the canvas scroll
 
 // ─── Theme ────────────────────────────────────────────────────────────────
@@ -270,10 +274,12 @@ function renderCanvas(s) {
         cardEls.set(strand.id, card);
     }
 
-    // Bounding box (always including the origin so strand (0,0) stays
-    // reachable) so the canvas can be scrolled out to whichever stray strand
-    // is farthest away, in any direction.
-    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+    // Bounding box (always covering at least ROOT_MARGIN around the origin —
+    // where the root strand defaults to — so there's always generous room to
+    // pan around it in every direction, even on a mostly-empty macro) so the
+    // canvas can be scrolled out to whichever stray strand is farthest away.
+    const prevMinX = lastBounds.minX, prevMinY = lastBounds.minY;
+    let minX = -ROOT_MARGIN, minY = -ROOT_MARGIN, maxX = ROOT_MARGIN, maxY = ROOT_MARGIN;
     for (const strand of strands) {
         const card = cardEls.get(strand.id);
         if (!card) continue;
@@ -291,6 +297,18 @@ function renderCanvas(s) {
     inner.style.transform = `scale(${canvasZoom})`;
     sizer.style.width = (innerW * canvasZoom) + 'px';
     sizer.style.height = (innerH * canvasZoom) + 'px';
+
+    // A strand placed beyond the previous extent (e.g. a palette drop out in
+    // blank space) pushes minX/minY outward, which shifts every card's
+    // rendered position by the same amount (see the loop below). Without
+    // this, that shift happens under a scroll position that didn't move,
+    // so the thing that was just dropped visibly jumps away from the
+    // cursor — compensate scroll so the content the user was looking at
+    // stays exactly where it was.
+    if (minX !== prevMinX || minY !== prevMinY) {
+        scrollEl.scrollLeft += (prevMinX - minX) * canvasZoom;
+        scrollEl.scrollTop += (prevMinY - minY) * canvasZoom;
+    }
 
     for (const strand of strands) {
         const card = cardEls.get(strand.id);
@@ -598,10 +616,23 @@ const SNAP_THRESHOLD = 28;
 let dragCandidate = null; // pointerdown seen, waiting to see if it turns into a drag
 let drag = null;          // an active drag, once the pointer has moved past the threshold
 
+// Pointer capture ensures this pointer's move/up events keep reaching us
+// even if the cursor leaves the window mid-drag — without it a release
+// outside the webview can be missed entirely, leaving `pan`/`drag`/
+// `paletteDrag` stuck set and silently blocking every later gesture.
+function capturePointer(e) {
+    try {
+        e.target.setPointerCapture?.(e.pointerId);
+    } catch (err) {
+        console.error('setPointerCapture failed:', err);
+    }
+}
+
 function beginPickup(e, strandId, index) {
     if (state.recording_phase?.phase === 'Active') return;
     if (e.button !== undefined && e.button !== 0) return;
     e.preventDefault();
+    capturePointer(e);
     dragCandidate = { strandId, index, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
 }
 
@@ -611,6 +642,7 @@ let pan = null;
 function beginPan(e) {
     if (e.button !== 1) return;
     e.preventDefault();
+    capturePointer(e);
     const scrollEl = document.getElementById('canvas-scroll');
     pan = {
         pointerId: e.pointerId,
@@ -682,6 +714,7 @@ function beginPaletteDrag(e, insType) {
     if (state.recording_phase?.phase === 'Active') return;
     if (e.button !== undefined && e.button !== 0) return;
     e.preventDefault();
+    capturePointer(e);
 
     const ghost = document.createElement('div');
     ghost.className = 'strand-drag-ghost';
@@ -709,16 +742,21 @@ function beginPaletteDrag(e, insType) {
 
 let paletteDrag = null; // dragging a fresh instruction in from the sidebar palette
 
+// Each branch below only ever `return`s once it has confirmed the event's
+// pointerId actually belongs to that gesture — never on a bare "some other
+// gesture is active" check. Only one of pan/paletteDrag/drag/dragCandidate
+// is ever really in flight at once, but if any one of them were ever left
+// stuck (e.g. a pointerup missed while panning), a blanket early-return here
+// would silently swallow every *other* pointer's moves/ups forever, which is
+// exactly what made palette drops stop working.
 function onPointerMove(e) {
-    if (pan) {
-        if (e.pointerId !== pan.pointerId) return;
+    if (pan && e.pointerId === pan.pointerId) {
         const scrollEl = document.getElementById('canvas-scroll');
         scrollEl.scrollLeft = pan.startScrollLeft - (e.clientX - pan.startX);
         scrollEl.scrollTop = pan.startScrollTop - (e.clientY - pan.startY);
         return;
     }
-    if (paletteDrag) {
-        if (e.pointerId !== paletteDrag.pointerId) return;
+    if (paletteDrag && e.pointerId === paletteDrag.pointerId) {
         positionGhost(e);
         if (isOverSidebar(e)) {
             paletteDrag.snap = null;
@@ -728,8 +766,7 @@ function onPointerMove(e) {
         }
         return;
     }
-    if (drag) {
-        if (e.pointerId !== drag.pointerId) return;
+    if (drag && e.pointerId === drag.pointerId) {
         positionGhost(e);
         if (isOverSidebar(e)) {
             drag.overTrash = true;
@@ -743,12 +780,13 @@ function onPointerMove(e) {
         }
         return;
     }
-    if (!dragCandidate || e.pointerId !== dragCandidate.pointerId) return;
-    const dx = e.clientX - dragCandidate.startX;
-    const dy = e.clientY - dragCandidate.startY;
-    if (Math.hypot(dx, dy) < 4) return;
-    startDrag(e, dragCandidate);
-    dragCandidate = null;
+    if (dragCandidate && e.pointerId === dragCandidate.pointerId) {
+        const dx = e.clientX - dragCandidate.startX;
+        const dy = e.clientY - dragCandidate.startY;
+        if (Math.hypot(dx, dy) < 4) return;
+        startDrag(e, dragCandidate);
+        dragCandidate = null;
+    }
 }
 
 // The ghost is built from real `.strand-card`/`.instruction-row` clones (not

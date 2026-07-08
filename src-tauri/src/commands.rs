@@ -1,6 +1,6 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::{loop_control, thread, Instruction, Macro, Strand, ROOT_STRAND_ID};
+use crate::macros::{loop_control, thread, Instruction, Macro, Strand};
 use crate::input::types::InputToken;
 use crate::recording;
 use crate::state::{
@@ -195,6 +195,12 @@ pub(crate) fn add_instruction<R: Runtime>(
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
+    if let Some(mac) = &s.current_macro {
+        if let Some(strand) = mac.strand(&strand_id) {
+            let idx = index.min(strand.instructions.len());
+            check_when_ran_attachment(strand, idx, &ins)?;
+        }
+    }
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
         if let Some(strand) = mac.strand_mut(&strand_id) {
@@ -205,6 +211,22 @@ pub(crate) fn add_instruction<R: Runtime>(
         }
     }
     emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Enforces the one rule governing "When Ran" blocks: nothing may ever end
+/// up attached underneath one. That means inserting at index 0 of a strand
+/// that already starts with `WhenRan` is forbidden (it would push the
+/// existing one down to index 1), and inserting a `WhenRan` anywhere but
+/// index 0 is forbidden (it would itself land underneath whatever's above
+/// it).
+fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -> Result<(), String> {
+    if index == 0 && strand.starts_with_when_ran() {
+        return Err("Can't attach a block above a When Ran block".to_string());
+    }
+    if matches!(ins, Instruction::WhenRan) && index != 0 {
+        return Err("A When Ran block can only be the first block in a strand".to_string());
+    }
     Ok(())
 }
 
@@ -307,7 +329,10 @@ pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: ta
                 } else {
                     index
                 };
-                if new_index != index {
+                // Swapping either end into position 0 would move a When Ran
+                // block out of (or something else into) the head slot.
+                let touches_when_ran_slot = (index == 0 || new_index == 0) && strand.starts_with_when_ran();
+                if new_index != index && !touches_when_ran_slot {
                     push_undo(&mut s);
                     if let Some(mac) = &mut s.current_macro {
                         if let Some(strand) = mac.strand_mut(&strand_id) {
@@ -355,8 +380,9 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     } else {
         push_undo(&mut s);
         if let Some(mac) = &mut s.current_macro {
-            // Clearing wipes every strand — root and any detached ones —
-            // matching "start this macro over from scratch".
+            // Clearing wipes every strand's instructions, including any
+            // "When Ran" blocks — matching "start this macro over from
+            // scratch".
             for strand in &mut mac.strands {
                 strand.instructions.clear();
             }
@@ -446,9 +472,6 @@ pub(crate) fn add_strand<R: Runtime>(
 
 #[tauri::command]
 pub(crate) fn remove_strand<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String) -> Result<(), String> {
-    if strand_id == ROOT_STRAND_ID {
-        return Err("The root strand can't be removed".to_string());
-    }
     let mut s = state.lock().map_err(|e| e.to_string())?;
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
@@ -508,8 +531,10 @@ pub(crate) fn split_strand<R: Runtime>(
 
 /// Splices `dragged_id`'s instructions into `target_id` at `index` and
 /// deletes the (now empty) dragged strand — this is how two stacks snap
-/// together on the canvas. The root strand can only ever be a target, never
-/// the dragged strand, so it's never at risk of being deleted here.
+/// together on the canvas. A strand headed by a "When Ran" block can only
+/// ever be a merge target (and only past its own head), never the dragged
+/// side — merging it into another strand would attach it underneath
+/// something, which is never allowed.
 #[tauri::command]
 pub(crate) fn merge_strand<R: Runtime>(
     state: State<SharedState>,
@@ -521,10 +546,17 @@ pub(crate) fn merge_strand<R: Runtime>(
     if dragged_id == target_id {
         return Err("Can't merge a strand into itself".to_string());
     }
-    if dragged_id == ROOT_STRAND_ID {
-        return Err("The root strand can't be merged into another strand".to_string());
-    }
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mac_ref = s.current_macro.as_ref().ok_or("No macro selected")?;
+    let dragged_ref = mac_ref.strand(&dragged_id).ok_or("Unknown dragged strand")?;
+    if dragged_ref.starts_with_when_ran() {
+        return Err("A When Ran strand can't be merged into another strand".to_string());
+    }
+    if let Some(target_ref) = mac_ref.strand(&target_id) {
+        if index == 0 && target_ref.starts_with_when_ran() {
+            return Err("Can't attach a strand above a When Ran block".to_string());
+        }
+    }
     push_undo(&mut s);
     let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
     let dragged_pos = mac.strands.iter().position(|s| s.id == dragged_id).ok_or("Unknown dragged strand")?;
@@ -702,7 +734,7 @@ fn stop_recording_impl(s: &mut crate::state::AppState) {
     if !instructions.is_empty() {
         push_undo(s);
         if let Some(mac) = &mut s.current_macro {
-            mac.root_mut().instructions.extend(instructions);
+            mac.recording_target_mut().instructions.extend(instructions);
             auto_save(s);
         }
     }

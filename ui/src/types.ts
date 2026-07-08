@@ -14,7 +14,8 @@ export type InstructionDto =
   | { type: 'MoveMouse'; x: number; y: number; coordinate: Coordinate }
   | { type: 'Scroll'; amount: number; axis: ScrollAxis }
   | { type: 'Command'; command: string }
-  | { type: 'Comment'; comment: string };
+  | { type: 'Comment'; comment: string }
+  | { type: 'WhenRan' };
 
 export type InstructionType = InstructionDto['type'];
 

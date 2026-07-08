@@ -1,7 +1,7 @@
 use crate::input::types::{Coordinate, Direction, InputToken, MacroKey};
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
-use crate::macros::{Instruction, Macro};
+use crate::macros::{Instruction, Macro, Strand};
 use rand::RngExt;
 use spin_sleep::{SpinSleeper, SpinStrategy};
 use std::process::Command;
@@ -27,17 +27,35 @@ fn spin_sleeper() -> &'static SpinSleeper {
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(15);
 
 impl Macro {
-    /// Runs this macro's root strand — the only strand executed today. Any
-    /// other (unconnected) strands are preserved on the macro but stay inert;
-    /// `run_instructions` below is factored out so a future per-strand
-    /// "run this disconnected strand as a function" command can reuse the
-    /// same execution engine without duplicating it.
+    /// Runs every "When Ran" entry-point strand (one whose first instruction
+    /// is `Instruction::WhenRan`) concurrently, each on its own thread, all
+    /// sharing the same `stop_flag` — so stopping a run stops every strand at
+    /// once. Strands that aren't entry points are preserved on the macro but
+    /// stay inert. Blocks until every entry strand has finished (or been
+    /// stopped), matching the old single-root behavior for callers.
     pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>, stop_flag: Option<Arc<Mutex<bool>>>) {
-        let root_instructions = self.strands.into_iter()
-            .find(|s| s.id == crate::macros::ROOT_STRAND_ID)
+        let entry_strands: Vec<Vec<Instruction>> = self.strands.into_iter()
+            .filter(Strand::starts_with_when_ran)
             .map(|s| s.instructions)
-            .unwrap_or_default();
-        run_instructions(root_instructions, emulator, stop_flag);
+            .collect();
+
+        let mut iter = entry_strands.into_iter();
+        let Some(first) = iter.next() else { return };
+        let rest: Vec<_> = iter.collect();
+
+        if rest.is_empty() {
+            run_instructions(first, emulator, stop_flag);
+            return;
+        }
+
+        std::thread::scope(|scope| {
+            for instructions in rest {
+                let emulator = Arc::clone(&emulator);
+                let stop_flag = stop_flag.clone();
+                scope.spawn(move || run_instructions(instructions, emulator, stop_flag));
+            }
+            run_instructions(first, emulator, stop_flag);
+        });
     }
 }
 
@@ -81,6 +99,7 @@ pub(crate) fn run_instructions(
         #[allow(unreachable_patterns)]
         match ins {
             Instruction::Comment(_) => {}
+            Instruction::WhenRan => {}
             Instruction::Wait(duration, randomness) => {
                 let actual = if randomness > 0.0 {
                     let offset = rand::rng().random_range(0.0..=randomness);
@@ -236,5 +255,78 @@ pub fn make_backend() -> Option<Arc<Mutex<dyn InputBackend>>> {
             EMULATOR_FAILED.store(true, Ordering::Relaxed);
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::types::{Axis, Direction, MacroButton, MacroKey};
+    use crate::macros::Strand;
+
+    struct NoopBackend;
+    impl InputBackend for NoopBackend {
+        fn key(&mut self, _key: MacroKey, _dir: Direction) -> Result<(), String> { Ok(()) }
+        fn raw_keycode(&mut self, _keycode: u16, _dir: Direction) -> Result<(), String> { Ok(()) }
+        fn button(&mut self, _button: MacroButton, _dir: Direction) -> Result<(), String> { Ok(()) }
+        fn move_mouse_rel(&mut self, _dx: i32, _dy: i32) -> Result<(), String> { Ok(()) }
+        fn move_mouse_abs(&mut self, _x: i32, _y: i32) -> Result<(), String> { Ok(()) }
+        fn scroll(&mut self, _amount: i32, _axis: Axis) -> Result<(), String> { Ok(()) }
+        fn text(&mut self, _s: &str) -> Result<(), String> { Ok(()) }
+        fn cursor_pos(&self) -> Option<(i32, i32)> { None }
+    }
+
+    fn when_ran_strand(id: &str, wait_ms: f64) -> Strand {
+        Strand {
+            id: id.to_string(),
+            x: 0,
+            y: 0,
+            instructions: vec![Instruction::WhenRan, Instruction::Wait(wait_ms, 0.0)],
+        }
+    }
+
+    /// Three entry strands each waiting 150ms should finish in well under
+    /// 3×150ms if they're actually running concurrently rather than one
+    /// after another.
+    #[test]
+    fn run_executes_all_when_ran_strands_concurrently() {
+        let mac = Macro {
+            id: "m".into(),
+            name: "Concurrent".into(),
+            description: "".into(),
+            strands: vec![
+                when_ran_strand("a", 150.0),
+                when_ran_strand("b", 150.0),
+                when_ran_strand("c", 150.0),
+                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(150.0, 0.0)] },
+            ],
+        };
+        let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
+        let start = Instant::now();
+        mac.run(emulator, None);
+        assert!(start.elapsed() < Duration::from_millis(400), "entry strands ran sequentially instead of concurrently");
+    }
+
+    /// A stop flag flipped false mid-run should cut every concurrently
+    /// running entry strand short, not just one of them.
+    #[test]
+    fn stop_flag_stops_every_concurrent_strand() {
+        let long_wait = 5_000.0;
+        let mac = Macro {
+            id: "m".into(),
+            name: "Stoppable".into(),
+            description: "".into(),
+            strands: vec![when_ran_strand("a", long_wait), when_ran_strand("b", long_wait)],
+        };
+        let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
+        let stop_flag = Arc::new(Mutex::new(true));
+        let flag_clone = Arc::clone(&stop_flag);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            *flag_clone.lock().unwrap() = false;
+        });
+        let start = Instant::now();
+        mac.run(emulator, Some(stop_flag));
+        assert!(start.elapsed() < Duration::from_millis(1000), "stop flag didn't stop both concurrent strands promptly");
     }
 }

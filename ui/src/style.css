@@ -442,51 +442,19 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .strand-body { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 
-/* The root strand's only piece of chrome: a small fixed marker sitting above
-   its stack. It's the one thing on the whole canvas that gets outlined —
-   the strand itself is never outlined, just this. Like a Scratch "hat"
-   block, it plugs directly into the stack below via the same puzzle tab
-   every instruction row has on its own bottom edge (see the shared
-   --tab-path comment on .instruction-row) — it just never has a notch of
-   its own, since nothing ever attaches above it.
-
-   Split into two elements (see the comment on .instruction-row for why):
-   `.root-marker` is an unclipped wrapper that only holds layout + the
-   drop-shadow outline/glow; `.root-marker-shape` is the actual clipped,
-   colored puzzle-tab silhouette inside it. */
-.root-marker {
-  margin-bottom: calc(-1 * var(--connector-notch-depth));
-  position: relative;
-  filter:
-    drop-shadow(var(--shadow-sm))
-    drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.35))
-    drop-shadow(2px 0 0 var(--accent))
-    drop-shadow(-2px 0 0 var(--accent))
-    drop-shadow(0 2px 0 var(--accent))
-    drop-shadow(0 -2px 0 var(--accent));
-}
-.root-marker-shape {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px calc(5px + var(--connector-notch-depth)) 10px;
-  background: var(--bg3);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
+/* "When Ran" is a normal instruction row (see .instruction-row) — it's
+   draggable, splittable and trashable exactly like every other block. It
+   only gets a quiet accent tint on its icon/label so it still reads as an
+   entry point at a glance; no outline or glow (that used to make the old
+   fixed root marker feel like an error state). */
+.instruction-row-when-ran .instruction-shape { color: var(--accent); }
+.instruction-row-when-ran svg { width: 14px; height: 14px; flex-shrink: 0; }
+.instruction-row-when-ran .when-ran-label {
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  clip-path: polygon(
-    4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - var(--connector-notch-depth) - 4px),
-    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
-    34.5px calc(100% - var(--connector-notch-depth)), 30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
-    28.3px calc(100% - var(--connector-notch-depth) + 5.9px), 24.5px 100%, 17.5px 100%,
-    13.7px calc(100% - var(--connector-notch-depth) + 5.9px), 11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
-    7.5px calc(100% - var(--connector-notch-depth)), 4px calc(100% - var(--connector-notch-depth)),
-    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
-  );
+  font-weight: 600;
+  font-size: 11px;
 }
-.root-marker svg { width: 12px; height: 12px; }
 
 .strand-empty-hint {
   padding: var(--spacing-sm) var(--spacing);
@@ -496,9 +464,10 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   border: 1px dashed var(--glass-border);
   border-radius: var(--radius);
   background: var(--glass-bg);
+  cursor: grab;
+  touch-action: none;
 }
-.strand-card:not(.is-root) .strand-empty-hint { cursor: grab; touch-action: none; }
-.strand-card:not(.is-root) .strand-empty-hint:active { cursor: grabbing; }
+.strand-empty-hint:active { cursor: grabbing; }
 
 /* ── Instruction Row ─────────────────────────────────────────────────────── */
 /* Each instruction is its own box — its own shape, sized to its own content,

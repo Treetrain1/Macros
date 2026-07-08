@@ -17,18 +17,19 @@ fn default_strand_id() -> String {
     Uuid::new_v4().simple().to_string()
 }
 
-/// Fixed id of the one strand that is actually executed when a macro runs.
-/// Every macro always has exactly one strand with this id — it can be
-/// emptied (by dragging every block off of it) but never removed, so there
-/// is always a well-defined "main" strand to attach pre-existing macros to
-/// and to run.
-pub(crate) const ROOT_STRAND_ID: &str = "root";
+/// Id used by strands' "main" entry point before "When Ran" blocks existed —
+/// every macro had exactly one strand with this literal id, and it was the
+/// only thing ever executed. Kept around solely so loading an old save file
+/// can find that strand and migrate it (see `From<MacroDe>` below); it has no
+/// special meaning anywhere else anymore.
+const LEGACY_ROOT_STRAND_ID: &str = "root";
 
-/// One draggable stack of instructions on the canvas. Strands that aren't
-/// attached to the root strand are still persisted with the macro (just not
-/// executed yet) — this is what allows stray/detached strands to survive a
-/// save/reload, and lays the groundwork for later running disconnected
-/// strands as independent functions.
+/// One draggable stack of instructions on the canvas. A strand is an entry
+/// point — one of the possibly-many independent things a macro runs
+/// concurrently — when its first instruction is `Instruction::WhenRan`;
+/// every other strand is still persisted with the macro (so stray/detached
+/// stacks survive a save/reload) but stays inert until dragged under a
+/// "When Ran" block.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub(crate) struct Strand {
     #[serde(default = "default_strand_id")]
@@ -42,8 +43,8 @@ pub(crate) struct Strand {
 }
 
 impl Strand {
-    fn root() -> Self {
-        Self { id: ROOT_STRAND_ID.to_string(), x: 0, y: 0, instructions: vec![] }
+    pub(crate) fn starts_with_when_ran(&self) -> bool {
+        matches!(self.instructions.first(), Some(Instruction::WhenRan))
     }
 }
 
@@ -83,27 +84,34 @@ impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
             MacroDe::Current { id, name, description, mut strands } => {
-                if !strands.iter().any(|s| s.id == ROOT_STRAND_ID) {
-                    strands.insert(0, Strand::root());
+                // Pre-"When Ran" saves have a strand literally id=="root" that
+                // was the sole implicit entry point; give it a real WhenRan
+                // block so it keeps running after upgrade.
+                if let Some(legacy) = strands.iter_mut().find(|s| s.id == LEGACY_ROOT_STRAND_ID) {
+                    if !legacy.starts_with_when_ran() {
+                        legacy.instructions.insert(0, Instruction::WhenRan);
+                    }
                 }
                 Self { id, name, description, strands }
             }
-            MacroDe::Legacy { id, name, description, code } => {
-                let root = Strand { id: ROOT_STRAND_ID.to_string(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![root] }
+            MacroDe::Legacy { id, name, description, mut code } => {
+                code.insert(0, Instruction::WhenRan);
+                let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
+                Self { id, name, description, strands: vec![strand] }
             }
         }
     }
 }
 
 impl Macro {
-    pub(crate) fn new(name: String, description: String, code: Vec<Instruction>) -> Self {
-        let root = Strand { id: ROOT_STRAND_ID.to_string(), x: 0, y: 0, instructions: code };
+    pub(crate) fn new(name: String, description: String, mut code: Vec<Instruction>) -> Self {
+        code.insert(0, Instruction::WhenRan);
+        let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
         Self {
             id: default_macro_id(),
             name,
             description,
-            strands: vec![root],
+            strands: vec![strand],
         }
     }
 
@@ -111,19 +119,6 @@ impl Macro {
         if self.id.trim().is_empty() {
             self.id = default_macro_id();
         }
-        if !self.strands.iter().any(|s| s.id == ROOT_STRAND_ID) {
-            self.strands.insert(0, Strand::root());
-        }
-    }
-
-    pub(crate) fn root(&self) -> &Strand {
-        self.strands.iter().find(|s| s.id == ROOT_STRAND_ID)
-            .expect("macro invariant: root strand always present")
-    }
-
-    pub(crate) fn root_mut(&mut self) -> &mut Strand {
-        self.strands.iter_mut().find(|s| s.id == ROOT_STRAND_ID)
-            .expect("macro invariant: root strand always present")
     }
 
     pub(crate) fn strand(&self, id: &str) -> Option<&Strand> {
@@ -132,6 +127,20 @@ impl Macro {
 
     pub(crate) fn strand_mut(&mut self, id: &str) -> Option<&mut Strand> {
         self.strands.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Strand that freshly-recorded input gets appended to: the first "When
+    /// Ran" entry point if one exists, otherwise just the first strand
+    /// (creating one if the macro is completely empty) so recorded input
+    /// always lands somewhere.
+    pub(crate) fn recording_target_mut(&mut self) -> &mut Strand {
+        if let Some(pos) = self.strands.iter().position(Strand::starts_with_when_ran) {
+            return &mut self.strands[pos];
+        }
+        if self.strands.is_empty() {
+            self.strands.push(Strand { id: default_strand_id(), x: 0, y: 0, instructions: vec![] });
+        }
+        &mut self.strands[0]
     }
 }
 
@@ -142,6 +151,11 @@ pub(crate) enum Instruction {
     Wait(f64, f64),
     Command(String),
     Comment(String),
+    /// Marks a strand as an entry point: the strand containing it (always at
+    /// index 0 — enforced by every command that can move/insert blocks) runs
+    /// as its own concurrent thread when the macro is run. A macro can have
+    /// any number of these.
+    WhenRan,
 }
 
 impl std::hash::Hash for Instruction {
@@ -151,6 +165,7 @@ impl std::hash::Hash for Instruction {
             Self::Wait(d, r) => { 1u8.hash(state); d.to_bits().hash(state); r.to_bits().hash(state); }
             Self::Command(s) => { 2u8.hash(state); s.hash(state); }
             Self::Comment(s) => { 3u8.hash(state); s.hash(state); }
+            Self::WhenRan    => { 4u8.hash(state); }
         }
     }
 }
@@ -161,6 +176,7 @@ enum InstructionDe {
     Wait(WaitDe),
     Command(String),
     Comment(String),
+    WhenRan,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +194,50 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
             InstructionDe::Command(s)                  => Instruction::Command(s),
             InstructionDe::Comment(s)                  => Instruction::Comment(s),
+            InstructionDe::WhenRan                     => Instruction::WhenRan,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_macro_defaults_to_one_when_ran_strand() {
+        let mac = Macro::new("Test".into(), "".into(), vec![]);
+        assert_eq!(mac.strands.len(), 1);
+        assert!(mac.strands[0].starts_with_when_ran());
+    }
+
+    #[test]
+    fn legacy_flat_code_migrates_to_when_ran_strand() {
+        let json = r#"{"name":"Old","description":"","code":[{"Comment":"hi"}]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        assert_eq!(mac.strands.len(), 1);
+        assert_eq!(mac.strands[0].instructions, vec![Instruction::WhenRan, Instruction::Comment("hi".into())]);
+    }
+
+    #[test]
+    fn legacy_root_strand_gains_when_ran_on_load() {
+        let json = r#"{"id":"m1","name":"Old","description":"","strands":[
+            {"id":"root","x":0,"y":0,"instructions":[{"Comment":"hi"}]},
+            {"id":"stray","x":10,"y":10,"instructions":[]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        let root = mac.strand("root").unwrap();
+        assert!(root.starts_with_when_ran());
+        assert_eq!(root.instructions, vec![Instruction::WhenRan, Instruction::Comment("hi".into())]);
+        // Untouched, non-entry strand should survive as-is.
+        assert!(mac.strand("stray").unwrap().instructions.is_empty());
+    }
+
+    #[test]
+    fn already_migrated_root_strand_is_not_double_prepended() {
+        let json = r#"{"id":"m1","name":"New","description":"","strands":[
+            {"id":"root","x":0,"y":0,"instructions":["WhenRan",{"Comment":"hi"}]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        assert_eq!(mac.strand("root").unwrap().instructions, vec![Instruction::WhenRan, Instruction::Comment("hi".into())]);
     }
 }

@@ -10,15 +10,13 @@ import { state } from './store';
 import { addInstruction, addStrand, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import type { InstructionDto, MacroDto } from './types';
 
-export const ROOT_ID = 'root';
-
 // Strand x/y from the backend are canvas-space coordinates that can go
 // negative; canvas-inner is sized to the strands' bounding box each render,
 // offset by this padding so cards never touch the edge.
 const CANVAS_PAD = 400;
-// Bounds always extend at least this far past the origin in every direction,
-// so there's room to pan around the root strand even when it's the only
-// thing on the canvas.
+// Bounds always extend at least this far past the canvas origin in every
+// direction, so there's room to pan around even when a macro has only one
+// strand sitting right at (0, 0).
 const ROOT_MARGIN = 1000;
 
 function cssEscape(s: string): string {
@@ -118,15 +116,12 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
 
   if (macroId !== currentMacroId) {
     currentMacroId = macroId;
-    const root = strands.find(st => st.id === ROOT_ID);
     requestAnimationFrame(() => {
-      if (root) {
-        scrollEl.scrollLeft = Math.max(0, root.x - minX + CANVAS_PAD - 60);
-        scrollEl.scrollTop = Math.max(0, root.y - minY + CANVAS_PAD - 60);
-      } else {
-        scrollEl.scrollLeft = 0;
-        scrollEl.scrollTop = 0;
-      }
+      // Center the initial view on the canvas origin — strands generally
+      // spawn near (0, 0), and there's no longer a single canonical strand
+      // to scroll to.
+      scrollEl.scrollLeft = Math.max(0, -minX + CANVAS_PAD - 60);
+      scrollEl.scrollTop = Math.max(0, -minY + CANVAS_PAD - 60);
     });
   }
 }
@@ -218,6 +213,11 @@ interface DragState {
   resolvingPromise: Promise<string | void> | null;
   snap: { targetId: string; index: number } | null;
   overTrash?: boolean;
+  // Whole-strand grab of a strand headed by a "When Ran" block: it can be
+  // moved around freely but never snapped/merged into another strand (that
+  // would attach it underneath something), so snap detection is skipped
+  // entirely for the whole drag.
+  noSnap: boolean;
   // The real DOM node(s) being dragged are physically relocated into the
   // ghost (not cloned/hidden), so the strand itself visibly follows the
   // pointer. Vue reuses these exact nodes by key on the next patch and never
@@ -255,6 +255,7 @@ let paletteDrag: PaletteDragState | null = null;
 
 export function defaultInstruction(type: InstructionDto['type']): InstructionDto {
   switch (type) {
+    case 'WhenRan': return { type: 'WhenRan' };
     case 'Wait': return { type: 'Wait', duration: 1000, randomness: 0 };
     case 'Text': return { type: 'Text', text: 'text' };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
@@ -346,13 +347,15 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     const body = card.querySelector('.strand-body');
     const rows = Array.from(card.querySelectorAll('.instruction-row'));
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
-    const marker = card.querySelector('.root-marker');
     boundaries.push(rows.length
       ? rows[rows.length - 1].getBoundingClientRect().bottom
-      : marker
-        ? marker.getBoundingClientRect().bottom + 4
-        : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
+      : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
+    // Index 0 (the very top boundary) would attach something above the
+    // strand's first block — never allowed when that first block is a
+    // "When Ran", since nothing may ever end up underneath it.
+    const headIsWhenRan = findStrand(id)?.instructions[0]?.type === 'WhenRan';
     for (let idx = 0; idx < boundaries.length; idx++) {
+      if (idx === 0 && headIsWhenRan) continue;
       const y = boundaries[idx];
       const dist = Math.abs(e.clientY - y);
       if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
@@ -396,7 +399,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   if (!strand) return;
 
   const cardEl = document.querySelector<HTMLElement>(`.strand-card[data-strand-id="${cssEscape(strandId)}"]`);
-  const wholeStrandGrab = strandId !== ROOT_ID && index === 0;
+  const wholeStrandGrab = index === 0;
 
   const ghost = document.createElement('div');
   ghost.className = 'strand-drag-ghost';
@@ -450,6 +453,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     restoreCard,
     hiddenRowEls,
     hiddenNewCardEl: null,
+    noSnap: wholeStrandGrab && strand.instructions[0]?.type === 'WhenRan',
   };
   drag = newDrag;
 
@@ -488,7 +492,10 @@ function onPointerMove(e: PointerEvent) {
   }
   if (paletteDrag && e.pointerId === paletteDrag.pointerId) {
     positionGhost(e);
-    if (isOverSidebar(e)) {
+    // A brand-new "When Ran" always becomes its own detached strand — it
+    // can never snap into an existing one (it would either attach itself
+    // underneath something, or land anywhere but the required index 0).
+    if (isOverSidebar(e) || paletteDrag.insType === 'WhenRan') {
       paletteDrag.snap = null;
       clearSnapIndicator();
     } else {
@@ -506,7 +513,12 @@ function onPointerMove(e: PointerEvent) {
     } else {
       drag.overTrash = false;
       setSidebarArmed(false);
-      updateSnapTarget(e, drag, drag.resolvedId ?? dragCandidate?.strandId);
+      if (drag.noSnap) {
+        drag.snap = null;
+        clearSnapIndicator();
+      } else {
+        updateSnapTarget(e, drag, drag.resolvedId ?? dragCandidate?.strandId);
+      }
     }
     return;
   }

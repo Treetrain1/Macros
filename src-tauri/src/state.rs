@@ -175,6 +175,7 @@ pub(crate) enum InstructionDto {
     Scroll { amount: i32, axis: String },
     Command { command: String },
     Comment { comment: String },
+    WhenRan,
 }
 
 #[derive(Serialize, Clone)]
@@ -281,6 +282,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::Wait(dur, rand) => InstructionDto::Wait { duration: *dur, randomness: *rand },
         Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
+        Instruction::WhenRan => InstructionDto::WhenRan,
         Instruction::Token(token) => match token {
             InputToken::Text(t) => InstructionDto::Text { text: t.clone() },
             InputToken::Key(k, d) => InstructionDto::Key {
@@ -327,6 +329,7 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
         }
         InstructionDto::Command { command } => Instruction::Command(command.clone()),
         InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
+        InstructionDto::WhenRan => Instruction::WhenRan,
     })
 }
 

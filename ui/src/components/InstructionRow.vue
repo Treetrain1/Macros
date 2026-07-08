@@ -10,10 +10,12 @@ import MoveMouseFields from './fields/MoveMouseFields.vue';
 import ScrollFields from './fields/ScrollFields.vue';
 import CommandFields from './fields/CommandFields.vue';
 import CommentFields from './fields/CommentFields.vue';
+import WhenRanFields from './fields/WhenRanFields.vue';
 
 const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
 const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
+  WhenRan: WhenRanFields,
   Wait: WaitFields,
   Text: TextFields,
   Key: KeyFields,
@@ -35,7 +37,12 @@ function onRowPointerDown(e: PointerEvent) {
 </script>
 
 <template>
-  <div class="instruction-row" :class="{ 'row-first': isFirst, 'row-last': isLast }" :data-index="index" @pointerdown="onRowPointerDown">
+  <div
+    class="instruction-row"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan' }"
+    :data-index="index"
+    @pointerdown="onRowPointerDown"
+  >
     <div class="instruction-shape">
       <div class="instruction-content">
         <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />

@@ -72,6 +72,7 @@ export type IconName = keyof typeof ICONS;
 
 /** Icon for each instruction type, used by the sidebar palette. */
 export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
+  WhenRan: 'play',
   Wait: 'clock',
   Text: 'text-cursor',
   Key: 'key',
@@ -83,6 +84,7 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
 };
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
+  WhenRan: 'When Ran',
   Wait: 'Wait',
   Text: 'Text',
   Key: 'Key',

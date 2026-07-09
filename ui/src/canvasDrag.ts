@@ -324,29 +324,30 @@ function positionGhost(e: PointerEvent) {
   });
 }
 
-let snapIndicatorEl: HTMLElement | null = null;
-function clearSnapIndicator() {
-  if (snapIndicatorEl) {
-    snapIndicatorEl.remove();
-    snapIndicatorEl = null;
-  }
-}
-
 const SNAP_THRESHOLD = 28;
 
 // Shared by both strand-drags (snapping an existing block elsewhere) and
 // palette-drags (dropping a brand new instruction onto a strand); writes the
-// result onto `target.snap` and updates the shared snap-line indicator.
+// result onto `target.snap` and updates the shared snap preview.
 interface SnapCandidate { targetId: string; index: number; dist: number; y: number; left: number; width: number }
 
-function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; index: number } | null }, excludeId: string | null | undefined) {
+function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; index: number } | null }, excludeId: string | null | undefined, ghostEl?: HTMLElement) {
+  const ghostRect = ghostEl?.getBoundingClientRect();
   const cards = Array.from(document.querySelectorAll<HTMLElement>('.strand-card'));
   let best: SnapCandidate | null = null;
   for (const card of cards) {
     const id = card.dataset.strandId;
     if (!id || id === excludeId) continue;
     const cardRect = card.getBoundingClientRect();
-    if (e.clientX < cardRect.left - 60 || e.clientX > cardRect.right + 60) continue;
+
+    // Check horizontal proximity based on actual block position, not pointer
+    if (ghostRect) {
+      const horizMargin = 20;
+      if (ghostRect.right < cardRect.left - horizMargin || ghostRect.left > cardRect.right + horizMargin) continue;
+    } else {
+      if (e.clientX < cardRect.left - 60 || e.clientX > cardRect.right + 60) continue;
+    }
+
     const body = card.querySelector('.strand-body');
     const rows = Array.from(card.querySelectorAll('.instruction-row'));
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
@@ -360,7 +361,8 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     for (let idx = 0; idx < boundaries.length; idx++) {
       if (idx === 0 && headIsWhenRan) continue;
       const y = boundaries[idx];
-      const dist = Math.abs(e.clientY - y);
+      const refY = ghostRect ? ghostRect.top : e.clientY;
+      const dist = Math.abs(refY - y);
       if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
         best = { targetId: id, index: idx, dist, y, left: cardRect.left, width: cardRect.width };
       }
@@ -369,18 +371,45 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
   target.snap = best !== null ? { targetId: (best as SnapCandidate).targetId, index: (best as SnapCandidate).index } : null;
 
   if (best !== null) {
-    const b = best as SnapCandidate;
-    if (!snapIndicatorEl) {
-      snapIndicatorEl = document.createElement('div');
-      snapIndicatorEl.className = 'strand-snap-indicator';
-      document.body.appendChild(snapIndicatorEl);
-    }
-    snapIndicatorEl.style.left = `${b.left}px`;
-    snapIndicatorEl.style.top = `${b.y - 2}px`;
-    snapIndicatorEl.style.width = `${b.width}px`;
+    showSnapPreview(best as SnapCandidate, ghostEl);
   } else {
-    clearSnapIndicator();
+    clearSnapPreview();
   }
+}
+
+let snapPreviewEl: HTMLElement | null = null;
+
+function clearSnapPreview() {
+  if (snapPreviewEl) {
+    snapPreviewEl.remove();
+    snapPreviewEl = null;
+  }
+}
+
+function showSnapPreview(best: SnapCandidate, ghostEl?: HTMLElement) {
+  if (snapPreviewEl) snapPreviewEl.remove();
+
+  if (!ghostEl) return;
+  const ghostRow = ghostEl.querySelector('.instruction-row');
+  if (!ghostRow) return;
+
+  const preview = document.createElement('div');
+  preview.className = 'strand-snap-preview';
+
+  const clone = ghostRow.cloneNode(true) as HTMLElement;
+  clone.style.marginBottom = '0';
+  preview.appendChild(clone);
+
+  preview.style.left = `${best.left}px`;
+  preview.style.top = `${best.y - 6}px`;
+  if (canvasZoom !== 1) {
+    preview.style.transform = `scale(${canvasZoom})`;
+    preview.style.transformOrigin = '0 0';
+  }
+
+  document.body.appendChild(preview);
+
+  snapPreviewEl = preview;
 }
 
 export function clientToCanvas(clientX: number, clientY: number): [number, number] {
@@ -500,9 +529,9 @@ function onPointerMove(e: PointerEvent) {
     // underneath something, or land anywhere but the required index 0).
     if (isOverSidebar(e) || isHeaderType(paletteDrag.insType)) {
       paletteDrag.snap = null;
-      clearSnapIndicator();
+      clearSnapPreview();
     } else {
-      updateSnapTarget(e, paletteDrag, null);
+      updateSnapTarget(e, paletteDrag, null, paletteDrag.ghostEl);
     }
     return;
   }
@@ -511,16 +540,16 @@ function onPointerMove(e: PointerEvent) {
     if (isOverSidebar(e)) {
       drag.overTrash = true;
       drag.snap = null;
-      clearSnapIndicator();
+      clearSnapPreview();
       setSidebarArmed(true);
     } else {
       drag.overTrash = false;
       setSidebarArmed(false);
       if (drag.noSnap) {
         drag.snap = null;
-        clearSnapIndicator();
+        clearSnapPreview();
       } else {
-        updateSnapTarget(e, drag, drag.resolvedId ?? dragCandidate?.strandId);
+        updateSnapTarget(e, drag, drag.resolvedId ?? dragCandidate?.strandId, drag.ghostEl);
       }
     }
     return;
@@ -547,7 +576,7 @@ function onPointerUp(e: PointerEvent) {
   if (paletteDrag && paletteDrag.pointerId === e.pointerId) {
     const finished = paletteDrag;
     paletteDrag = null;
-    clearSnapIndicator();
+    clearSnapPreview();
     finished.ghostEl.remove();
 
     if (!isOverSidebar(e)) {
@@ -572,7 +601,7 @@ function onPointerUp(e: PointerEvent) {
 
   const finished = drag;
   drag = null;
-  clearSnapIndicator();
+  clearSnapPreview();
   setSidebarArmed(false);
   // Move the real card back to where it came from before removing the
   // (now-empty) ghost wrapper — unconditionally (move/merge/trash/error), so

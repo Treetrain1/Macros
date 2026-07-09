@@ -679,14 +679,26 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   pointer-events: none;
   opacity: 0.92;
 }
-.strand-snap-indicator {
+.strand-snap-preview {
   position: fixed;
   z-index: 19;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-  box-shadow: var(--glow-accent);
   pointer-events: none;
+  opacity: 0.4;
+}
+.strand-snap-preview .instruction-row {
+  filter: none !important;
+  cursor: default;
+}
+.strand-snap-preview .instruction-shape {
+  background: rgba(var(--accent-rgb), 0.2);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.strand-snap-preview .instruction-row::before {
+  background: rgba(var(--accent-rgb), 0.15);
+}
+.strand-snap-preview .instruction-content {
+  opacity: 0;
 }
 
 /* ── Editor Bottom Toolbar ───────────────────────────────────────────────── */

@@ -387,7 +387,11 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
       const refY = ghostRect ? ghostRect.top : e.clientY;
       const dist = Math.abs(refY - y);
       if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
-        best = { targetId: id, index: idx, dist, y, left: cardRect.left, width: cardRect.width };
+        // For the "after last row" boundary, the insertion point is 6px
+        // above the boundary: the last row's margin-bottom: -6px means the
+        // next item starts 6 px above its border-box bottom.
+        const insY = idx === rows.length ? y - 6 : y;
+        best = { targetId: id, index: idx, dist, y: insY, left: cardRect.left, width: cardRect.width };
       }
     }
   }
@@ -424,7 +428,7 @@ function showSnapPreview(best: SnapCandidate, ghostEl?: HTMLElement) {
   preview.appendChild(clone);
 
   preview.style.left = `${best.left}px`;
-  preview.style.top = `${best.y - 6}px`;
+  preview.style.top = `${best.y}px`;
   if (canvasZoom !== 1) {
     preview.style.transform = `scale(${canvasZoom})`;
     preview.style.transformOrigin = '0 0';

@@ -28,7 +28,7 @@ function onPaletteDown(e: PointerEvent, type: InstructionDto['type']) {
   <div class="instruction-sidebar" id="instruction-sidebar">
     <div class="sidebar-trash-hint">
       <Trash2 />
-      <span>Drag a strand here to delete it</span>
+      <span>Drag a block here to delete it</span>
     </div>
     <div class="sidebar-palette" id="sidebar-palette">
       <div

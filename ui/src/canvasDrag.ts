@@ -107,11 +107,28 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   // pointer while this solid, static card just sits there until drop calls
   // moveStrand. Hide it for the duration, same idea as the whole-strand-grab
   // case where the real card itself becomes the ghost.
-  if (drag && !drag.restoreCard && drag.resolvedId) {
-    const newCard = cardEls.get(drag.resolvedId);
-    if (newCard && newCard !== drag.hiddenNewCardEl) {
-      newCard.style.visibility = 'hidden';
-      drag.hiddenNewCardEl = newCard;
+  //
+  // The resolvedId is set asynchronously (when the splitStrand invoke
+  // resolves), but the backend can emit state-updated before that response
+  // arrives — so we also check preExistingStrandIds to catch new strands
+  // even before resolvedId is known.
+  if (drag && !drag.restoreCard) {
+    const targetId = drag.resolvedId;
+    if (targetId) {
+      const newCard = cardEls.get(targetId);
+      if (newCard && newCard !== drag.hiddenNewCardEl) {
+        newCard.style.visibility = 'hidden';
+        drag.hiddenNewCardEl = newCard;
+      }
+    } else {
+      // resolvedId not yet available — hide any strand that wasn't there
+      // before the drag started (the newly created split strand).
+      for (const [id, card] of cardEls) {
+        if (!drag.preExistingStrandIds.has(id) && card !== drag.hiddenNewCardEl) {
+          card.style.visibility = 'hidden';
+          drag.hiddenNewCardEl = card;
+        }
+      }
     }
   }
 
@@ -241,6 +258,11 @@ interface DragState {
   // for us each render (see there); tracked here purely so pointerup knows
   // what to unhide.
   hiddenNewCardEl: HTMLElement | null;
+  // Strand IDs that existed when the drag started. Used by positionCanvas to
+  // detect newly created split-strand cards even before the invoke response
+  // sets resolvedId — the backend's state-updated event can arrive before the
+  // invoke resolves, leaving a window where the new card renders unhidden.
+  preExistingStrandIds: Set<string>;
 }
 let drag: DragState | null = null;
 
@@ -487,6 +509,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     hiddenRowEls,
     hiddenNewCardEl: null,
     noSnap: wholeStrandGrab && strand.instructions[0] != null && isHeaderType(strand.instructions[0].type),
+    preExistingStrandIds: new Set(state.current_macro?.strands?.map(s => s.id) ?? []),
   };
   drag = newDrag;
 
@@ -613,12 +636,20 @@ function onPointerUp(e: PointerEvent) {
     finished.restoreCard.el.style.position = '';
     finished.restoreCard.parent.insertBefore(finished.restoreCard.el, finished.restoreCard.next);
   }
+  // Remove the ghost first so the real card at the split point isn't
+  // visible alongside the ghost's clones — that brief overlap reads as a
+  // "copy of the dragged block left behind at the original position".
+  finished.ghostEl.remove();
   // The split-drag rows were only ever hidden (their DOM parent never
   // changed), so just make them visible again — see the hiddenRowEls comment
   // on DragState for why they can't be physically moved like the card above.
+  // For split-drags these references may be stale (Vue re-rendered the
+  // original strand after splitStrand resolved), but the unhide is harmless.
   for (const el of finished.hiddenRowEls) el.style.visibility = '';
-  if (finished.hiddenNewCardEl) finished.hiddenNewCardEl.style.visibility = '';
-  finished.ghostEl.remove();
+  // Don't unhide hiddenNewCardEl here — for merge/trash the strand is
+  // removed by the backend so it should stay hidden; for the move case it's
+  // unhidden in the async callback after the optimistic x/y update so the
+  // card appears at the drop position, not the split point.
 
   void (async () => {
     const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
@@ -638,6 +669,9 @@ function onPointerUp(e: PointerEvent) {
         strand.x = x;
         strand.y = y;
       }
+      // Reveal the card now that it's positioned at the drop coordinates,
+      // so it never appears at the split point.
+      if (finished.hiddenNewCardEl) finished.hiddenNewCardEl.style.visibility = '';
       await moveStrand(id, x, y);
     }
   })();

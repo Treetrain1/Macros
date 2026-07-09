@@ -9,6 +9,7 @@
 import { state } from './store';
 import { addInstruction, addStrand, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import type { InstructionDto, MacroDto } from './types';
+import { isHeaderType } from './types';
 
 // Strand x/y from the backend are canvas-space coordinates that can go
 // negative; canvas-inner is sized to the strands' bounding box each render,
@@ -317,7 +318,9 @@ function positionGhost(e: PointerEvent) {
     ghostRafPending = false;
     const active = drag ?? paletteDrag;
     if (!active || !lastPointerEvent) return;
-    active.ghostEl.style.transform = `translate(${lastPointerEvent.clientX - active.offsetX}px, ${lastPointerEvent.clientY - active.offsetY}px)`;
+    const tx = lastPointerEvent.clientX - active.offsetX;
+    const ty = lastPointerEvent.clientY - active.offsetY;
+    active.ghostEl.style.transform = `translate(${tx}px, ${ty}px) scale(${canvasZoom})`;
   });
 }
 
@@ -353,7 +356,7 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     // Index 0 (the very top boundary) would attach something above the
     // strand's first block — never allowed when that first block is a
     // "When Ran", since nothing may ever end up underneath it.
-    const headIsWhenRan = findStrand(id)?.instructions[0]?.type === 'WhenRan';
+    const headIsWhenRan = findStrand(id)?.instructions[0] && isHeaderType(findStrand(id)!.instructions[0].type);
     for (let idx = 0; idx < boundaries.length; idx++) {
       if (idx === 0 && headIsWhenRan) continue;
       const y = boundaries[idx];
@@ -453,7 +456,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     restoreCard,
     hiddenRowEls,
     hiddenNewCardEl: null,
-    noSnap: wholeStrandGrab && strand.instructions[0]?.type === 'WhenRan',
+    noSnap: wholeStrandGrab && strand.instructions[0] != null && isHeaderType(strand.instructions[0].type),
   };
   drag = newDrag;
 
@@ -495,7 +498,7 @@ function onPointerMove(e: PointerEvent) {
     // A brand-new "When Ran" always becomes its own detached strand — it
     // can never snap into an existing one (it would either attach itself
     // underneath something, or land anywhere but the required index 0).
-    if (isOverSidebar(e) || paletteDrag.insType === 'WhenRan') {
+    if (isOverSidebar(e) || isHeaderType(paletteDrag.insType)) {
       paletteDrag.snap = null;
       clearSnapIndicator();
     } else {

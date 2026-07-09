@@ -456,6 +456,46 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   font-size: 11px;
 }
 
+/* Header blocks (When Ran, and any future top-only blocks) have no top
+   notch — a flat top edge with only the bottom tab, because nothing can
+   ever sit above a header. The left padding also doesn't need to reserve
+   space for the connector notch since there's none. */
+.instruction-row-header::before {
+  clip-path: polygon(
+    4px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)),
+    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
+    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
+    24.5px 100%, 17.5px 100%,
+    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
+    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    7.5px calc(100% - var(--connector-notch-depth)),
+    4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
+}
+.instruction-row-header .instruction-shape {
+  padding: 6px var(--spacing) calc(6px + var(--connector-notch-depth)) var(--spacing);
+  clip-path: polygon(
+    4px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)),
+    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
+    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
+    24.5px 100%, 17.5px 100%,
+    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
+    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    7.5px calc(100% - var(--connector-notch-depth)),
+    4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
+}
+
 .strand-empty-hint {
   padding: var(--spacing-sm) var(--spacing);
   font-size: 12px;

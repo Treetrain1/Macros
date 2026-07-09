@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
 import type { InstructionDto } from '../types';
+import { isHeaderType } from '../types';
 import { beginPickup } from '../canvasDrag';
 import WaitFields from './fields/WaitFields.vue';
 import TextFields from './fields/TextFields.vue';
@@ -39,7 +40,7 @@ function onRowPointerDown(e: PointerEvent) {
 <template>
   <div
     class="instruction-row"
-    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan' }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
   >

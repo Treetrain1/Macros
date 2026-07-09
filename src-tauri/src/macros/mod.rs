@@ -42,9 +42,18 @@ pub(crate) struct Strand {
     pub(crate) instructions: Vec<Instruction>,
 }
 
+impl Instruction {
+    /// Returns `true` for "header" blocks — blocks that must be first in their
+    /// strand, cannot have anything stacked above them, and render with a flat
+    /// top edge (no connector notch). Currently only `WhenRan`.
+    pub(crate) fn is_header(&self) -> bool {
+        matches!(self, Instruction::WhenRan)
+    }
+}
+
 impl Strand {
     pub(crate) fn starts_with_when_ran(&self) -> bool {
-        matches!(self.instructions.first(), Some(Instruction::WhenRan))
+        self.instructions.first().map_or(false, Instruction::is_header)
     }
 }
 

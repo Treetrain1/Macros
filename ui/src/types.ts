@@ -19,6 +19,12 @@ export type InstructionDto =
 
 export type InstructionType = InstructionDto['type'];
 
+export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan']);
+
+export function isHeaderType(type: InstructionDto['type']): boolean {
+  return HEADER_TYPES.has(type);
+}
+
 export interface StrandDto {
   id: string;
   x: number;

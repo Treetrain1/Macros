@@ -224,7 +224,7 @@ fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -
     if index == 0 && strand.starts_with_when_ran() {
         return Err("Can't attach a block above a When Ran block".to_string());
     }
-    if matches!(ins, Instruction::WhenRan) && index != 0 {
+    if ins.is_header() && index != 0 {
         return Err("A When Ran block can only be the first block in a strand".to_string());
     }
     Ok(())

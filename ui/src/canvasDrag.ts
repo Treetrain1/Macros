@@ -321,6 +321,7 @@ function positionGhost(e: PointerEvent) {
     const tx = lastPointerEvent.clientX - active.offsetX;
     const ty = lastPointerEvent.clientY - active.offsetY;
     active.ghostEl.style.transform = `translate(${tx}px, ${ty}px) scale(${canvasZoom})`;
+    active.ghostEl.style.transformOrigin = '0 0';
   });
 }
 

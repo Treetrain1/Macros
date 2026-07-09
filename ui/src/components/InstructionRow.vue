@@ -5,6 +5,7 @@ import { isHeaderType } from '../types';
 import { beginPickup } from '../canvasDrag';
 import { state } from '../store';
 import { openBlockMenu } from '../contextMenu';
+import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
 import WaitFields from './fields/WaitFields.vue';
 import TextFields from './fields/TextFields.vue';
 import KeyFields from './fields/KeyFields.vue';
@@ -30,6 +31,7 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
 };
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);
+const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.instruction.type]]);
 
 const isRecordingTarget = computed(
   () => props.isFirst && props.strandId === state.current_macro?.recording_target_strand_id,
@@ -57,6 +59,7 @@ function onRowContextMenu(e: MouseEvent) {
   >
     <div class="instruction-shape">
       <span v-if="isRecordingTarget" class="recording-target-dot" title="Recording target" />
+      <component :is="typeIcon" v-if="!isHeaderType(instruction.type)" class="instruction-type-icon" />
       <div class="instruction-content">
         <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
       </div>

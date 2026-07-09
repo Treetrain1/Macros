@@ -604,6 +604,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
    12px at 8px deep, ~2.5px corner chamfers, plus a 4px chamfer on the
    row's four outer corners. */
 .instruction-shape {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -639,6 +640,26 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
+}
+
+/* Sits in the left padding .instruction-shape reserves (see its
+   padding-left, sized off --connector-cut-inset/--connector-cut-width).
+   Centered on 21px — the same x the top/bottom notch geometry is centered
+   on — so it lines up with the puzzle-piece connector rather than the
+   padding box. */
+.instruction-type-icon {
+  position: absolute;
+  left: 21px;
+  /* .instruction-shape's padding is asymmetric (6px top vs 6+notch-depth
+     bottom, to reserve room for the tab) so flex-centered content sits
+     notch-depth/2 above true 50% — match that or the icon reads low. */
+  top: calc(50% - (var(--connector-notch-depth) / 2));
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  pointer-events: none;
 }
 .instruction-label {
   color: var(--text-dim);

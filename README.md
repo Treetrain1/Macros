@@ -1,7 +1,6 @@
 # Macros
 
-A libcosmic app to manage and run macros on Linux.\
-Windows support is experimental/unfinished.
+A Tauri app to manage and run macros on Windows, Linux, and macOS.
 
 ## Building
 

@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { state } from '../store';
 import { runMacro, startRecording, stopRecording, toggleLoopMode } from '../tauri';
 import AppButton from './AppButton.vue';
+import SwitchControl from './SwitchControl.vue';
 
 const runIcon = computed(() => (state.loop_mode_enabled ? 'repeat' : 'play'));
 const runLabel = computed(() => (state.loop_mode_enabled ? 'Start loop' : 'Run macro'));
@@ -32,9 +33,6 @@ function onRecordClick() {
   else stopRecording();
 }
 
-function onLoopChange(e: Event) {
-  toggleLoopMode((e.target as HTMLInputElement).checked);
-}
 </script>
 
 <template>
@@ -49,11 +47,9 @@ function onLoopChange(e: Event) {
         :label="runLabel"
         @click="runMacro()"
       />
-      <label class="switch">
-        <input type="checkbox" :checked="state.loop_mode_enabled" @change="onLoopChange">
-        <span class="switch-track"></span>
+      <SwitchControl :model-value="state.loop_mode_enabled" @update:model-value="toggleLoopMode">
         Loop mode
-      </label>
+      </SwitchControl>
     </div>
     <div class="run-right">
       <AppButton

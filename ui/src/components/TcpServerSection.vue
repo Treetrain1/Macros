@@ -2,12 +2,10 @@
 import { Server } from 'lucide-vue-next';
 import { state } from '../store';
 import { setIpcAutoStart, setIpcPortText, startIpcServer, stopIpcServer } from '../tauri';
+import SwitchControl from './SwitchControl.vue';
 
 function onPortInput(e: Event) {
   setIpcPortText((e.target as HTMLInputElement).value);
-}
-function onAutoStartChange(e: Event) {
-  setIpcAutoStart((e.target as HTMLInputElement).checked);
 }
 </script>
 
@@ -34,10 +32,7 @@ function onAutoStartChange(e: Event) {
       </div>
       <div class="settings-row">
         <span class="settings-row-label">Automatically start server on app launch</span>
-        <label class="switch">
-          <input type="checkbox" :checked="state.ipc_auto_start" @change="onAutoStartChange">
-          <span class="switch-track"></span>
-        </label>
+        <SwitchControl :model-value="state.ipc_auto_start" @update:model-value="setIpcAutoStart" />
       </div>
     </div>
   </div>

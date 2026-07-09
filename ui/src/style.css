@@ -1083,8 +1083,7 @@ button.confirm-armed {
   transition: background var(--dur-fast) var(--ease-standard),
               border-color var(--dur-fast) var(--ease-standard);
 }
-.switch-track::before {
-  content: '';
+.switch-knob {
   position: absolute;
   top: 1px;
   left: 1px;
@@ -1099,19 +1098,23 @@ button.confirm-armed {
   background: var(--accent);
   border-color: var(--accent);
 }
-.switch input[type="checkbox"]:checked + .switch-track::before {
+.switch input[type="checkbox"]:checked + .switch-track .switch-knob {
   transform: translateX(16px);
   background: #fff;
 }
 .switch input[type="checkbox"]:focus-visible + .switch-track {
   box-shadow: var(--bevel-press), var(--glow-accent);
 }
+.switch-dragging .switch-track,
+.switch-dragging .switch-knob {
+  transition: none !important;
+}
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .btn-active-record, .btn-record-countdown { animation: none; }
   button, input, select, .instruction-row, #main-page, #settings-page,
-  .switch-track, .switch-track::before {
+  .switch-track, .switch-track .switch-knob {
     transition: none !important;
   }
   .warning-banner.banner-enter, button.confirm-armed, .shake-once, .empty-state, .dd-panel {

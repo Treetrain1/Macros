@@ -342,6 +342,7 @@ pub(crate) fn delete_instruction<R: Runtime>(
     let strand = mac.strand_mut(&strand_id).ok_or("Unknown strand")?;
     strand.instructions.remove(index);
     let tail = strand.instructions.split_off(index.min(strand.instructions.len()));
+    let now_empty = strand.instructions.is_empty();
     let new_id = if !tail.is_empty() {
         let new_id = uuid::Uuid::new_v4().simple().to_string();
         mac.strands.push(Strand { id: new_id.clone(), x, y, instructions: tail });
@@ -349,6 +350,11 @@ pub(crate) fn delete_instruction<R: Runtime>(
     } else {
         None
     };
+    // A strand left with no blocks is just dead weight on the canvas — drop
+    // it instead of leaving an empty card behind.
+    if now_empty {
+        mac.strands.retain(|s| s.id != strand_id);
+    }
     s.invalid_field_buffers.clear();
     auto_save(&s);
     emit_state_updated(&app, &s);
@@ -420,12 +426,10 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     } else {
         push_undo(&mut s);
         if let Some(mac) = &mut s.current_macro {
-            // Clearing wipes every strand's instructions, including any
-            // "When Ran" blocks — matching "start this macro over from
-            // scratch".
-            for strand in &mut mac.strands {
-                strand.instructions.clear();
-            }
+            // Clearing wipes every strand, including any "When Ran" blocks —
+            // matching "start this macro over from scratch". Emptied strands
+            // aren't kept around as empty cards; the canvas ends up blank.
+            mac.strands.clear();
             s.invalid_field_buffers.clear();
             auto_save(&s);
             s.confirm_clear_instructions = false;

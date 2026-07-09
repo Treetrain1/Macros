@@ -148,6 +148,7 @@ pub(crate) struct MacroDto {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) strands: Vec<StrandDto>,
+    pub(crate) recording_target_strand_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -348,6 +349,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         name: mac.name.clone(),
         description: mac.description.clone(),
         strands: mac.strands.iter().map(strand_to_dto).collect(),
+        recording_target_strand_id: mac.recording_target_id(),
     }
 }
 

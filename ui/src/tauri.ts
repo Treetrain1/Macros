@@ -49,6 +49,12 @@ export const splitStrand = (strandId: string, index: number, x: number, y: numbe
   invoke<string>('split_strand', { strandId, index, x, y });
 export const mergeStrand = (draggedId: string, targetId: string, index: number) =>
   invoke<void>('merge_strand', { draggedId, targetId, index });
+export const deleteInstruction = (strandId: string, index: number, x: number, y: number) =>
+  invoke<string | null>('delete_instruction', { strandId, index, x, y });
+export const pasteInstructions = (x: number, y: number, instructions: InstructionDto[]) =>
+  invoke<string>('paste_instructions', { x, y, instructions });
+export const setRecordingTarget = (strandId: string) =>
+  invoke<void>('set_recording_target', { strandId });
 
 // ─── Key capture ────────────────────────────────────────────────────────────
 export const startKeyCapture = (strandId: string, index: number) =>

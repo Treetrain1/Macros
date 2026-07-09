@@ -2,9 +2,17 @@
 import { onMounted, watch } from 'vue';
 import { state } from '../store';
 import { attachDragListeners, positionCanvas } from '../canvasDrag';
+import { openCanvasMenu } from '../contextMenu';
 import StrandCard from './StrandCard.vue';
+import ContextMenu from './ContextMenu.vue';
 
 defineProps<{ recording: boolean }>();
+
+// Only genuine empty-space right-clicks reach here — InstructionRow's own
+// contextmenu handler calls stopPropagation for right-clicks on a block.
+function onCanvasContextMenu(e: MouseEvent) {
+  openCanvasMenu(e);
+}
 
 onMounted(() => {
   attachDragListeners();
@@ -27,7 +35,7 @@ watch(
 
 <template>
   <div class="canvas-wrap">
-    <div class="canvas-scroll" id="canvas-scroll">
+    <div class="canvas-scroll" id="canvas-scroll" @contextmenu.prevent="onCanvasContextMenu">
       <div class="canvas-sizer" id="canvas-sizer">
         <div class="canvas-inner" id="canvas-inner">
           <StrandCard v-for="strand in state.current_macro?.strands ?? []" :key="strand.id" :strand="strand" />
@@ -39,5 +47,6 @@ watch(
       <span>Recording…</span>
       <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
     </div>
+    <ContextMenu />
   </div>
 </template>

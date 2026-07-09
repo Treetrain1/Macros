@@ -315,6 +315,46 @@ pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tau
     Ok(())
 }
 
+/// Deletes the instruction at `index` in `strand_id`, keeping everything
+/// above it in place; anything that was below it is split off into a brand
+/// new strand at `(x, y)` (same idea as `split_strand`, but atomic with the
+/// removal so it's one undo step). Returns the new strand's id, or `None` if
+/// there was nothing below the deleted block to split off.
+#[tauri::command]
+pub(crate) fn delete_instruction<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    strand_id: String,
+    index: usize,
+    x: i32,
+    y: i32,
+) -> Result<Option<String>, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let in_range = s.current_macro.as_ref()
+        .and_then(|mac| mac.strand(&strand_id))
+        .is_some_and(|strand| index < strand.instructions.len());
+    if !in_range {
+        emit_state_updated(&app, &s);
+        return Ok(None);
+    }
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let strand = mac.strand_mut(&strand_id).ok_or("Unknown strand")?;
+    strand.instructions.remove(index);
+    let tail = strand.instructions.split_off(index.min(strand.instructions.len()));
+    let new_id = if !tail.is_empty() {
+        let new_id = uuid::Uuid::new_v4().simple().to_string();
+        mac.strands.push(Strand { id: new_id.clone(), x, y, instructions: tail });
+        Some(new_id)
+    } else {
+        None
+    };
+    s.invalid_field_buffers.clear();
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(new_id)
+}
+
 #[tauri::command]
 pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize, direction: i32) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -574,6 +614,50 @@ pub(crate) fn merge_strand<R: Runtime>(
     target.instructions.splice(idx..idx, dragged.instructions);
     s.invalid_field_buffers.retain(|(sid, _, _), _| sid != &dragged_id);
     auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Creates a new detached strand at `(x, y)` holding `instructions` verbatim —
+/// how the "Paste" right-click action drops previously-copied blocks onto the
+/// canvas. Like `add_strand` but for a whole list of instructions at once.
+#[tauri::command]
+pub(crate) fn paste_instructions<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    x: i32,
+    y: i32,
+    instructions: Vec<InstructionDto>,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let ins: Vec<Instruction> = instructions
+        .iter()
+        .map(dto_to_instruction)
+        .collect::<Option<Vec<_>>>()
+        .ok_or("Unknown instruction type")?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let new_id = uuid::Uuid::new_v4().simple().to_string();
+    mac.strands.push(Strand { id: new_id.clone(), x, y, instructions: ins });
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(new_id)
+}
+
+/// Sets the strand that freshly-recorded input is appended to — the "Set
+/// Recording Target" right-click action. Not part of the undo/redo stacks
+/// (those only snapshot `strands`), so this survives undo/redo untouched, and
+/// silently does nothing if `strand_id` doesn't exist (e.g. a stale menu
+/// click after a concurrent delete).
+#[tauri::command]
+pub(crate) fn set_recording_target<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        if mac.strand(&strand_id).is_some() {
+            mac.recording_target = Some(strand_id);
+            auto_save(&s);
+        }
+    }
     emit_state_updated(&app, &s);
     Ok(())
 }

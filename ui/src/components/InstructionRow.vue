@@ -3,6 +3,8 @@ import { computed, type Component } from 'vue';
 import type { InstructionDto } from '../types';
 import { isHeaderType } from '../types';
 import { beginPickup } from '../canvasDrag';
+import { state } from '../store';
+import { openBlockMenu } from '../contextMenu';
 import WaitFields from './fields/WaitFields.vue';
 import TextFields from './fields/TextFields.vue';
 import KeyFields from './fields/KeyFields.vue';
@@ -29,11 +31,19 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);
 
+const isRecordingTarget = computed(
+  () => props.isFirst && props.strandId === state.current_macro?.recording_target_strand_id,
+);
+
 function onRowPointerDown(e: PointerEvent) {
   const target = e.target as Element | null;
   if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
   if (target instanceof HTMLElement && target.isContentEditable) return;
   beginPickup(e, props.strandId, props.index);
+}
+
+function onRowContextMenu(e: MouseEvent) {
+  openBlockMenu(e, props.strandId, props.index);
 }
 </script>
 
@@ -43,8 +53,10 @@ function onRowPointerDown(e: PointerEvent) {
     :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
+    @contextmenu.prevent.stop="onRowContextMenu"
   >
     <div class="instruction-shape">
+      <span v-if="isRecordingTarget" class="recording-target-dot" title="Recording target" />
       <div class="instruction-content">
         <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
       </div>

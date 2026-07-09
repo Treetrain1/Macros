@@ -383,7 +383,7 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
   }
 }
 
-function clientToCanvas(clientX: number, clientY: number): [number, number] {
+export function clientToCanvas(clientX: number, clientY: number): [number, number] {
   const inner = document.getElementById('canvas-inner');
   if (!inner) return [0, 0];
   const rect = inner.getBoundingClientRect();

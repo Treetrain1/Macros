@@ -32,6 +32,11 @@ import {
   Terminal,
   MessageSquare,
   CornerDownRight,
+  Target,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Layers,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -66,6 +71,11 @@ export const ICONS = {
   terminal: Terminal,
   'message-square': MessageSquare,
   'corner-down-right': CornerDownRight,
+  target: Target,
+  copy: Copy,
+  scissors: Scissors,
+  'clipboard-paste': ClipboardPaste,
+  layers: Layers,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;

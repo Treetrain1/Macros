@@ -64,6 +64,14 @@ pub(crate) struct Macro {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) strands: Vec<Strand>,
+    /// Strand explicitly chosen (via the canvas's "Set Recording Target"
+    /// right-click action) to receive freshly-recorded input. `None` means
+    /// no explicit choice has been made yet — falls back to the automatic
+    /// "first When Ran strand, else first strand" rule. Deliberately kept
+    /// out of the undo/redo stacks (which only snapshot `strands`): it's a
+    /// pointer/preference, not an edit to the macro's instructions.
+    #[serde(default)]
+    pub(crate) recording_target: Option<String>,
 }
 
 /// Deserialization shape supporting both the current multi-strand format and
@@ -79,6 +87,8 @@ enum MacroDe {
         name: String,
         description: String,
         strands: Vec<Strand>,
+        #[serde(default)]
+        recording_target: Option<String>,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -92,7 +102,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
-            MacroDe::Current { id, name, description, mut strands } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target } => {
                 // Pre-"When Ran" saves have a strand literally id=="root" that
                 // was the sole implicit entry point; give it a real WhenRan
                 // block so it keeps running after upgrade.
@@ -101,12 +111,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands }
+                Self { id, name, description, strands, recording_target }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand] }
+                Self { id, name, description, strands: vec![strand], recording_target: None }
             }
         }
     }
@@ -121,6 +131,7 @@ impl Macro {
             name,
             description,
             strands: vec![strand],
+            recording_target: None,
         }
     }
 
@@ -138,11 +149,17 @@ impl Macro {
         self.strands.iter_mut().find(|s| s.id == id)
     }
 
-    /// Strand that freshly-recorded input gets appended to: the first "When
+    /// Strand that freshly-recorded input gets appended to: the explicitly
+    /// chosen `recording_target` if it still exists, else the first "When
     /// Ran" entry point if one exists, otherwise just the first strand
     /// (creating one if the macro is completely empty) so recorded input
     /// always lands somewhere.
     pub(crate) fn recording_target_mut(&mut self) -> &mut Strand {
+        if let Some(id) = &self.recording_target {
+            if let Some(pos) = self.strands.iter().position(|s| &s.id == id) {
+                return &mut self.strands[pos];
+            }
+        }
         if let Some(pos) = self.strands.iter().position(Strand::starts_with_when_ran) {
             return &mut self.strands[pos];
         }
@@ -150,6 +167,22 @@ impl Macro {
             self.strands.push(Strand { id: default_strand_id(), x: 0, y: 0, instructions: vec![] });
         }
         &mut self.strands[0]
+    }
+
+    /// Read-only counterpart to `recording_target_mut` — same resolution
+    /// order, but never creates a strand, so it's safe to call for display
+    /// purposes (e.g. deciding which strand's top block gets the red
+    /// recording-target dot).
+    pub(crate) fn recording_target_id(&self) -> Option<String> {
+        if let Some(id) = &self.recording_target {
+            if self.strands.iter().any(|s| &s.id == id) {
+                return Some(id.clone());
+            }
+        }
+        if let Some(strand) = self.strands.iter().find(|s| s.starts_with_when_ran()) {
+            return Some(strand.id.clone());
+        }
+        self.strands.first().map(|s| s.id.clone())
     }
 }
 

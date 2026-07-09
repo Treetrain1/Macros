@@ -37,6 +37,7 @@ export interface MacroDto {
   name: string;
   description: string;
   strands: StrandDto[];
+  recording_target_strand_id: string | null;
 }
 
 export interface KeyCaptureDto {

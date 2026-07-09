@@ -653,6 +653,20 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   width: auto;
 }
 
+/* Marks the top block of whichever strand is the current recording target
+   (see "Set Recording Target" in the block context menu). */
+.recording-target-dot {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 4px rgba(var(--red-rgb), 0.7);
+  pointer-events: none;
+}
+
 /* ── Drag ghost + snap indicator ─────────────────────────────────────────── */
 /* Deliberately bare — the dragged content itself is a real .strand-card /
    .instruction-row clone, so it already looks exactly like it does at rest.
@@ -913,6 +927,52 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .dd-option[aria-selected="true"] { background: var(--hover-overlay); }
 .dd-option:active { background: var(--bg3); }
 .dd-option-current { color: var(--accent); font-weight: 600; }
+
+/* ── Right-click context menu ────────────────────────────────────────────── */
+.context-menu {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  animation: ddPanelEnter var(--dur-fast) var(--ease-standard);
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  padding: 7px 10px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: 13px;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+.context-menu-item:hover:not(:disabled) {
+  background: var(--hover-overlay);
+  transform: none;
+  box-shadow: none;
+}
+.context-menu-item:active:not(:disabled) { background: var(--bg3); }
+.context-menu-item-icon { display: flex; align-items: center; justify-content: center; line-height: 0; }
+.context-menu-item-icon svg { width: 14px; height: 14px; }
+.context-menu-item-active { color: var(--accent); font-weight: 600; }
+.context-menu-item-danger { color: var(--red); }
+.context-menu-item-danger:hover:not(:disabled) { background: rgba(var(--red-rgb), 0.14); }
+.context-menu-item:disabled { opacity: 0.38; cursor: default; }
 
 /* Split button: primary "add" action fused to a chevron that opens a type
    picker (Add-at-end row). */

@@ -91,10 +91,11 @@ jobs:
           cache-dependency-path: ui/pnpm-lock.yaml
 
       - name: Build (release)
+        if: runner.os != 'macOS'
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Rename binary (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Rename binary (Linux)
+        if: runner.os == 'Linux'
         run: cp target/${{ matrix.target }}/release/macros ${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
@@ -103,11 +104,28 @@ jobs:
         run: Copy-Item target/${{ matrix.target }}/release/macros.exe ${{ matrix.artifact_name }}
 
       - name: Upload artifact
-        if: runner.os != 'Linux'
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build macOS app bundle
+        if: runner.os == 'macOS'
+        run: ./scripts/build-macos-bundle.sh ${{ matrix.target }}
+
+      - name: Zip macOS app bundle
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Macros.app ${{ matrix.artifact_name }}.app.zip
+
+      - name: Upload macOS app bundle
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}.app.zip
+          path: ${{ matrix.artifact_name }}.app.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -120,12 +138,30 @@ jobs:
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-appimage.AppImage
           # linuxdeploy expects the binary name to match the Exec entry in the desktop file
           cp ${{ matrix.artifact_name }} macros
+
+          # cef-dll-sys' build script drops the whole CEF runtime (libcef.so, GL/Vulkan
+          # shims, *.pak, icudtl.dat, locales/, ...) next to the compiled binary in
+          # target/<triple>/release. libcef.so has to sit beside `macros` for linuxdeploy
+          # to resolve the NEEDED entry via ldd; the rest of the payload isn't linked
+          # (some is dlopen'd, the data files aren't ELF at all), so it has to be copied
+          # in by hand wherever libcef.so ends up (usr/lib, once linuxdeploy deploys it).
+          CEF_DIR="target/${{ matrix.target }}/release"
+          cp "$CEF_DIR/libcef.so" .
+
           ./linuxdeploy.AppImage \
             --appdir AppDir \
             --executable ./macros \
             --desktop-file res/macros.desktop \
-            --icon-file res/icons/macros.png \
-            --output appimage
+            --icon-file res/icons/macros.png
+
+          cp "$CEF_DIR"/libEGL.so "$CEF_DIR"/libGLESv2.so "$CEF_DIR"/libvk_swiftshader.so \
+             "$CEF_DIR"/libvulkan.so.1 "$CEF_DIR"/vk_swiftshader_icd.json "$CEF_DIR"/chrome-sandbox \
+             "$CEF_DIR"/icudtl.dat "$CEF_DIR"/v8_context_snapshot.bin "$CEF_DIR"/chrome_100_percent.pak \
+             "$CEF_DIR"/chrome_200_percent.pak "$CEF_DIR"/resources.pak \
+             AppDir/usr/lib/
+          cp -r "$CEF_DIR/locales" AppDir/usr/lib/
+
+          ./linuxdeploy.AppImage --appdir AppDir --output appimage
           mv Macros*.AppImage ${{ matrix.artifact_name }}.AppImage
 
       - name: Upload AppImage artifact
@@ -142,12 +178,25 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
           flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+          # org.gnome.Platform, not org.freedesktop.Platform: tao/wry need GTK3 for the
+          # window itself, which the freedesktop runtime doesn't ship.
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
 
       - name: Build Flatpak
         if: runner.os == 'Linux'
         run: |
           cp ${{ matrix.artifact_name }} packaging/flatpak/macros
+
+          # Same CEF runtime payload as the AppImage step above, staged for the
+          # manifest's sources list (packaging/flatpak/dev.ethanstokes.Macros.yml).
+          CEF_DIR="target/${{ matrix.target }}/release"
+          cp "$CEF_DIR"/libcef.so "$CEF_DIR"/libEGL.so "$CEF_DIR"/libGLESv2.so \
+             "$CEF_DIR"/libvk_swiftshader.so "$CEF_DIR"/libvulkan.so.1 "$CEF_DIR"/vk_swiftshader_icd.json \
+             "$CEF_DIR"/chrome-sandbox "$CEF_DIR"/icudtl.dat "$CEF_DIR"/v8_context_snapshot.bin \
+             "$CEF_DIR"/chrome_100_percent.pak "$CEF_DIR"/chrome_200_percent.pak "$CEF_DIR"/resources.pak \
+             packaging/flatpak/
+          cp -r "$CEF_DIR/locales" packaging/flatpak/locales
+
           flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/dev.ethanstokes.Macros.yml
           flatpak build-bundle flatpak-repo ${{ matrix.artifact_name }}.flatpak dev.ethanstokes.Macros stable
 

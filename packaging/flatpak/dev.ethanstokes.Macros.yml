@@ -1,7 +1,12 @@
 app-id: dev.ethanstokes.Macros
-runtime: org.freedesktop.Platform
-runtime-version: '24.08'
-sdk: org.freedesktop.Sdk
+# GTK3 (used by tao/wry for the window itself) isn't in org.freedesktop.Platform;
+# org.gnome.Platform is the smallest stock runtime that includes it. webkit2gtk is
+# NOT required here even though wry depends on it in general -- with the "cef"
+# feature enabled, wry never links webkit2gtk-sys (verified via ldd on the built
+# binary), so the GNOME runtime's webkit doesn't need to be exercised at all.
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
 command: macros
 branch: stable
 
@@ -11,6 +16,7 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --socket=x11
+  - --socket=pulseaudio
   - --device=all
   - --device=dri
   - --talk-name=org.freedesktop.DBus
@@ -20,12 +26,61 @@ modules:
   - name: macros
     buildsystem: simple
     build-commands:
-      - install -Dm755 macros /app/bin/macros
-      - install -Dm644 macros.desktop /app/share/applications/dev.ethanstokes.Macros.desktop
+      - install -Dm755 macros /app/lib/macros/macros
+      - mkdir -p /app/bin
+      - ln -s ../lib/macros/macros /app/bin/macros
+      # CEF resolves its own resources (icudtl.dat, *.pak, locales/, ...) and dlopen's
+      # its GL/Vulkan backends relative to wherever libcef.so lives, so the whole CEF
+      # runtime payload has to stay flat alongside it -- same requirement as the
+      # AppImage build, see .github/workflows/*.yml.
+      - install -Dm755 libcef.so /app/lib/macros/libcef.so
+      - install -Dm755 libEGL.so /app/lib/macros/libEGL.so
+      - install -Dm755 libGLESv2.so /app/lib/macros/libGLESv2.so
+      - install -Dm755 libvk_swiftshader.so /app/lib/macros/libvk_swiftshader.so
+      - install -Dm755 libvulkan.so.1 /app/lib/macros/libvulkan.so.1
+      - install -Dm644 vk_swiftshader_icd.json /app/lib/macros/vk_swiftshader_icd.json
+      - install -Dm755 chrome-sandbox /app/lib/macros/chrome-sandbox
+      - install -Dm644 icudtl.dat /app/lib/macros/icudtl.dat
+      - install -Dm644 v8_context_snapshot.bin /app/lib/macros/v8_context_snapshot.bin
+      - install -Dm644 chrome_100_percent.pak /app/lib/macros/chrome_100_percent.pak
+      - install -Dm644 chrome_200_percent.pak /app/lib/macros/chrome_200_percent.pak
+      - install -Dm644 resources.pak /app/lib/macros/resources.pak
+      - cp -r locales /app/lib/macros/locales
+      # res/macros.desktop uses Icon=macros, matching the AppImage/system-install
+      # icon name; the flatpak export convention requires Icon= to match the app id.
+      - sed 's/^Icon=macros$/Icon=dev.ethanstokes.Macros/' macros.desktop > dev.ethanstokes.Macros.desktop
+      - install -Dm644 dev.ethanstokes.Macros.desktop /app/share/applications/dev.ethanstokes.Macros.desktop
       - install -Dm644 macros.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Macros.png
     sources:
       - type: file
         path: macros
+      - type: file
+        path: libcef.so
+      - type: file
+        path: libEGL.so
+      - type: file
+        path: libGLESv2.so
+      - type: file
+        path: libvk_swiftshader.so
+      - type: file
+        path: libvulkan.so.1
+      - type: file
+        path: vk_swiftshader_icd.json
+      - type: file
+        path: chrome-sandbox
+      - type: file
+        path: icudtl.dat
+      - type: file
+        path: v8_context_snapshot.bin
+      - type: file
+        path: chrome_100_percent.pak
+      - type: file
+        path: chrome_200_percent.pak
+      - type: file
+        path: resources.pak
+      - type: dir
+        path: locales
+        dest: locales
       - type: file
         path: ../../res/macros.desktop
       - type: file

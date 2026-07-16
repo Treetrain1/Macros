@@ -1,18 +1,10 @@
 fn main() {
     build_frontend();
+    // Also embeds the Windows icon + version resource (from tauri.conf.json's
+    // productName/bundle.icon) on its own -- a second, manual pass doing the
+    // same thing here would emit a duplicate VERSION resource and fail to
+    // link with `CVTRES : fatal error CVT1100: duplicate resource`.
     tauri_build::build();
-
-    #[cfg(windows)]
-    {
-        let mut res = winresource::WindowsResource::new();
-        res.set_icon("icons/icon.ico");
-        res.set("FileDescription", "Macros");
-        res.set("ProductName", "Macros");
-        if let Err(e) = res.compile() {
-            eprintln!("Failed to embed Windows resources: {e}");
-            std::process::exit(1);
-        }
-    }
 }
 
 // `frontendDist` points at `../ui/dist`, a build output that doesn't exist

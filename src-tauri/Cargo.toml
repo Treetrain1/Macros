@@ -40,6 +40,3 @@ foreign-types.workspace = true
 
 [build-dependencies]
 tauri-build.workspace = true
-
-[target.'cfg(windows)'.build-dependencies]
-winresource.workspace = true

@@ -258,6 +258,7 @@ pub(super) fn start_capture_thread(
             Ok(vd) => vd,
             Err(e) => {
                 warn!("Cannot start evdev capture (no virtual device): {}", e);
+                crate::recording::set_grab_failed(true);
                 return;
             }
         };
@@ -305,6 +306,9 @@ pub(super) fn start_capture_thread(
 
         if grabbed.is_empty() {
             warn!("No input devices could be grabbed; global hotkeys and recording unavailable.");
+            crate::recording::set_grab_failed(true);
+        } else {
+            crate::recording::set_grab_failed(false);
         }
 
         // Spawn one reader thread per grabbed device.

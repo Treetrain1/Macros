@@ -34,7 +34,6 @@ jobs:
             linux_arch: aarch64
             experimental: false
 
-          # macOS is experimental: enigo is not declared as a macOS dep in Cargo.toml
           - name: macos-arm64
             runner: macos-latest
             target: aarch64-apple-darwin
@@ -61,6 +60,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             pkg-config \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
             libdbus-1-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-0 \
@@ -68,9 +76,19 @@ jobs:
             libxtst-dev \
             libwayland-dev \
             wayland-protocols \
-            libglib2.0-dev \
-            libatspi2.0-dev \
             libclang-dev
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
 
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }}

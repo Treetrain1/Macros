@@ -2,6 +2,7 @@
   "name": "macros-ui",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.3.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",

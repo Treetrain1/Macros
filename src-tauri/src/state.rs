@@ -83,6 +83,7 @@ pub(crate) struct AppState {
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,
+    pub(crate) global_speed_multiplier: f64,
     pub(crate) ipc_server: Option<tauri::async_runtime::JoinHandle<()>>,
     pub(crate) ipc_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub(crate) ipc_active_port: Option<u16>,
@@ -118,6 +119,7 @@ pub(crate) struct StateDto {
     pub(crate) current_macro: Option<MacroDto>,
     pub(crate) macros_data: Vec<MacroDto>,
     pub(crate) loop_mode_enabled: bool,
+    pub(crate) global_speed_multiplier: f64,
     pub(crate) is_looping: bool,
     pub(crate) ipc_active_port: Option<u16>,
     pub(crate) ipc_auto_start: bool,
@@ -149,6 +151,7 @@ pub(crate) struct MacroDto {
     pub(crate) description: String,
     pub(crate) strands: Vec<StrandDto>,
     pub(crate) recording_target_strand_id: Option<String>,
+    pub(crate) speed_multiplier: f64,
 }
 
 #[derive(Serialize, Clone)]
@@ -194,6 +197,9 @@ pub(crate) enum HotkeyActionDto {
     PrevMacro,
     ToggleLoop,
     StartRecordingImmediate,
+    StopRecording,
+    Undo,
+    Redo,
     RunSpecificMacro { macro_id: String },
 }
 
@@ -350,6 +356,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         description: mac.description.clone(),
         strands: mac.strands.iter().map(strand_to_dto).collect(),
         recording_target_strand_id: mac.recording_target_id(),
+        speed_multiplier: mac.speed_multiplier,
     }
 }
 
@@ -361,6 +368,9 @@ fn hotkey_action_to_dto(action: &HotkeyAction) -> HotkeyActionDto {
         HotkeyAction::PrevMacro => HotkeyActionDto::PrevMacro,
         HotkeyAction::ToggleLoop => HotkeyActionDto::ToggleLoop,
         HotkeyAction::StartRecordingImmediate => HotkeyActionDto::StartRecordingImmediate,
+        HotkeyAction::StopRecording => HotkeyActionDto::StopRecording,
+        HotkeyAction::Undo => HotkeyActionDto::Undo,
+        HotkeyAction::Redo => HotkeyActionDto::Redo,
         HotkeyAction::RunSpecificMacro(id) => HotkeyActionDto::RunSpecificMacro { macro_id: id.clone() },
     }
 }
@@ -373,6 +383,9 @@ pub(crate) fn dto_to_hotkey_action(dto: &HotkeyActionDto) -> HotkeyAction {
         HotkeyActionDto::PrevMacro => HotkeyAction::PrevMacro,
         HotkeyActionDto::ToggleLoop => HotkeyAction::ToggleLoop,
         HotkeyActionDto::StartRecordingImmediate => HotkeyAction::StartRecordingImmediate,
+        HotkeyActionDto::StopRecording => HotkeyAction::StopRecording,
+        HotkeyActionDto::Undo => HotkeyAction::Undo,
+        HotkeyActionDto::Redo => HotkeyAction::Redo,
         HotkeyActionDto::RunSpecificMacro { macro_id } => HotkeyAction::RunSpecificMacro(macro_id.clone()),
     }
 }
@@ -451,6 +464,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         current_macro,
         macros_data,
         loop_mode_enabled: s.loop_mode_enabled,
+        global_speed_multiplier: s.global_speed_multiplier,
         is_looping,
         ipc_active_port: s.ipc_active_port,
         ipc_auto_start: s.ipc_auto_start,

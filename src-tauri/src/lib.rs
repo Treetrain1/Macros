@@ -25,6 +25,12 @@ pub fn run() {
     tauri::Builder::<Cef>::default()
         .command_line_args([
             ("--ozone-platform".to_string(), Some("x11".to_string())),
+            // Chromium's GPU process runs its own sandbox on top of `no_sandbox`
+            // (which only disables the main/renderer sandbox), and on some Linux
+            // setups that sandbox blocks the Mesa DRI loader from opening its own
+            // driver (dri_gbm.so) with EACCES, which crashes the GPU process
+            // instead of falling back to software rendering.
+            ("--disable-gpu-sandbox".to_string(), None),
         ])
         .setup(|app| {
             let settings = config::load_settings();
@@ -38,6 +44,7 @@ pub fn run() {
                 thread_pool: ThreadPool::new(),
                 is_looping: Arc::new(Mutex::new(false)),
                 loop_mode_enabled: settings.loop_mode_enabled.unwrap_or(false),
+                global_speed_multiplier: settings.global_speed_multiplier.unwrap_or(1.0),
                 ipc_server: None,
                 ipc_shutdown_tx: None,
                 ipc_active_port: None,
@@ -150,6 +157,7 @@ pub fn run() {
             commands::new_macro,
             commands::remove_macro,
             commands::set_title,
+            commands::set_macro_speed_multiplier,
             commands::save_macro,
             commands::add_instruction,
             commands::edit_instruction,
@@ -171,6 +179,7 @@ pub fn run() {
             commands::key_capture_event,
             commands::run_macro,
             commands::toggle_loop_mode,
+            commands::set_global_speed_multiplier,
             commands::start_recording,
             commands::stop_recording,
             commands::toggle_record_mouse_relative,

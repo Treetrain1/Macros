@@ -182,9 +182,27 @@ function capturePointer(e: PointerEvent) {
   }
 }
 
+// On Linux, a middle click is X11's "paste primary selection" gesture —
+// CEF honors it against whatever element already has focus, independent of
+// hit-testing the click point, so preventDefault()-ing the pointerdown above
+// doesn't stop it. The paste still goes through the normal cancelable
+// ClipboardEvent though, so swallow that instead while a middle-click pan is
+// in flight (a plain click that never reaches beginPan's checks never sets
+// this, so real Ctrl+V/menu pastes elsewhere are untouched).
+let blockPrimaryPaste = false;
+let blockPrimaryPasteGeneration = 0;
+
+function blockMiddleClickPaste(e: ClipboardEvent) {
+  if (!blockPrimaryPaste) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}
+
 function beginPan(e: PointerEvent) {
   if (e.button !== 1) return;
   if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
+  blockPrimaryPaste = true;
+  blockPrimaryPasteGeneration++;
   e.preventDefault();
   capturePointer(e);
   const scrollEl = document.getElementById('canvas-scroll');
@@ -595,6 +613,16 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp(e: PointerEvent) {
   if (pan && pan.pointerId === e.pointerId) {
     pan = null;
+    // The primary-selection paste fires off the middle-button *release*,
+    // dispatched by the native layer slightly after this pointerup handler
+    // runs — clearing the flag synchronously here would re-open the window
+    // right before the paste event arrives. Let it ride out a tick first.
+    // Guard with a generation counter so this stale timer can't clear the
+    // flag out from under a fresh pan that started in the meantime.
+    const generation = blockPrimaryPasteGeneration;
+    setTimeout(() => {
+      if (blockPrimaryPasteGeneration === generation) blockPrimaryPaste = false;
+    }, 200);
     document.getElementById('canvas-scroll')?.classList.remove('panning');
   }
   if (dragCandidate && dragCandidate.pointerId === e.pointerId) {
@@ -691,5 +719,6 @@ export function attachDragListeners() {
   document.addEventListener('pointermove', onPointerMove);
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', onPointerUp);
+  document.addEventListener('paste', blockMiddleClickPaste, true);
   document.addEventListener('wheel', onCanvasWheel, { passive: false });
 }

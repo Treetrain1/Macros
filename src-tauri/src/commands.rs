@@ -1,6 +1,6 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::{loop_control, thread, Instruction, Macro, Strand};
+use crate::macros::{loop_control, thread, Instruction, Macro, Strand, SPEED_MULTIPLIER_RANGE};
 use crate::input::types::InputToken;
 use crate::recording;
 use crate::state::{
@@ -165,6 +165,17 @@ pub(crate) fn set_title<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
         let macros = config::get_macros_from_config();
         s.macro_strs = macros.iter().map(|m| m.name.clone()).collect();
         s.macros_list = macros;
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_macro_speed_multiplier<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, multiplier: f64) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        mac.speed_multiplier = multiplier.clamp(*SPEED_MULTIPLIER_RANGE.start(), *SPEED_MULTIPLIER_RANGE.end());
+        auto_save(&s);
     }
     emit_state_updated(&app, &s);
     Ok(())
@@ -440,8 +451,7 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(prev_strands) = s.undo_stack.pop() {
         let current = s.current_macro.as_ref().map(|m| m.strands.clone());
@@ -455,12 +465,11 @@ pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
         s.invalid_field_buffers.clear();
         auto_save(&s);
     }
-    emit_state_updated(&app, &s);
+    emit_state_updated(app, &s);
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(next_strands) = s.redo_stack.pop() {
         let current = s.current_macro.as_ref().map(|m| m.strands.clone());
@@ -474,8 +483,18 @@ pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
         s.invalid_field_buffers.clear();
         auto_save(&s);
     }
-    emit_state_updated(&app, &s);
+    emit_state_updated(app, &s);
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn undo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    perform_undo(&state, &app)
+}
+
+#[tauri::command]
+pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    perform_redo(&state, &app)
 }
 
 // ─── Strands (canvas) ──────────────────────────────────────────────────────
@@ -708,13 +727,14 @@ pub(crate) fn key_capture_event<R: Runtime>(
 
 #[tauri::command]
 pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
-    let (mac, emulator, is_looping, loop_mode) = {
+    let (mac, emulator, is_looping, loop_mode, speed_multiplier) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mac = s.current_macro.clone();
         let emulator = s.emulator.as_ref().map(Arc::clone);
         let is_looping = Arc::clone(&s.is_looping);
         let loop_mode = s.loop_mode_enabled;
-        (mac, emulator, is_looping, loop_mode)
+        let speed_multiplier = mac.as_ref().map_or(1.0, |m| m.speed_multiplier) * s.global_speed_multiplier;
+        (mac, emulator, is_looping, loop_mode, speed_multiplier)
     };
 
     if let (Some(mac), Some(emulator)) = (mac, emulator) {
@@ -724,7 +744,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
                 return Ok(());
             }
             let mac_name = mac.name.clone();
-            let loop_task = mac.into_loop_task(Arc::clone(&emulator), Arc::clone(&is_looping));
+            let loop_task = mac.into_loop_task(Arc::clone(&emulator), Arc::clone(&is_looping), speed_multiplier);
             let mut s = state.lock().map_err(|e| e.to_string())?;
             if let Err(e) = thread::spawn_macro_thread(
                 &mut s.thread_pool,
@@ -737,7 +757,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
         } else {
             let _ = loop_control::set_loop_state(&is_looping, true);
             let mac_name = mac.name.clone();
-            let single_run_task = mac.into_single_run_task(Arc::clone(&emulator), Arc::clone(&is_looping));
+            let single_run_task = mac.into_single_run_task(Arc::clone(&emulator), Arc::clone(&is_looping), speed_multiplier);
             let mut s = state.lock().map_err(|e| e.to_string())?;
             if let Err(e) = thread::spawn_macro_thread(
                 &mut s.thread_pool,
@@ -760,6 +780,16 @@ pub(crate) fn toggle_loop_mode<R: Runtime>(state: State<SharedState>, app: tauri
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.loop_mode_enabled = enabled;
     config::update_settings(|settings| settings.loop_mode_enabled = Some(enabled));
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_global_speed_multiplier<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, multiplier: f64) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let clamped = multiplier.clamp(*SPEED_MULTIPLIER_RANGE.start(), *SPEED_MULTIPLIER_RANGE.end());
+    s.global_speed_multiplier = clamped;
+    config::update_settings(|settings| settings.global_speed_multiplier = Some(clamped));
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -902,6 +932,14 @@ pub(crate) fn combo_capture_event<R: Runtime>(
 
     match s.combo_capture.take() {
         Some(ComboCapture::Named(action)) => {
+            // StopRecording must never require a combo: modifier keys held
+            // while it fires would themselves have already been captured as
+            // macro steps before the trigger key arrives.
+            let combo = if matches!(action, HotkeyAction::StopRecording) {
+                KeyCombo { modifiers: 0, ..combo }
+            } else {
+                combo
+            };
             if let Some(existing) = s.hotkey_bindings.iter_mut().find(|b| b.action == action) {
                 existing.combo = combo;
             } else {
@@ -1133,6 +1171,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 let emulator = Arc::clone(emulator);
                 let is_looping = Arc::clone(&s.is_looping);
                 let loop_mode = s.loop_mode_enabled;
+                let global_speed_multiplier = s.global_speed_multiplier;
                 let mac = match &action {
                     HotkeyAction::RunMacro => s.current_macro.clone(),
                     HotkeyAction::RunSpecificMacro(id) => {
@@ -1143,7 +1182,8 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 };
                 drop(s);
                 if let Some(mac) = mac {
-                    run_macro_task(mac, emulator, is_looping, loop_mode);
+                    let speed_multiplier = mac.speed_multiplier * global_speed_multiplier;
+                    run_macro_task(mac, emulator, is_looping, loop_mode, speed_multiplier);
                 }
             }
         }
@@ -1209,6 +1249,18 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 }
             }
         }
+        HotkeyAction::StopRecording => {
+            // Only meaningful while a recording is active, which is handled
+            // directly in recording::start_grab_thread's capture callback
+            // (so it can suppress the trigger key before it's captured as a
+            // macro step). Reached here only if pressed while idle — no-op.
+        }
+        HotkeyAction::Undo => {
+            let _ = perform_undo(state, app);
+        }
+        HotkeyAction::Redo => {
+            let _ = perform_redo(state, app);
+        }
     }
 }
 
@@ -1217,6 +1269,7 @@ fn run_macro_task(
     emulator: Arc<std::sync::Mutex<dyn crate::macros::backend::InputBackend>>,
     is_looping: Arc<std::sync::Mutex<bool>>,
     loop_mode: bool,
+    speed_multiplier: f64,
 ) {
     if loop_mode {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
@@ -1230,7 +1283,7 @@ fn run_macro_task(
                 } else {
                     break;
                 }
-                mac.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)));
+                mac.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)), speed_multiplier);
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         });
@@ -1240,7 +1293,7 @@ fn run_macro_task(
         tokio::task::spawn_blocking(move || {
             #[cfg(windows)]
             crate::macros::backend::windows::prepare_for_macro_execution();
-            mac.run(emulator, Some(Arc::clone(&stop_flag)));
+            mac.run(emulator, Some(Arc::clone(&stop_flag)), speed_multiplier);
             if let Ok(mut st) = stop_flag.lock() { *st = false; }
         });
     }

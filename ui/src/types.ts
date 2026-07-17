@@ -38,6 +38,7 @@ export interface MacroDto {
   description: string;
   strands: StrandDto[];
   recording_target_strand_id: string | null;
+  speed_multiplier: number;
 }
 
 export interface KeyCaptureDto {
@@ -52,6 +53,9 @@ export type HotkeyActionDto =
   | { type: 'PrevMacro' }
   | { type: 'ToggleLoop' }
   | { type: 'StartRecordingImmediate' }
+  | { type: 'StopRecording' }
+  | { type: 'Undo' }
+  | { type: 'Redo' }
   | { type: 'RunSpecificMacro'; macro_id: string };
 
 export interface HotkeyBindingDto {
@@ -101,6 +105,7 @@ export interface StateDto {
   current_macro: MacroDto | null;
   macros_data: MacroDto[];
   loop_mode_enabled: boolean;
+  global_speed_multiplier: number;
   is_looping: boolean;
   ipc_active_port: number | null;
   ipc_auto_start: boolean;
@@ -132,6 +137,7 @@ export function emptyState(): StateDto {
     current_macro: null,
     macros_data: [],
     loop_mode_enabled: false,
+    global_speed_multiplier: 1.0,
     is_looping: false,
     ipc_active_port: null,
     ipc_auto_start: false,

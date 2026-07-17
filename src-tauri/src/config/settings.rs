@@ -10,6 +10,12 @@ pub(crate) struct AppSettings {
     pub(crate) ipc_auto_start: Option<bool>,
     pub(crate) global_hotkeys: Option<Vec<HotkeyBinding>>,
     pub(crate) selected_macro_id: Option<String>,
+    /// Runtime-only playback speed override applied on top of each macro's
+    /// own `speed_multiplier`, so it scales everything without editing
+    /// individual macros. Persisted across restarts like the rest of
+    /// `AppSettings`, but conceptually a session knob rather than a macro
+    /// property.
+    pub(crate) global_speed_multiplier: Option<f64>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {

@@ -9,4 +9,12 @@ export const NAMED_ACTIONS: { label: string; type: NamedActionType }[] = [
   { label: 'Previous Macro', type: 'PrevMacro' },
   { label: 'Toggle Loop', type: 'ToggleLoop' },
   { label: 'Start Recording (immediate)', type: 'StartRecordingImmediate' },
+  { label: 'Stop Recording', type: 'StopRecording' },
+  { label: 'Undo', type: 'Undo' },
+  { label: 'Redo', type: 'Redo' },
 ];
+
+// Actions whose binding must be a single key with no modifiers held — the
+// modifiers of a combo would themselves be captured as macro steps before
+// the trigger key arrives, since these fire mid-recording.
+export const NO_COMBO_ACTIONS = new Set<NamedActionType>(['StopRecording']);

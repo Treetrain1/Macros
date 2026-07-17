@@ -120,17 +120,27 @@ pub(crate) fn get_recording_queue() -> &'static Mutex<VecDeque<Instruction>> {
 }
 
 pub(crate) fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
+    // Always kept up to date (on every platform): StopRecording is looked up
+    // from here directly by start_grab_thread's shared capture callback
+    // rather than through any OS-level hotkey registration, since it must
+    // only fire while RECORDING_ACTIVE, not system-wide at all times.
+    let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
+    if let Ok(mut t) = table.write() {
+        *t = bindings.clone();
+    }
+
     #[cfg(windows)]
     {
-        crate::macros::backend::windows::signal_hotkey_update(bindings);
-        return;
-    }
-    #[allow(unreachable_code)]
-    {
-        let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
-        if let Ok(mut t) = table.write() {
-            *t = bindings;
-        }
+        // Registering StopRecording via Win32's RegisterHotKey would eat
+        // that key system-wide any time the app is running, not just while
+        // recording (a global hotkey always consumes its key, regardless of
+        // which window has focus) — so it's excluded here and left to the
+        // WH_KEYBOARD_LL-based check above.
+        let winapi_bindings: Vec<HotkeyBinding> = bindings
+            .into_iter()
+            .filter(|b| !matches!(b.action, HotkeyAction::StopRecording))
+            .collect();
+        crate::macros::backend::windows::signal_hotkey_update(winapi_bindings);
     }
 }
 
@@ -213,12 +223,33 @@ fn check_hotkey(mods: u8, key_name: &str) -> Option<HotkeyAction> {
     let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
     if let Ok(bindings) = table.try_read() {
         for binding in bindings.iter() {
+            // StopRecording only ever fires while a recording is in progress
+            // (checked directly in start_grab_thread's RECORDING_ACTIVE branch),
+            // never through this general lookup — otherwise its unmodified
+            // single key would be swallowed system-wide any time the app is
+            // simply running.
+            if matches!(binding.action, HotkeyAction::StopRecording) {
+                continue;
+            }
             if binding.combo.modifiers == mods && binding.combo.key == key_name {
                 return Some(binding.action.clone());
             }
         }
     }
     None
+}
+
+/// Looks up the configured `StopRecording` binding's key name, if any. That
+/// binding is always combo-less (zero modifiers) — enforced when it's
+/// captured — so matching only needs to compare the key itself.
+fn stop_recording_key() -> Option<String> {
+    let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
+    table.try_read().ok().and_then(|bindings| {
+        bindings
+            .iter()
+            .find(|b| matches!(b.action, HotkeyAction::StopRecording))
+            .map(|b| b.combo.key.clone())
+    })
 }
 
 pub(crate) fn start_grab_thread() {
@@ -245,11 +276,20 @@ pub(crate) fn start_grab_thread() {
             }
 
             if RECORDING_ACTIVE.load(Ordering::Relaxed) {
-                // Escape stops recording
-                if matches!(&event, CaptureEvent::KeyPress(MacroKey::Escape)) {
-                    RECORDING_ACTIVE.store(false, Ordering::Relaxed);
-                    push_queue_signal(QueueSignal::Stop);
-                    return CaptureDecision::Suppress;
+                // The configured (combo-less) StopRecording key stops recording.
+                // Escape has no special status here — it only stops recording if
+                // the user has it (still) bound to StopRecording, which is the
+                // shipped default but can be changed or cleared like any other
+                // hotkey.
+                if let CaptureEvent::KeyPress(key) = &event {
+                    let is_stop_key = key
+                        .hotkey_name()
+                        .is_some_and(|name| stop_recording_key().as_deref() == Some(name.as_str()));
+                    if is_stop_key {
+                        RECORDING_ACTIVE.store(false, Ordering::Relaxed);
+                        push_queue_signal(QueueSignal::Stop);
+                        return CaptureDecision::Suppress;
+                    }
                 }
 
                 let elapsed = elapsed_since_session_start(ts);

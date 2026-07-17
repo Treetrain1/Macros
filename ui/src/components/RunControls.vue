@@ -20,10 +20,15 @@ const recordIcon = computed(() => {
   if (phase === 'Active') return 'square';
   return 'circle';
 });
+const stopRecordingCombo = computed(() =>
+  state.hotkey_bindings.find(b => b.action.type === 'StopRecording')?.combo_display
+);
 const recordLabel = computed(() => {
   const phase = state.recording_phase;
   if (phase.phase === 'Countdown') return `Recording in ${phase.countdown}s…`;
-  if (phase.phase === 'Active') return 'Stop recording (Esc)';
+  if (phase.phase === 'Active') {
+    return stopRecordingCombo.value ? `Stop recording (${stopRecordingCombo.value})` : 'Stop recording';
+  }
   return 'Record';
 });
 const recordDisabled = computed(() => state.recording_phase.phase === 'Idle' && state.macro_selected == null);

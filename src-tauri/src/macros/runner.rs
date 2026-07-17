@@ -33,7 +33,7 @@ impl Macro {
     /// once. Strands that aren't entry points are preserved on the macro but
     /// stay inert. Blocks until every entry strand has finished (or been
     /// stopped), matching the old single-root behavior for callers.
-    pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>, stop_flag: Option<Arc<Mutex<bool>>>) {
+    pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>, stop_flag: Option<Arc<Mutex<bool>>>, speed_multiplier: f64) {
         let entry_strands: Vec<Vec<Instruction>> = self.strands.into_iter()
             .filter(Strand::starts_with_when_ran)
             .map(|s| s.instructions)
@@ -44,7 +44,7 @@ impl Macro {
         let rest: Vec<_> = iter.collect();
 
         if rest.is_empty() {
-            run_instructions(first, emulator, stop_flag);
+            run_instructions(first, emulator, stop_flag, speed_multiplier);
             return;
         }
 
@@ -52,9 +52,9 @@ impl Macro {
             for instructions in rest {
                 let emulator = Arc::clone(&emulator);
                 let stop_flag = stop_flag.clone();
-                scope.spawn(move || run_instructions(instructions, emulator, stop_flag));
+                scope.spawn(move || run_instructions(instructions, emulator, stop_flag, speed_multiplier));
             }
-            run_instructions(first, emulator, stop_flag);
+            run_instructions(first, emulator, stop_flag, speed_multiplier);
         });
     }
 }
@@ -64,10 +64,18 @@ impl Macro {
 /// the "Stop Loop" hotkey is pressed mid-iteration. Either way, any keys
 /// pressed so far are released before returning, whether the run finished
 /// naturally or was aborted.
+///
+/// `speed_multiplier` scales every `Wait` instruction's duration and
+/// randomness inversely — 2.0 runs waits at half their length (twice as
+/// fast), 0.5 runs them at double length (half as fast) — so it behaves
+/// like an actual playback speed rather than a wait-length multiplier. The
+/// caller combines the macro's own multiplier with the global runtime
+/// override into this single factor before calling in.
 pub(crate) fn run_instructions(
     instructions: Vec<Instruction>,
     emulator: Arc<Mutex<dyn InputBackend>>,
     stop_flag: Option<Arc<Mutex<bool>>>,
+    speed_multiplier: f64,
 ) {
     raise_current_thread_priority();
     let mut deadline = Instant::now();
@@ -101,6 +109,8 @@ pub(crate) fn run_instructions(
             Instruction::Comment(_) => {}
             Instruction::WhenRan => {}
             Instruction::Wait(duration, randomness) => {
+                let duration = duration / speed_multiplier;
+                let randomness = randomness / speed_multiplier;
                 let actual = if randomness > 0.0 {
                     let offset = rand::rng().random_range(0.0..=randomness);
                     if rand::random::<bool>() {
@@ -300,10 +310,12 @@ mod tests {
                 when_ran_strand("c", 150.0),
                 Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(150.0, 0.0)] },
             ],
+            recording_target: None,
+            speed_multiplier: 1.0,
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let start = Instant::now();
-        mac.run(emulator, None);
+        mac.run(emulator, None, 1.0);
         assert!(start.elapsed() < Duration::from_millis(400), "entry strands ran sequentially instead of concurrently");
     }
 
@@ -317,6 +329,8 @@ mod tests {
             name: "Stoppable".into(),
             description: "".into(),
             strands: vec![when_ran_strand("a", long_wait), when_ran_strand("b", long_wait)],
+            recording_target: None,
+            speed_multiplier: 1.0,
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let stop_flag = Arc::new(Mutex::new(true));
@@ -326,7 +340,7 @@ mod tests {
             *flag_clone.lock().unwrap() = false;
         });
         let start = Instant::now();
-        mac.run(emulator, Some(stop_flag));
+        mac.run(emulator, Some(stop_flag), 1.0);
         assert!(start.elapsed() < Duration::from_millis(1000), "stop flag didn't stop both concurrent strands promptly");
     }
 }

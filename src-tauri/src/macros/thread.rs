@@ -10,6 +10,7 @@ impl Macro {
         self,
         emulator: Arc<Mutex<dyn InputBackend>>,
         loop_flag: Arc<Mutex<bool>>,
+        speed_multiplier: f64,
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Starting macro loop: {}", self.name);
@@ -23,7 +24,7 @@ impl Macro {
                     break;
                 }
 
-                self.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)));
+                self.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)), speed_multiplier);
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -35,6 +36,7 @@ impl Macro {
         self,
         emulator: Arc<Mutex<dyn InputBackend>>,
         stop_flag: Arc<Mutex<bool>>,
+        speed_multiplier: f64,
     ) -> impl FnOnce() + Send + 'static {
         move || {
             println!("Running macro: {}", self.name);
@@ -42,7 +44,7 @@ impl Macro {
             // instead of the stoppable polling loop. Single runs don't need
             // mid-wait interruption, and the polling loop was causing waits
             // to be skipped when stop_requested fired spuriously.
-            self.run(emulator, None);
+            self.run(emulator, None, speed_multiplier);
             if let Ok(mut state) = stop_flag.lock() {
                 *state = false;
             }

@@ -20,6 +20,8 @@ export const selectMacro = (index: number) => invoke<void>('select_macro', { ind
 export const newMacro = () => invoke<void>('new_macro');
 export const removeMacro = () => invoke<void>('remove_macro');
 export const setTitle = (title: string) => invoke<void>('set_title', { title });
+export const setMacroSpeedMultiplier = (multiplier: number) =>
+  invoke<void>('set_macro_speed_multiplier', { multiplier });
 export const saveMacro = () => invoke<void>('save_macro');
 
 // ─── Instructions ───────────────────────────────────────────────────────────
@@ -65,6 +67,8 @@ export const keyCaptureEvent = (code: string, key: string) =>
 // ─── Run / record / loop ────────────────────────────────────────────────────
 export const runMacro = () => invoke<void>('run_macro');
 export const toggleLoopMode = (enabled: boolean) => invoke<void>('toggle_loop_mode', { enabled });
+export const setGlobalSpeedMultiplier = (multiplier: number) =>
+  invoke<void>('set_global_speed_multiplier', { multiplier });
 export const startRecording = () => invoke<void>('start_recording');
 export const stopRecording = () => invoke<void>('stop_recording');
 export const toggleRecordMouseRelative = (relative: boolean) =>

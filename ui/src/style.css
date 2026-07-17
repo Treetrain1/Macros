@@ -316,6 +316,88 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .editor-title-row label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .editor-title-row input { flex: 1; }
 
+.speed-control { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.speed-control label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+
+.speed-control input[type="range"] {
+  --fill: 0%;
+  flex: none;
+  width: 90px;
+  height: 5px;
+  margin: 0;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--bg3) var(--fill));
+  border: 1px solid var(--border);
+  box-shadow: var(--bevel-press);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: box-shadow var(--dur-fast) var(--ease-standard);
+}
+.speed-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--accent-light), var(--accent));
+  border: 1px solid var(--accent);
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard);
+}
+.speed-control input[type="range"]::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.speed-control input[type="range"]::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px 0 0 999px;
+  background: var(--accent);
+}
+.speed-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--accent-light), var(--accent));
+  border: 1px solid var(--accent);
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard);
+}
+.speed-control input[type="range"]:hover:not(:disabled)::-webkit-slider-thumb,
+.speed-control input[type="range"]:active:not(:disabled)::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: var(--bevel-top), var(--shadow-md);
+}
+.speed-control input[type="range"]:hover:not(:disabled)::-moz-range-thumb,
+.speed-control input[type="range"]:active:not(:disabled)::-moz-range-thumb {
+  transform: scale(1.15);
+  box-shadow: var(--bevel-top), var(--shadow-md);
+}
+.speed-control input[type="range"]:focus-visible { outline: none; }
+.speed-control input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--glow-accent); }
+.speed-control input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: var(--glow-accent); }
+.speed-control input[type="range"]:disabled { cursor: default; opacity: 0.38; background: var(--bg3); }
+.speed-control input[type="range"]:disabled::-webkit-slider-thumb {
+  cursor: default;
+  background: var(--bg3);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.speed-control input[type="range"]:disabled::-moz-range-thumb {
+  cursor: default;
+  background: var(--bg3);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.speed-control input.speed-number { flex: none; width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.speed-control .speed-unit { font-size: 12px; color: var(--text-dim); }
+
 .editor-content-area {
   flex: 1;
   display: flex;
@@ -800,6 +882,11 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .settings-row-label {
   flex: 1;
   font-size: 13px;
+}
+.settings-row-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 4px;
 }
 
 /* ── Warning Banners ─────────────────────────────────────────────────────── */

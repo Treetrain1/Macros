@@ -17,6 +17,10 @@ fn default_strand_id() -> String {
     Uuid::new_v4().simple().to_string()
 }
 
+fn default_speed_multiplier() -> f64 {
+    1.0
+}
+
 /// Id used by strands' "main" entry point before "When Ran" blocks existed —
 /// every macro had exactly one strand with this literal id, and it was the
 /// only thing ever executed. Kept around solely so loading an old save file
@@ -57,7 +61,7 @@ impl Strand {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(from = "MacroDe")]
 pub(crate) struct Macro {
     pub(crate) id: String,
@@ -72,7 +76,19 @@ pub(crate) struct Macro {
     /// pointer/preference, not an edit to the macro's instructions.
     #[serde(default)]
     pub(crate) recording_target: Option<String>,
+    /// Playback speed for this macro: every `Wait` instruction's duration and
+    /// randomness is divided by this when the macro runs, combined with the
+    /// global runtime override (see `AppState::global_speed_multiplier`).
+    /// 1.0 is normal speed, 2.0 is twice as fast (waits are half as long),
+    /// 0.5 is half as fast (waits are twice as long). Clamped to
+    /// `SPEED_MULTIPLIER_RANGE` wherever it's set.
+    #[serde(default = "default_speed_multiplier")]
+    pub(crate) speed_multiplier: f64,
 }
+
+/// Valid range for both the per-macro and global speed multipliers, enforced
+/// wherever either is set from user input.
+pub(crate) const SPEED_MULTIPLIER_RANGE: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 
 /// Deserialization shape supporting both the current multi-strand format and
 /// the legacy single flat `code: Vec<Instruction>` format saved by older
@@ -89,6 +105,8 @@ enum MacroDe {
         strands: Vec<Strand>,
         #[serde(default)]
         recording_target: Option<String>,
+        #[serde(default = "default_speed_multiplier")]
+        speed_multiplier: f64,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -102,7 +120,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
-            MacroDe::Current { id, name, description, mut strands, recording_target } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier } => {
                 // Pre-"When Ran" saves have a strand literally id=="root" that
                 // was the sole implicit entry point; give it a real WhenRan
                 // block so it keeps running after upgrade.
@@ -111,12 +129,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands, recording_target }
+                Self { id, name, description, strands, recording_target, speed_multiplier }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand], recording_target: None }
+                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier() }
             }
         }
     }
@@ -132,6 +150,7 @@ impl Macro {
             description,
             strands: vec![strand],
             recording_target: None,
+            speed_multiplier: default_speed_multiplier(),
         }
     }
 
@@ -198,6 +217,17 @@ pub(crate) enum Instruction {
     /// as its own concurrent thread when the macro is run. A macro can have
     /// any number of these.
     WhenRan,
+}
+
+impl std::hash::Hash for Macro {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.name.hash(state);
+        self.description.hash(state);
+        self.strands.hash(state);
+        self.recording_target.hash(state);
+        self.speed_multiplier.to_bits().hash(state);
+    }
 }
 
 impl std::hash::Hash for Instruction {

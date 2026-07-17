@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted } from 'vue';
 import { state, initState } from './store';
 import { cancelComboCapture, comboCaptureEvent, keyCaptureEvent } from './tauri';
+import { NO_COMBO_ACTIONS, type NamedActionType } from './constants';
 import MainPage from './components/MainPage.vue';
 import SettingsPage from './components/SettingsPage.vue';
 
@@ -26,7 +27,9 @@ async function onKeydown(e: KeyboardEvent) {
       return;
     }
     if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
-    const modifiers = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    const capturingAction = state.combo_capture.kind === 'Named' ? state.combo_capture.action?.type as NamedActionType : null;
+    const noCombo = capturingAction != null && NO_COMBO_ACTIONS.has(capturingAction);
+    const modifiers = noCombo ? 0 : (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
     await comboCaptureEvent(e.code, modifiers);
   }
 }

@@ -58,5 +58,9 @@ fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             action: HotkeyAction::ToggleLoop,
             combo: KeyCombo { modifiers: MOD_CTRL | MOD_ALT, key: "KeyL".to_string() },
         },
+        HotkeyBinding {
+            action: HotkeyAction::StopRecording,
+            combo: KeyCombo { modifiers: 0, key: "Escape".to_string() },
+        },
     ]
 }

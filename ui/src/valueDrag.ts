@@ -39,6 +39,13 @@ interface ValueDragState {
   source: ValueDragSource;
   dropTarget: { el: HTMLElement; location: ValueLocationDto } | null;
   overTrash: boolean;
+  // For an 'existing' pickup, the real on-screen block being dragged — hidden
+  // (not moved/cloned away) for the duration so the field it came from reads
+  // as empty immediately, instead of only updating once the drop's async
+  // take/put round trip lands. Restored on pointerup regardless of outcome;
+  // Vue's own re-render (once the backend call resolves) settles the rest,
+  // same idea as canvasDrag.ts's hiddenRowEls.
+  hiddenSourceEl: HTMLElement | null;
 }
 let valueDrag: ValueDragState | null = null;
 
@@ -87,14 +94,33 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
   ghost.appendChild(candidate.anchorEl.cloneNode(true) as HTMLElement);
   document.body.appendChild(ghost);
 
+  // A palette drag's anchorEl is the sidebar's hidden off-screen template
+  // (InstructionSidebar renders it at `left: -9999px; top: -9999px`), so its
+  // rect.left/top are that off-screen position, not anything cursor-relative
+  // — deriving the pointer offset from them (as the 'existing' case does)
+  // sent both the ghost and, since drop coordinates are computed by
+  // subtracting this same offset, the new block itself flying off toward
+  // -9999,-9999. Center the ghost under the pointer instead; only picking up
+  // a real, on-screen block has a meaningful click-relative offset to keep.
+  const isFresh = candidate.source.kind === 'fresh';
+  const offsetX = isFresh ? rect.width / 2 : e.clientX - rect.left;
+  const offsetY = isFresh ? rect.height / 2 : e.clientY - rect.top;
+
+  let hiddenSourceEl: HTMLElement | null = null;
+  if (candidate.source.kind === 'existing') {
+    hiddenSourceEl = candidate.anchorEl;
+    hiddenSourceEl.style.visibility = 'hidden';
+  }
+
   valueDrag = {
     pointerId: candidate.pointerId,
-    offsetX: e.clientX - rect.left,
-    offsetY: e.clientY - rect.top,
+    offsetX,
+    offsetY,
     ghostEl: ghost,
     source: candidate.source,
     dropTarget: null,
     overTrash: false,
+    hiddenSourceEl,
   };
   positionGhost(e);
 }
@@ -184,6 +210,7 @@ function onPointerUp(e: PointerEvent) {
   clearDropHighlight();
   setSidebarArmed(false);
   finished.ghostEl.remove();
+  if (finished.hiddenSourceEl) finished.hiddenSourceEl.style.visibility = '';
 
   void (async () => {
     try {

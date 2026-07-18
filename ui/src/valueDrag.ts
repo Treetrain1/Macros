@@ -14,8 +14,8 @@
 // needed since nothing needs to preserve Vue component identity mid-drag.
 import { ref } from 'vue';
 import { state } from './store';
-import { capturePointer, clientToCanvas, isOverSidebar, setSidebarArmed } from './canvasDrag';
-import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
+import { capturePointer, clientToCanvas, getCanvasZoom, isOverSidebar, setSidebarArmed } from './canvasDrag';
+import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, swapValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
 import { numberValue } from './types';
 import { locationsEqual } from './invalidField';
@@ -122,7 +122,8 @@ function positionGhost(e: PointerEvent) {
     if (!valueDrag || !lastPointerEvent) return;
     const tx = lastPointerEvent.clientX - valueDrag.offsetX;
     const ty = lastPointerEvent.clientY - valueDrag.offsetY;
-    valueDrag.ghostEl.style.transform = `translate(${tx}px, ${ty}px)`;
+    valueDrag.ghostEl.style.transform = `translate(${tx}px, ${ty}px) scale(${getCanvasZoom()})`;
+    valueDrag.ghostEl.style.transformOrigin = '0 0';
   });
 }
 
@@ -186,8 +187,11 @@ function isSelfOrDescendant(candidate: ValueLocationDto, root: ValueLocationDto)
 }
 
 /** Walks up from the topmost element under the pointer to the nearest
- * `[data-value-location]` block, skipping the dragged block's own subtree
- * (can't drop a block into itself or one of its own operands). */
+ * `[data-value-location]` block, skipping only the dragged block's own
+ * subtree (can't drop a block into itself or one of its own operands). A
+ * floating card's own root (path `[]`) is a valid target like any other —
+ * dropping onto one swaps its content in place (see `swapValue` in
+ * onPointerUp), ejecting whatever it held as its own new floating card. */
 function findDropTarget(clientX: number, clientY: number, exclude: ValueLocationDto | null): { el: HTMLElement; location: ValueLocationDto } | null {
   let el: Element | null = document.elementFromPoint(clientX, clientY);
   while (el) {
@@ -199,7 +203,8 @@ function findDropTarget(clientX: number, clientY: number, exclude: ValueLocation
     } catch {
       return null;
     }
-    if (!exclude || !isSelfOrDescendant(location, exclude)) {
+    const isSelf = !!exclude && isSelfOrDescendant(location, exclude);
+    if (!isSelf) {
       return { el: match, location };
     }
     el = match.parentElement;
@@ -275,20 +280,42 @@ function onPointerUp(e: PointerEvent) {
         return;
       }
       if (finished.dropTarget) {
+        const { location: targetLoc, el: targetEl } = finished.dropTarget;
+
+        let incoming: ValueDto;
         if (finished.source.kind === 'fresh') {
-          // Whatever the sidebar prefab currently holds (its edited literal,
-          // or lhs/rhs for an operator) is what lands here — put_value fully
-          // replaces the target node (tucking its prior content away as
-          // `saved` when the incoming value is itself an operator), so this
-          // subsumes the old "just pick a kind, get zeroed defaults" flow.
-          const dropped = paletteValueFor(finished.source.valueKind);
-          await putValue(finished.dropTarget.location, dropped);
-          markOrUnmark(finished.dropTarget.location, dropped);
+          incoming = paletteValueFor(finished.source.valueKind);
         } else {
-          const taken = await takeValue(finished.source.location);
+          incoming = await takeValue(finished.source.location);
           unmarkCapsule(finished.source.location);
-          await putValue(finished.dropTarget.location, taken);
-          markOrUnmark(finished.dropTarget.location, taken);
+        }
+
+        // A boxed target (an operator, a floating card, or a leaf capsule
+        // dropped in earlier — see `boxed` in ValueBlock.vue) is a real block
+        // someone placed there on purpose, so replacing it shouldn't just
+        // quietly disappear it into the incoming operator's `saved` — swap it
+        // out and eject it as its own floating card next to the target
+        // instead, so it visibly reads as "moved aside" rather than deleted.
+        // swapValue rather than take_value+put_value: take_value's
+        // whole-card-removal special case for a `Floating` root (correct
+        // when *picking a floating card up*) would otherwise delete the
+        // target's entry out from under the follow-up put_value, leaving
+        // nowhere for `incoming` to land. An unboxed target is just ordinary
+        // field content (typed in, not dragged in), so it keeps the plain
+        // put_value-absorbs-the-old-value behavior. Read the class off the
+        // live element rather than the value tree — there's no frontend
+        // helper to resolve an arbitrary location to its current ValueDto,
+        // and the rendered class already reflects exactly the same `boxed`
+        // check we'd otherwise have to duplicate.
+        if (targetEl.classList.contains('value-card-shape')) {
+          const r = targetEl.getBoundingClientRect();
+          const [x, y] = clientToCanvas(r.right + 16, r.top);
+          const displaced = await swapValue(targetLoc, incoming);
+          markOrUnmark(targetLoc, incoming);
+          await createFloatingValue(x, y, displaced);
+        } else {
+          await putValue(targetLoc, incoming);
+          markOrUnmark(targetLoc, incoming);
         }
         return;
       }

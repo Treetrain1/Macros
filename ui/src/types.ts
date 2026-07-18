@@ -24,6 +24,10 @@ export function numberValue(value: number): ValueDto {
   return { kind: 'Number', value };
 }
 
+export function textValue(value: string): ValueDto {
+  return { kind: 'Text', value };
+}
+
 // Fresh default tree for a value block just dragged off the sidebar palette
 // — mirrors src-tauri/src/commands.rs's `apply_value_kind` defaults.
 export function defaultValueForKind(kind: ValueKind): ValueDto {
@@ -56,7 +60,7 @@ export function fieldLocation(strandId: string, index: number, fieldId: string):
 
 export type InstructionDto =
   | { type: 'Wait'; duration: ValueDto }
-  | { type: 'Text'; text: string }
+  | { type: 'Text'; text: ValueDto }
   | { type: 'Key'; key: string; direction: KeyDirection }
   | { type: 'Button'; button: MouseButton; direction: KeyDirection }
   | { type: 'MoveMouse'; x: ValueDto; y: ValueDto; coordinate: Coordinate }
@@ -75,7 +79,7 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
   switch (type) {
     case 'WhenRan': return { type: 'WhenRan' };
     case 'Wait': return { type: 'Wait', duration: numberValue(1000) };
-    case 'Text': return { type: 'Text', text: 'text' };
+    case 'Text': return { type: 'Text', text: textValue('text') };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
     case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };
     case 'MoveMouse': return { type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };

@@ -333,6 +333,7 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::Token(InputToken::MoveMouse(x, _, _)), FieldId::MoveMouseX) => Some(x),
         (Instruction::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
         (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
+        (Instruction::Token(InputToken::Text(t)), FieldId::TextValue) => Some(t),
         _ => None,
     }
 }
@@ -548,6 +549,44 @@ pub(crate) fn put_value<R: Runtime>(
     auto_save(&s);
     emit_state_updated(&app, &s);
     Ok(())
+}
+
+/// Overwrites the node at `location` with `value` in place, atomically
+/// returning whatever it displaced — the "eject a boxed target" half of
+/// dropping a block onto an existing operator/capsule/floating card (see
+/// `apply_value_kind`'s sibling logic in the frontend's valueDrag.ts). Unlike
+/// `take_value` followed by `put_value`, this never removes a `Floating`
+/// location's root entry from `floating_values` — a `Floating` `path: []`
+/// target keeps its id/x/y and just gets new content, which a plain
+/// `take_value` (whose whole-card-removal special case exists for *picking a
+/// floating card up*, not for replacing what's parked at one) would have
+/// deleted out from under the follow-up `put_value`.
+#[tauri::command]
+pub(crate) fn swap_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    location: ValueLocationDto,
+    value: ValueDto,
+) -> Result<ValueDto, String> {
+    let loc = location.to_location()?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let old = (|| {
+        let mac = s.current_macro.as_mut()?;
+        let node = resolve_location_mut(mac, &loc)?;
+        let mut incoming = dto_to_value(&value);
+        if let Value::BinaryOp { saved, .. } = &mut incoming {
+            *saved = Box::new(node.clone());
+        }
+        Some(std::mem::replace(node, incoming))
+    })();
+    prune_value_buffers(&mut s.invalid_field_buffers, &loc);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    match old {
+        Some(v) => Ok(value_to_dto(&v)),
+        None => Err("Nothing to swap at that location".to_string()),
+    }
 }
 
 /// Creates a new value block parked on open canvas — used both for a fresh

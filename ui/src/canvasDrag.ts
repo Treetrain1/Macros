@@ -38,6 +38,13 @@ const MAX_ZOOM = 2.5;
 let canvasZoom = 1;
 let currentMacroId: string | null = null;
 
+// Value-block drag ghosts (valueDrag.ts) live outside canvas-inner's scaled
+// subtree too, so they need this to counter-scale themselves the same way
+// strand/palette ghosts do below.
+export function getCanvasZoom(): number {
+  return canvasZoom;
+}
+
 // Bounds of the last render, needed to convert pointer/client coordinates
 // back into canvas (strand.x/y) space when a drag ends on empty canvas.
 let lastBounds = { minX: 0, minY: 0 };

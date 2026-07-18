@@ -17,6 +17,7 @@ pub(crate) enum FieldId {
     MoveMouseX,
     MoveMouseY,
     ScrollAmount,
+    TextValue,
 }
 
 impl std::fmt::Display for FieldId {
@@ -26,6 +27,7 @@ impl std::fmt::Display for FieldId {
             FieldId::MoveMouseX => write!(f, "MoveMouseX"),
             FieldId::MoveMouseY => write!(f, "MoveMouseY"),
             FieldId::ScrollAmount => write!(f, "ScrollAmount"),
+            FieldId::TextValue => write!(f, "TextValue"),
         }
     }
 }
@@ -38,6 +40,7 @@ impl std::str::FromStr for FieldId {
             "MoveMouseX" => Ok(FieldId::MoveMouseX),
             "MoveMouseY" => Ok(FieldId::MoveMouseY),
             "ScrollAmount" => Ok(FieldId::ScrollAmount),
+            "TextValue" => Ok(FieldId::TextValue),
             _ => Err(format!("Unknown FieldId: {s}")),
         }
     }
@@ -277,7 +280,7 @@ pub(crate) fn location_to_dto(loc: &ValueLocation) -> ValueLocationDto {
 #[serde(tag = "type")]
 pub(crate) enum InstructionDto {
     Wait { duration: ValueDto },
-    Text { text: String },
+    Text { text: ValueDto },
     Key { key: String, direction: String },
     Button { button: String, direction: String },
     MoveMouse { x: ValueDto, y: ValueDto, coordinate: String },
@@ -446,7 +449,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
         Instruction::WhenRan => InstructionDto::WhenRan,
         Instruction::Token(token) => match token {
-            InputToken::Text(t) => InstructionDto::Text { text: t.clone() },
+            InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
                 key: key_to_string(k).unwrap_or("Unknown").to_string(),
                 direction: direction_to_str(d).to_string(),
@@ -473,7 +476,7 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
     use crate::input::{index_to_mouse_button, key_names::string_to_key};
     Some(match dto {
         InstructionDto::Wait { duration } => Instruction::Wait(dto_to_value(duration)),
-        InstructionDto::Text { text } => Instruction::Token(InputToken::Text(text.clone())),
+        InstructionDto::Text { text } => Instruction::Token(InputToken::Text(dto_to_value(text))),
         InstructionDto::Key { key, direction } => {
             let mk = string_to_key(key).ok()?;
             Instruction::Token(InputToken::Key(mk, str_to_direction(direction)))

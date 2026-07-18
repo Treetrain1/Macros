@@ -39,6 +39,8 @@ export const takeValue = (location: ValueLocationDto) =>
   invoke<ValueDto>('take_value', { location });
 export const putValue = (location: ValueLocationDto, value: ValueDto) =>
   invoke<void>('put_value', { location, value });
+export const swapValue = (location: ValueLocationDto, value: ValueDto) =>
+  invoke<ValueDto>('swap_value', { location, value });
 export const createFloatingValue = (x: number, y: number, value: ValueDto) =>
   invoke<string>('create_floating_value', { x, y, value });
 export const moveFloatingValue = (floatingId: string, x: number, y: number) =>

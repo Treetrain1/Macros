@@ -97,6 +97,17 @@ impl Value {
         self.eval()?.as_number()
     }
 
+    /// Evaluates the tree down to a string — the entry point the `Text`
+    /// instruction token calls. A `Text` leaf passes through verbatim; a
+    /// `Number` leaf or a `BinaryOp` result (always numeric, even for
+    /// `Op::Random`) gets stringified.
+    pub(crate) fn eval_text(&self) -> Result<String, String> {
+        Ok(match self.eval()? {
+            Evaluated::Text(s) => s,
+            Evaluated::Number(n) => n.to_string(),
+        })
+    }
+
     /// Walks `path` (`0` steps into `lhs`, `1` into `rhs` at each
     /// `BinaryOp`) down to the addressed node; an empty path returns `self`.
     pub(crate) fn get_mut(&mut self, path: &[u8]) -> Option<&mut Value> {
@@ -173,11 +184,16 @@ impl<'de> Deserialize<'de> for Value {
         #[serde(untagged)]
         enum ValueDe {
             Legacy(f64),
+            // Pre-`Value` shape of `InputToken::Text`: a bare JSON string,
+            // from back when the `Text` instruction just held a `String`
+            // rather than a full expression tree.
+            LegacyText(String),
             Current(Tagged),
         }
 
         Ok(match ValueDe::deserialize(deserializer)? {
             ValueDe::Legacy(n) => Value::Number { value: n },
+            ValueDe::LegacyText(s) => Value::Text { value: s },
             ValueDe::Current(Tagged::Number { value }) => Value::Number { value },
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
             ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs, saved }) => Value::BinaryOp { op, lhs, rhs, saved },
@@ -193,6 +209,31 @@ mod tests {
     fn legacy_bare_number_deserializes_to_number() {
         let v: Value = serde_json::from_str("5.0").unwrap();
         assert_eq!(v, Value::number(5.0));
+    }
+
+    #[test]
+    fn legacy_bare_string_deserializes_to_text() {
+        // Pre-`Value` save shape of `InputToken::Text`, from back when it
+        // held a plain `String` — must keep loading old macros.
+        let v: Value = serde_json::from_str("\"hello\"").unwrap();
+        assert_eq!(v, Value::Text { value: "hello".into() });
+    }
+
+    #[test]
+    fn eval_text_passes_through_text_leaf() {
+        let v = Value::Text { value: "hi".into() };
+        assert_eq!(v.eval_text(), Ok("hi".to_string()));
+    }
+
+    #[test]
+    fn eval_text_stringifies_numeric_result() {
+        let v = Value::BinaryOp {
+            op: Op::Add,
+            lhs: Box::new(Value::number(2.0)),
+            rhs: Box::new(Value::number(3.0)),
+            saved: Box::new(Value::number(0.0)),
+        };
+        assert_eq!(v.eval_text(), Ok("5".to_string()));
     }
 
     #[test]

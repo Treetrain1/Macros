@@ -170,11 +170,14 @@ pub(crate) fn run_instructions(
                 };
 
                 match token {
-                    InputToken::Text(text) => {
-                        if let Err(err) = em.text(&text) {
-                            warn!("Failed to type text '{}': {}", text, err);
+                    InputToken::Text(value) => match value.eval_text() {
+                        Ok(text) => {
+                            if let Err(err) = em.text(&text) {
+                                warn!("Failed to type text '{}': {}", text, err);
+                            }
                         }
-                    }
+                        Err(e) => warn!("Skipping Text: {}", e),
+                    },
                     InputToken::Key(key, direction) => {
                         let normalized_key = normalize_modifier_key(key);
                         let key_for_event =

@@ -193,6 +193,6 @@ pub enum InputToken {
     Button(MacroButton, Direction),
     MoveMouse(Value, Value, Coordinate),
     Scroll(Value, Axis),
-    Text(String),
+    Text(Value),
     Raw(u16, Direction),
 }

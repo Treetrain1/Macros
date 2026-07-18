@@ -846,6 +846,7 @@ body.sidebar-resizing {
   font-weight: 600;
   color: var(--text-dim);
   padding: 0 1px;
+  white-space: nowrap;
 }
 /* Wins over .value-card-shape's resting border/shadow by cascade order
    (same specificity, declared later) rather than !important. Applies to

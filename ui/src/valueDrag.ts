@@ -50,6 +50,12 @@ interface ValueDragState {
   source: ValueDragSource;
   dropTarget: { el: HTMLElement; location: ValueLocationDto } | null;
   overTrash: boolean;
+  // The real floating-card element being dragged, hidden for the drag's
+  // duration so it doesn't sit fully visible next to the ghost that's
+  // tracking the pointer — unlike an embedded field/subfield (which has
+  // dragReveal to show a placeholder in its place), a whole floating block
+  // has nothing left behind to show; the card itself is what's moving.
+  hiddenAnchorEl: HTMLElement | null;
 }
 let valueDrag: ValueDragState | null = null;
 
@@ -110,11 +116,17 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
   const offsetX = isFresh ? rect.width / 2 : e.clientX - rect.left;
   const offsetY = isFresh ? rect.height / 2 : e.clientY - rect.top;
 
+  let hiddenAnchorEl: HTMLElement | null = null;
   if (candidate.source.kind === 'existing') {
     const { location, value } = candidate.source;
     // A whole floating block (root, empty path) has no field left behind to
-    // reveal anything in — the card itself is what's moving/disappearing.
-    if (!(location.kind === 'Floating' && location.path.length === 0)) {
+    // reveal anything in — the card itself is what's moving/disappearing, so
+    // hide the real one (already cloned into the ghost above) instead of
+    // leaving it sitting fully visible at its old spot for the whole drag.
+    if (location.kind === 'Floating' && location.path.length === 0) {
+      candidate.anchorEl.style.visibility = 'hidden';
+      hiddenAnchorEl = candidate.anchorEl;
+    } else {
       dragReveal.value = { location, value: value.kind === 'BinaryOp' ? value.saved : numberValue(0) };
     }
   }
@@ -127,6 +139,7 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
     source: candidate.source,
     dropTarget: null,
     overTrash: false,
+    hiddenAnchorEl,
   };
   positionGhost(e);
 }
@@ -216,7 +229,6 @@ function onPointerUp(e: PointerEvent) {
   clearDropHighlight();
   setSidebarArmed(false);
   finished.ghostEl.remove();
-  dragReveal.value = null;
 
   void (async () => {
     try {
@@ -251,14 +263,31 @@ function onPointerUp(e: PointerEvent) {
       if (finished.source.kind === 'fresh') {
         await createFloatingValue(x, y, paletteValueFor(finished.source.valueKind));
       } else if (finished.source.location.kind === 'Floating' && finished.source.location.path.length === 0) {
-        // Whole floating block, just repositioned — no content change.
-        await moveFloatingValue(finished.source.location.floating_id, x, y);
+        // Whole floating block, just repositioned — no content change. Apply
+        // the new position locally first (same optimistic trick as
+        // canvasDrag.ts's strand move) and reveal the real card immediately
+        // after, so it reappears at the drop point instead of flashing at
+        // its old position for the round trip to moveFloatingValue.
+        const floatingId = finished.source.location.floating_id;
+        const fv = state.current_macro?.floating_values?.find(f => f.id === floatingId);
+        if (fv) {
+          fv.x = x;
+          fv.y = y;
+        }
+        if (finished.hiddenAnchorEl) finished.hiddenAnchorEl.style.visibility = '';
+        await moveFloatingValue(floatingId, x, y);
       } else {
         const taken = await takeValue(finished.source.location);
         await createFloatingValue(x, y, taken);
       }
     } catch (err) {
       console.error('value drag drop failed:', err);
+    } finally {
+      // Cleared only once the backend call(s) above have resolved, so the
+      // source slot/card never flashes back to its real pre-drag content in
+      // the window between drop and the state-updated round trip landing.
+      dragReveal.value = null;
+      if (finished.hiddenAnchorEl) finished.hiddenAnchorEl.style.visibility = '';
     }
   })();
 }

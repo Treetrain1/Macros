@@ -6,13 +6,57 @@ export type MouseButton = 'Left' | 'Right' | 'Middle' | 'Side' | 'Extra';
 export type Coordinate = 'Absolute' | 'Relative';
 export type ScrollAxis = 'Vertical' | 'Horizontal';
 
+// A small recursive expression tree backing a numeric instruction field —
+// either a number, a piece of text, or an operator applied to two nested
+// ValueDtos (e.g. `(5) + (3)`). Mirrors src-tauri/src/state.rs's ValueDto.
+export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div';
+export type ValueKind = 'Number' | 'Text' | ValueOp;
+export type ValueDto =
+  | { kind: 'Number'; value: number }
+  | { kind: 'Text'; value: string }
+  | { kind: 'BinaryOp'; op: ValueOp; lhs: ValueDto; rhs: ValueDto };
+
+export function numberValue(value: number): ValueDto {
+  return { kind: 'Number', value };
+}
+
+// Fresh default tree for a value block just dragged off the sidebar palette
+// — mirrors src-tauri/src/commands.rs's `apply_value_kind` defaults.
+export function defaultValueForKind(kind: ValueKind): ValueDto {
+  switch (kind) {
+    case 'Number': return { kind: 'Number', value: 0 };
+    case 'Text': return { kind: 'Text', value: '' };
+    default: return { kind: 'BinaryOp', op: kind, lhs: numberValue(0), rhs: numberValue(0) };
+  }
+}
+
+// Addresses a single Value node: either inside an instruction's field
+// (Field) or inside a value block parked on canvas (Floating), at `path`
+// within that root (0=lhs/1=rhs at each BinaryOp level). Mirrors
+// src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
+export type ValueLocationDto =
+  | { kind: 'Field'; strand_id: string; index: number; field_id: string; path: number[] }
+  | { kind: 'Floating'; floating_id: string; path: number[] };
+
+export interface FloatingValueDto {
+  id: string;
+  x: number;
+  y: number;
+  value: ValueDto;
+}
+
+// Root-of-field location for the field components under ui/src/components/fields/.
+export function fieldLocation(strandId: string, index: number, fieldId: string): ValueLocationDto {
+  return { kind: 'Field', strand_id: strandId, index, field_id: fieldId, path: [] };
+}
+
 export type InstructionDto =
-  | { type: 'Wait'; duration: number; randomness: number }
+  | { type: 'Wait'; duration: ValueDto; randomness: ValueDto }
   | { type: 'Text'; text: string }
   | { type: 'Key'; key: string; direction: KeyDirection }
   | { type: 'Button'; button: MouseButton; direction: KeyDirection }
-  | { type: 'MoveMouse'; x: number; y: number; coordinate: Coordinate }
-  | { type: 'Scroll'; amount: number; axis: ScrollAxis }
+  | { type: 'MoveMouse'; x: ValueDto; y: ValueDto; coordinate: Coordinate }
+  | { type: 'Scroll'; amount: ValueDto; axis: ScrollAxis }
   | { type: 'Command'; command: string }
   | { type: 'Comment'; comment: string }
   | { type: 'WhenRan' };
@@ -39,6 +83,7 @@ export interface MacroDto {
   strands: StrandDto[];
   recording_target_strand_id: string | null;
   speed_multiplier: number;
+  floating_values: FloatingValueDto[];
 }
 
 export interface KeyCaptureDto {
@@ -81,9 +126,7 @@ export interface PendingMacroHotkeyDto {
 }
 
 export interface InvalidFieldDto {
-  strand_id: string;
-  instruction_index: number;
-  field_id: string;
+  location: ValueLocationDto;
   text: string;
 }
 

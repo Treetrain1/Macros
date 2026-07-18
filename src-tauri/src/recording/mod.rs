@@ -1,5 +1,6 @@
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding};
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroKey};
+use crate::input::value::Value;
 use crate::macros::backend::{self, CaptureDecision, CaptureEvent, CaptureTimestamp};
 use crate::macros::Instruction;
 use std::collections::VecDeque;
@@ -303,7 +304,7 @@ pub(crate) fn start_grab_thread() {
                             if let Some(prev_elapsed) = prev {
                                 let elapsed_ms = elapsed.saturating_sub(prev_elapsed).as_secs_f64() * 1000.0;
                                 if elapsed_ms > 0.0 {
-                                    q.push_back(Instruction::Wait(elapsed_ms, 0.0));
+                                    q.push_back(Instruction::Wait(Value::number(elapsed_ms), Value::number(0.0)));
                                 }
                             }
                             q.push_back(instr);
@@ -367,9 +368,9 @@ fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
         }
         CaptureEvent::Scroll(h, v) => {
             if *v != 0 {
-                Instruction::Token(InputToken::Scroll(*v, Axis::Vertical))
+                Instruction::Token(InputToken::Scroll(Value::number(*v as f64), Axis::Vertical))
             } else if *h != 0 {
-                Instruction::Token(InputToken::Scroll(*h, Axis::Horizontal))
+                Instruction::Token(InputToken::Scroll(Value::number(*h as f64), Axis::Horizontal))
             } else {
                 return None;
             }
@@ -381,10 +382,10 @@ fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
             if *dx == 0 && *dy == 0 {
                 return None;
             }
-            Instruction::Token(InputToken::MoveMouse(*dx, *dy, Coordinate::Rel))
+            Instruction::Token(InputToken::MoveMouse(Value::number(*dx as f64), Value::number(*dy as f64), Coordinate::Rel))
         }
         CaptureEvent::MouseMoveAbs(x, y) => {
-            Instruction::Token(InputToken::MoveMouse(*x as i32, *y as i32, Coordinate::Abs))
+            Instruction::Token(InputToken::MoveMouse(Value::number(*x), Value::number(*y), Coordinate::Abs))
         }
     })
 }

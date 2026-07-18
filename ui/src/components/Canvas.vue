@@ -2,8 +2,10 @@
 import { onMounted, watch } from 'vue';
 import { state } from '../store';
 import { attachDragListeners, positionCanvas } from '../canvasDrag';
+import { attachValueDragListeners } from '../valueDrag';
 import { openCanvasMenu } from '../contextMenu';
 import StrandCard from './StrandCard.vue';
+import FloatingValueCard from './FloatingValueCard.vue';
 import ContextMenu from './ContextMenu.vue';
 
 defineProps<{ recording: boolean }>();
@@ -16,6 +18,7 @@ function onCanvasContextMenu(e: MouseEvent) {
 
 onMounted(() => {
   attachDragListeners();
+  attachValueDragListeners();
   positionCanvas(state.current_macro);
 });
 
@@ -24,10 +27,10 @@ onMounted(() => {
 // operation — it needs to read the just-rendered, unstyled DOM
 // (offsetWidth/offsetHeight), which Vue's reactivity graph has no visibility
 // into. So this runs as a plain post-patch pass rather than a computed/:style
-// binding: `flush: 'post'` guarantees the v-for'd .strand-card elements
-// already exist in the DOM when it runs.
+// binding: `flush: 'post'` guarantees the v-for'd .strand-card/
+// .value-floating-card elements already exist in the DOM when it runs.
 watch(
-  () => state.current_macro?.strands,
+  () => [state.current_macro?.strands, state.current_macro?.floating_values],
   () => positionCanvas(state.current_macro),
   { flush: 'post', deep: true },
 );
@@ -39,6 +42,11 @@ watch(
       <div class="canvas-sizer" id="canvas-sizer">
         <div class="canvas-inner" id="canvas-inner">
           <StrandCard v-for="strand in state.current_macro?.strands ?? []" :key="strand.id" :strand="strand" />
+          <FloatingValueCard
+            v-for="fv in state.current_macro?.floating_values ?? []"
+            :key="fv.id"
+            :floating-value="fv"
+          />
         </div>
       </div>
     </div>

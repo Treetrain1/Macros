@@ -1,4 +1,5 @@
 use crate::input::types::InputToken;
+use crate::input::value::Value;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -46,6 +47,25 @@ pub(crate) struct Strand {
     pub(crate) instructions: Vec<Instruction>,
 }
 
+/// A value block sitting free on the canvas, not embedded in any
+/// instruction's field — the drag-and-drop "parking spot" for a value block
+/// before/after it's placed into a field's slot (or one of its subfields).
+/// Can never be attached to a strand's instruction list directly.
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+pub(crate) struct FloatingValue {
+    #[serde(default = "default_floating_value_id")]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) x: i32,
+    #[serde(default)]
+    pub(crate) y: i32,
+    pub(crate) value: Value,
+}
+
+fn default_floating_value_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
 impl Instruction {
     /// Returns `true` for "header" blocks — blocks that must be first in their
     /// strand, cannot have anything stacked above them, and render with a flat
@@ -84,6 +104,9 @@ pub(crate) struct Macro {
     /// `SPEED_MULTIPLIER_RANGE` wherever it's set.
     #[serde(default = "default_speed_multiplier")]
     pub(crate) speed_multiplier: f64,
+    /// Value blocks parked on open canvas — see `FloatingValue`.
+    #[serde(default)]
+    pub(crate) floating_values: Vec<FloatingValue>,
 }
 
 /// Valid range for both the per-macro and global speed multipliers, enforced
@@ -107,6 +130,8 @@ enum MacroDe {
         recording_target: Option<String>,
         #[serde(default = "default_speed_multiplier")]
         speed_multiplier: f64,
+        #[serde(default)]
+        floating_values: Vec<FloatingValue>,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -120,7 +145,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
-            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values } => {
                 // Pre-"When Ran" saves have a strand literally id=="root" that
                 // was the sole implicit entry point; give it a real WhenRan
                 // block so it keeps running after upgrade.
@@ -129,12 +154,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands, recording_target, speed_multiplier }
+                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier() }
+                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new() }
             }
         }
     }
@@ -151,6 +176,7 @@ impl Macro {
             strands: vec![strand],
             recording_target: None,
             speed_multiplier: default_speed_multiplier(),
+            floating_values: Vec::new(),
         }
     }
 
@@ -166,6 +192,10 @@ impl Macro {
 
     pub(crate) fn strand_mut(&mut self, id: &str) -> Option<&mut Strand> {
         self.strands.iter_mut().find(|s| s.id == id)
+    }
+
+    pub(crate) fn floating_value_mut(&mut self, id: &str) -> Option<&mut FloatingValue> {
+        self.floating_values.iter_mut().find(|f| f.id == id)
     }
 
     /// Strand that freshly-recorded input gets appended to: the explicitly
@@ -209,7 +239,7 @@ impl Macro {
 #[serde(from = "InstructionDe")]
 pub(crate) enum Instruction {
     Token(InputToken),
-    Wait(f64, f64),
+    Wait(Value, Value),
     Command(String),
     Comment(String),
     /// Marks a strand as an entry point: the strand containing it (always at
@@ -227,6 +257,7 @@ impl std::hash::Hash for Macro {
         self.strands.hash(state);
         self.recording_target.hash(state);
         self.speed_multiplier.to_bits().hash(state);
+        self.floating_values.hash(state);
     }
 }
 
@@ -234,7 +265,7 @@ impl std::hash::Hash for Instruction {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             Self::Token(t)   => { 0u8.hash(state); t.hash(state); }
-            Self::Wait(d, r) => { 1u8.hash(state); d.to_bits().hash(state); r.to_bits().hash(state); }
+            Self::Wait(d, r) => { 1u8.hash(state); d.hash(state); r.hash(state); }
             Self::Command(s) => { 2u8.hash(state); s.hash(state); }
             Self::Comment(s) => { 3u8.hash(state); s.hash(state); }
             Self::WhenRan    => { 4u8.hash(state); }
@@ -255,14 +286,14 @@ enum InstructionDe {
 #[serde(untagged)]
 enum WaitDe {
     Legacy(u64),
-    Current(f64, f64),
+    Current(Value, Value),
 }
 
 impl From<InstructionDe> for Instruction {
     fn from(de: InstructionDe) -> Self {
         match de {
             InstructionDe::Token(t)                    => Instruction::Token(t),
-            InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(d as f64, 0.0),
+            InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(Value::number(d as f64), Value::number(0.0)),
             InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
             InstructionDe::Command(s)                  => Instruction::Command(s),
             InstructionDe::Comment(s)                  => Instruction::Comment(s),
@@ -274,6 +305,7 @@ impl From<InstructionDe> for Instruction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::types::Coordinate;
 
     #[test]
     fn new_macro_defaults_to_one_when_ran_strand() {
@@ -311,5 +343,29 @@ mod tests {
         ]}"#;
         let mac: Macro = serde_json::from_str(json).unwrap();
         assert_eq!(mac.strand("root").unwrap().instructions, vec![Instruction::WhenRan, Instruction::Comment("hi".into())]);
+    }
+
+    #[test]
+    fn legacy_bare_number_wait_fields_migrate_to_value() {
+        let json = r#"{"Wait":[1000.0,50.0]}"#;
+        let ins: Instruction = serde_json::from_str(json).unwrap();
+        assert_eq!(ins, Instruction::Wait(Value::number(1000.0), Value::number(50.0)));
+    }
+
+    #[test]
+    fn legacy_single_arg_wait_migrates_to_value() {
+        let json = r#"{"Wait":1000}"#;
+        let ins: Instruction = serde_json::from_str(json).unwrap();
+        assert_eq!(ins, Instruction::Wait(Value::number(1000.0), Value::number(0.0)));
+    }
+
+    #[test]
+    fn legacy_bare_number_move_mouse_fields_migrate_to_value() {
+        let json = r#"{"Token":{"MoveMouse":[5,10,"Rel"]}}"#;
+        let ins: Instruction = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            ins,
+            Instruction::Token(InputToken::MoveMouse(Value::number(5.0), Value::number(10.0), Coordinate::Rel)),
+        );
     }
 }

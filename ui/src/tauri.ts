@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getVersion } from '@tauri-apps/api/app';
-import type { HotkeyActionDto, InstructionDto, StateDto } from './types';
+import type { HotkeyActionDto, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
 
 export function getState(): Promise<StateDto> {
   return invoke('get_state');
@@ -31,8 +31,20 @@ export const addInstruction = (strandId: string, index: number, instruction: Ins
   invoke<void>('add_instruction', { strandId, index, instruction });
 export const editInstruction = (strandId: string, index: number, instruction: InstructionDto) =>
   invoke<void>('edit_instruction', { strandId, index, instruction });
-export const editInstructionField = (strandId: string, index: number, fieldId: string, text: string) =>
-  invoke<void>('edit_instruction_field', { strandId, index, fieldId, text });
+export const editValueField = (location: ValueLocationDto, text: string) =>
+  invoke<void>('edit_value_field', { location, text });
+export const setValueKind = (location: ValueLocationDto, kind: ValueKind) =>
+  invoke<void>('set_value_kind', { location, kind });
+export const takeValue = (location: ValueLocationDto) =>
+  invoke<ValueDto>('take_value', { location });
+export const putValue = (location: ValueLocationDto, value: ValueDto) =>
+  invoke<void>('put_value', { location, value });
+export const createFloatingValue = (x: number, y: number, value: ValueDto) =>
+  invoke<string>('create_floating_value', { x, y, value });
+export const moveFloatingValue = (floatingId: string, x: number, y: number) =>
+  invoke<void>('move_floating_value', { floatingId, x, y });
+export const removeFloatingValue = (floatingId: string) =>
+  invoke<void>('remove_floating_value', { floatingId });
 export const removeInstruction = (strandId: string, index: number) =>
   invoke<void>('remove_instruction', { strandId, index });
 export const reorderInstruction = (strandId: string, index: number, direction: number) =>

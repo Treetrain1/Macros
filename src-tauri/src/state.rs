@@ -1,9 +1,10 @@
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
+use crate::input::value::{Op, Value};
 use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use crate::macros::backend::InputBackend;
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::{Instruction, Macro, Strand};
+use crate::macros::{FloatingValue, Instruction, Macro, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -74,6 +75,14 @@ pub(crate) enum ComboCapture {
     Pending,
 }
 
+/// One undo/redo checkpoint — everything a "structural" edit command can
+/// change: the strand list and the floating value blocks parked on canvas.
+#[derive(Debug, Clone)]
+pub(crate) struct MacroSnapshot {
+    pub(crate) strands: Vec<Strand>,
+    pub(crate) floating_values: Vec<FloatingValue>,
+}
+
 pub(crate) struct AppState {
     pub(crate) macro_selected: Option<usize>,
     pub(crate) current_macro: Option<Macro>,
@@ -95,8 +104,8 @@ pub(crate) struct AppState {
     pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,
     pub(crate) key_capture: Option<(String, usize)>,
-    pub(crate) undo_stack: Vec<Vec<Strand>>,
-    pub(crate) redo_stack: Vec<Vec<Strand>>,
+    pub(crate) undo_stack: Vec<MacroSnapshot>,
+    pub(crate) redo_stack: Vec<MacroSnapshot>,
     pub(crate) recording_phase: RecordingPhase,
     pub(crate) recording_countdown_generation: u64,
     pub(crate) record_mouse_relative: bool,
@@ -104,7 +113,7 @@ pub(crate) struct AppState {
     pub(crate) combo_capture: Option<ComboCapture>,
     pub(crate) hotkey_bindings: Vec<HotkeyBinding>,
     pub(crate) pending_macro_hotkey: Option<(Option<usize>, Option<KeyCombo>)>,
-    pub(crate) invalid_field_buffers: HashMap<(String, usize, FieldId), String>,
+    pub(crate) invalid_field_buffers: HashMap<ValueLocation, String>,
     pub(crate) ipc_port_text: String,
     pub(crate) ipc_port_invalid: bool,
     pub(crate) update_check_state: UpdateCheckState,
@@ -153,6 +162,7 @@ pub(crate) struct MacroDto {
     pub(crate) strands: Vec<StrandDto>,
     pub(crate) recording_target_strand_id: Option<String>,
     pub(crate) speed_multiplier: f64,
+    pub(crate) floating_values: Vec<FloatingValueDto>,
 }
 
 #[derive(Serialize, Clone)]
@@ -170,14 +180,111 @@ pub(crate) struct KeyCaptureDto {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "kind")]
+pub(crate) enum ValueDto {
+    Number { value: f64 },
+    Text { value: String },
+    BinaryOp { op: String, lhs: Box<ValueDto>, rhs: Box<ValueDto> },
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct FloatingValueDto {
+    pub(crate) id: String,
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) value: ValueDto,
+}
+
+/// Addresses a single `Value` node — either inside an instruction's field
+/// (`Field`) or inside a value block parked on canvas (`Floating`), at
+/// `path` within that root (`Value::get_mut`'s `0`=lhs/`1`=rhs addressing).
+/// Resolved against a `Macro` by `commands::resolve_location_mut`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ValueLocation {
+    Field { strand_id: String, index: usize, field_id: FieldId, path: Vec<u8> },
+    Floating { floating_id: String, path: Vec<u8> },
+}
+
+impl ValueLocation {
+    pub(crate) fn path(&self) -> &[u8] {
+        match self {
+            ValueLocation::Field { path, .. } => path,
+            ValueLocation::Floating { path, .. } => path,
+        }
+    }
+
+    /// True if `self` and `other` address a node in the same tree (ignoring
+    /// `path`) — used to prune stale invalid-text buffers for descendants of
+    /// a subtree that just got replaced wholesale.
+    pub(crate) fn same_root(&self, other: &ValueLocation) -> bool {
+        match (self, other) {
+            (
+                ValueLocation::Field { strand_id: s1, index: i1, field_id: f1, .. },
+                ValueLocation::Field { strand_id: s2, index: i2, field_id: f2, .. },
+            ) => s1 == s2 && i1 == i2 && f1 == f2,
+            (ValueLocation::Floating { floating_id: a, .. }, ValueLocation::Floating { floating_id: b, .. }) => a == b,
+            _ => false,
+        }
+    }
+
+    /// `Some(strand_id)` for a `Field` location, `None` for `Floating` —
+    /// used to prune buffered entries when a whole strand is removed.
+    pub(crate) fn strand_id(&self) -> Option<&str> {
+        match self {
+            ValueLocation::Field { strand_id, .. } => Some(strand_id),
+            ValueLocation::Floating { .. } => None,
+        }
+    }
+}
+
+/// Wire shape for `ValueLocation` — received from the frontend as command
+/// params, and sent back out as part of `InvalidFieldDto`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "kind")]
+pub(crate) enum ValueLocationDto {
+    Field { strand_id: String, index: usize, field_id: String, path: Vec<u8> },
+    Floating { floating_id: String, path: Vec<u8> },
+}
+
+impl ValueLocationDto {
+    pub(crate) fn to_location(&self) -> Result<ValueLocation, String> {
+        Ok(match self {
+            ValueLocationDto::Field { strand_id, index, field_id, path } => ValueLocation::Field {
+                strand_id: strand_id.clone(),
+                index: *index,
+                field_id: field_id.parse()?,
+                path: path.clone(),
+            },
+            ValueLocationDto::Floating { floating_id, path } => {
+                ValueLocation::Floating { floating_id: floating_id.clone(), path: path.clone() }
+            }
+        })
+    }
+}
+
+pub(crate) fn location_to_dto(loc: &ValueLocation) -> ValueLocationDto {
+    match loc {
+        ValueLocation::Field { strand_id, index, field_id, path } => ValueLocationDto::Field {
+            strand_id: strand_id.clone(),
+            index: *index,
+            field_id: field_id.to_string(),
+            path: path.clone(),
+        },
+        ValueLocation::Floating { floating_id, path } => {
+            ValueLocationDto::Floating { floating_id: floating_id.clone(), path: path.clone() }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub(crate) enum InstructionDto {
-    Wait { duration: f64, randomness: f64 },
+    Wait { duration: ValueDto, randomness: ValueDto },
     Text { text: String },
     Key { key: String, direction: String },
     Button { button: String, direction: String },
-    MoveMouse { x: i32, y: i32, coordinate: String },
-    Scroll { amount: i32, axis: String },
+    MoveMouse { x: ValueDto, y: ValueDto, coordinate: String },
+    Scroll { amount: ValueDto, axis: String },
     Command { command: String },
     Comment { comment: String },
     WhenRan,
@@ -232,9 +339,7 @@ pub(crate) struct PendingMacroHotkeyDto {
 
 #[derive(Serialize, Clone)]
 pub(crate) struct InvalidFieldDto {
-    pub(crate) strand_id: String,
-    pub(crate) instruction_index: usize,
-    pub(crate) field_id: String,
+    pub(crate) location: ValueLocationDto,
     pub(crate) text: String,
 }
 
@@ -291,9 +396,51 @@ fn str_to_axis(s: &str) -> Axis {
     }
 }
 
+fn op_to_str(op: &Op) -> &'static str {
+    match op {
+        Op::Add => "Add",
+        Op::Sub => "Sub",
+        Op::Mul => "Mul",
+        Op::Div => "Div",
+    }
+}
+
+fn str_to_op(s: &str) -> Op {
+    match s {
+        "Sub" => Op::Sub,
+        "Mul" => Op::Mul,
+        "Div" => Op::Div,
+        _ => Op::Add,
+    }
+}
+
+pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
+    match value {
+        Value::Number { value } => ValueDto::Number { value: *value },
+        Value::Text { value } => ValueDto::Text { value: value.clone() },
+        Value::BinaryOp { op, lhs, rhs } => ValueDto::BinaryOp {
+            op: op_to_str(op).to_string(),
+            lhs: Box::new(value_to_dto(lhs)),
+            rhs: Box::new(value_to_dto(rhs)),
+        },
+    }
+}
+
+pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
+    match dto {
+        ValueDto::Number { value } => Value::Number { value: *value },
+        ValueDto::Text { value } => Value::Text { value: value.clone() },
+        ValueDto::BinaryOp { op, lhs, rhs } => Value::BinaryOp {
+            op: str_to_op(op),
+            lhs: Box::new(dto_to_value(lhs)),
+            rhs: Box::new(dto_to_value(rhs)),
+        },
+    }
+}
+
 pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
     match ins {
-        Instruction::Wait(dur, rand) => InstructionDto::Wait { duration: *dur, randomness: *rand },
+        Instruction::Wait(dur, rand) => InstructionDto::Wait { duration: value_to_dto(dur), randomness: value_to_dto(rand) },
         Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
         Instruction::WhenRan => InstructionDto::WhenRan,
@@ -308,12 +455,12 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
                 direction: direction_to_str(d).to_string(),
             },
             InputToken::MoveMouse(x, y, coord) => InstructionDto::MoveMouse {
-                x: *x,
-                y: *y,
+                x: value_to_dto(x),
+                y: value_to_dto(y),
                 coordinate: coordinate_to_str(coord).to_string(),
             },
             InputToken::Scroll(amt, axis) => InstructionDto::Scroll {
-                amount: *amt,
+                amount: value_to_dto(amt),
                 axis: axis_to_str(axis).to_string(),
             },
             InputToken::Raw(_, _) => InstructionDto::Comment { comment: "(raw keycode)".to_string() },
@@ -324,7 +471,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
 pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
     use crate::input::{index_to_mouse_button, key_names::string_to_key};
     Some(match dto {
-        InstructionDto::Wait { duration, randomness } => Instruction::Wait(*duration, *randomness),
+        InstructionDto::Wait { duration, randomness } => Instruction::Wait(dto_to_value(duration), dto_to_value(randomness)),
         InstructionDto::Text { text } => Instruction::Token(InputToken::Text(text.clone())),
         InstructionDto::Key { key, direction } => {
             let mk = string_to_key(key).ok()?;
@@ -336,10 +483,10 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
             Instruction::Token(InputToken::Button(index_to_mouse_button(idx), str_to_direction(direction)))
         }
         InstructionDto::MoveMouse { x, y, coordinate } => {
-            Instruction::Token(InputToken::MoveMouse(*x, *y, str_to_coordinate(coordinate)))
+            Instruction::Token(InputToken::MoveMouse(dto_to_value(x), dto_to_value(y), str_to_coordinate(coordinate)))
         }
         InstructionDto::Scroll { amount, axis } => {
-            Instruction::Token(InputToken::Scroll(*amount, str_to_axis(axis)))
+            Instruction::Token(InputToken::Scroll(dto_to_value(amount), str_to_axis(axis)))
         }
         InstructionDto::Command { command } => Instruction::Command(command.clone()),
         InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
@@ -356,6 +503,10 @@ fn strand_to_dto(strand: &Strand) -> StrandDto {
     }
 }
 
+fn floating_value_to_dto(fv: &FloatingValue) -> FloatingValueDto {
+    FloatingValueDto { id: fv.id.clone(), x: fv.x, y: fv.y, value: value_to_dto(&fv.value) }
+}
+
 fn macro_to_dto(mac: &Macro) -> MacroDto {
     MacroDto {
         id: mac.id.clone(),
@@ -364,6 +515,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         strands: mac.strands.iter().map(strand_to_dto).collect(),
         recording_target_strand_id: mac.recording_target_id(),
         speed_multiplier: mac.speed_multiplier,
+        floating_values: mac.floating_values.iter().map(floating_value_to_dto).collect(),
     }
 }
 
@@ -458,13 +610,8 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         combo_display: combo.as_ref().map(|c| c.format()),
     });
 
-    let invalid_field_buffers: Vec<InvalidFieldDto> = s.invalid_field_buffers.iter().map(|((strand_id, ins_idx, field), text)| {
-        InvalidFieldDto {
-            strand_id: strand_id.clone(),
-            instruction_index: *ins_idx,
-            field_id: field.to_string(),
-            text: text.clone(),
-        }
+    let invalid_field_buffers: Vec<InvalidFieldDto> = s.invalid_field_buffers.iter().map(|(location, text)| {
+        InvalidFieldDto { location: location_to_dto(location), text: text.clone() }
     }).collect();
 
     let key_capture = s.key_capture.as_ref().map(|(strand_id, index)| KeyCaptureDto {

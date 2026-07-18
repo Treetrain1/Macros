@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::hotkey_types::{MOD_ALT, MOD_CTRL, MOD_META, MOD_SHIFT};
+use crate::input::value::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Direction {
@@ -186,12 +187,12 @@ pub enum MacroButton {
     Other(u8),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub enum InputToken {
     Key(MacroKey, Direction),
     Button(MacroButton, Direction),
-    MoveMouse(i32, i32, Coordinate),
-    Scroll(i32, Axis),
+    MoveMouse(Value, Value, Coordinate),
+    Scroll(Value, Axis),
     Text(String),
     Raw(u16, Direction),
 }

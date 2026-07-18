@@ -9,7 +9,7 @@
 import { state } from './store';
 import { addInstruction, addStrand, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import type { InstructionDto, MacroDto } from './types';
-import { isHeaderType } from './types';
+import { isHeaderType, numberValue } from './types';
 
 // Strand x/y from the backend are canvas-space coordinates that can go
 // negative; canvas-inner is sized to the strands' bounding box each render,
@@ -53,6 +53,7 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   if (!inner || !sizer || !scrollEl) return;
 
   const strands = macro?.strands ?? [];
+  const floatingValues = macro?.floating_values ?? [];
   const macroId = macro?.id ?? null;
   if (macroId !== currentMacroId) canvasZoom = 1;
 
@@ -60,6 +61,11 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   for (const strand of strands) {
     const el = inner.querySelector<HTMLElement>(`.strand-card[data-strand-id="${cssEscape(strand.id)}"]`);
     if (el) cardEls.set(strand.id, el);
+  }
+  const floatingCardEls = new Map<string, HTMLElement>();
+  for (const fv of floatingValues) {
+    const el = inner.querySelector<HTMLElement>(`.value-floating-card[data-floating-id="${cssEscape(fv.id)}"]`);
+    if (el) floatingCardEls.set(fv.id, el);
   }
 
   const prevMinX = lastBounds.minX;
@@ -72,6 +78,14 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     minY = Math.min(minY, strand.y);
     maxX = Math.max(maxX, strand.x + card.offsetWidth);
     maxY = Math.max(maxY, strand.y + card.offsetHeight);
+  }
+  for (const fv of floatingValues) {
+    const card = floatingCardEls.get(fv.id);
+    if (!card) continue;
+    minX = Math.min(minX, fv.x);
+    minY = Math.min(minY, fv.y);
+    maxX = Math.max(maxX, fv.x + card.offsetWidth);
+    maxY = Math.max(maxY, fv.y + card.offsetHeight);
   }
   lastBounds = { minX, minY };
 
@@ -98,6 +112,12 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     if (!card) continue;
     card.style.left = `${strand.x - minX + CANVAS_PAD}px`;
     card.style.top = `${strand.y - minY + CANVAS_PAD}px`;
+  }
+  for (const fv of floatingValues) {
+    const card = floatingCardEls.get(fv.id);
+    if (!card) continue;
+    card.style.left = `${fv.x - minX + CANVAS_PAD}px`;
+    card.style.top = `${fv.y - minY + CANVAS_PAD}px`;
   }
 
   // A split-drag's new strand renders here as a real, fully visible card at
@@ -174,7 +194,7 @@ interface PanState {
 }
 let pan: PanState | null = null;
 
-function capturePointer(e: PointerEvent) {
+export function capturePointer(e: PointerEvent) {
   try {
     (e.target as Element | null)?.setPointerCapture?.(e.pointerId);
   } catch (err) {
@@ -219,14 +239,14 @@ function beginPan(e: PointerEvent) {
 
 // ── Instruction sidebar (palette + trash) ───────────────────────────────────
 
-function isOverSidebar(e: PointerEvent): boolean {
+export function isOverSidebar(e: PointerEvent): boolean {
   const el = document.getElementById('instruction-sidebar');
   if (!el) return false;
   const rect = el.getBoundingClientRect();
   return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
 }
 
-function setSidebarArmed(armed: boolean) {
+export function setSidebarArmed(armed: boolean) {
   document.getElementById('instruction-sidebar')?.classList.toggle('trash-armed', armed);
 }
 
@@ -297,12 +317,12 @@ let paletteDrag: PaletteDragState | null = null;
 export function defaultInstruction(type: InstructionDto['type']): InstructionDto {
   switch (type) {
     case 'WhenRan': return { type: 'WhenRan' };
-    case 'Wait': return { type: 'Wait', duration: 1000, randomness: 0 };
+    case 'Wait': return { type: 'Wait', duration: numberValue(1000), randomness: numberValue(0) };
     case 'Text': return { type: 'Text', text: 'text' };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
     case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };
-    case 'MoveMouse': return { type: 'MoveMouse', x: 0, y: 0, coordinate: 'Relative' };
-    case 'Scroll': return { type: 'Scroll', amount: 4, axis: 'Vertical' };
+    case 'MoveMouse': return { type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };
+    case 'Scroll': return { type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
     case 'Command': return { type: 'Command', command: '' };
     case 'Comment': return { type: 'Comment', comment: '' };
     default: return { type: 'Comment', comment: '' };

@@ -1,4 +1,5 @@
 use crate::input::types::{Coordinate, Direction, InputToken, MacroKey};
+use crate::input::value::Value;
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
 use crate::macros::{Instruction, Macro, Strand};
@@ -109,6 +110,20 @@ pub(crate) fn run_instructions(
             Instruction::Comment(_) => {}
             Instruction::WhenRan => {}
             Instruction::Wait(duration, randomness) => {
+                let duration = match duration.eval_number() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("Skipping Wait: duration {}", e);
+                        continue;
+                    }
+                };
+                let randomness = match randomness.eval_number() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("Wait randomness {}, treating as 0", e);
+                        0.0
+                    }
+                };
                 let duration = duration / speed_multiplier;
                 let randomness = randomness / speed_multiplier;
                 let actual = if randomness > 0.0 {
@@ -223,16 +238,36 @@ pub(crate) fn run_instructions(
                         }
                     }
                     InputToken::MoveMouse(x, y, Coordinate::Rel) => {
+                        let x = match x.eval_number() {
+                            Ok(v) => v.round() as i32,
+                            Err(e) => { warn!("Skipping relative mouse move: x {}", e); continue; }
+                        };
+                        let y = match y.eval_number() {
+                            Ok(v) => v.round() as i32,
+                            Err(e) => { warn!("Skipping relative mouse move: y {}", e); continue; }
+                        };
                         if let Err(err) = em.move_mouse_rel(x, y) {
                             warn!("Failed to move mouse rel ({}, {}): {}", x, y, err);
                         }
                     }
                     InputToken::MoveMouse(x, y, Coordinate::Abs) => {
+                        let x = match x.eval_number() {
+                            Ok(v) => v.round() as i32,
+                            Err(e) => { warn!("Skipping absolute mouse move: x {}", e); continue; }
+                        };
+                        let y = match y.eval_number() {
+                            Ok(v) => v.round() as i32,
+                            Err(e) => { warn!("Skipping absolute mouse move: y {}", e); continue; }
+                        };
                         if let Err(err) = em.move_mouse_abs(x, y) {
                             warn!("Failed to move mouse abs ({}, {}): {}", x, y, err);
                         }
                     }
                     InputToken::Scroll(amount, axis) => {
+                        let amount = match amount.eval_number() {
+                            Ok(v) => v.round() as i32,
+                            Err(e) => { warn!("Skipping scroll: {}", e); continue; }
+                        };
                         if let Err(err) = em.scroll(amount, axis) {
                             warn!("Failed to scroll by {}: {}", amount, err);
                         }
@@ -291,7 +326,7 @@ mod tests {
             id: id.to_string(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::WhenRan, Instruction::Wait(wait_ms, 0.0)],
+            instructions: vec![Instruction::WhenRan, Instruction::Wait(Value::number(wait_ms), Value::number(0.0))],
         }
     }
 
@@ -308,10 +343,11 @@ mod tests {
                 when_ran_strand("a", 150.0),
                 when_ran_strand("b", 150.0),
                 when_ran_strand("c", 150.0),
-                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(150.0, 0.0)] },
+                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(Value::number(150.0), Value::number(0.0))] },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
+            floating_values: vec![],
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let start = Instant::now();
@@ -331,6 +367,7 @@ mod tests {
             strands: vec![when_ran_strand("a", long_wait), when_ran_strand("b", long_wait)],
             recording_target: None,
             speed_multiplier: 1.0,
+            floating_values: vec![],
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let stop_flag = Arc::new(Mutex::new(true));

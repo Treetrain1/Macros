@@ -445,15 +445,21 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 .instruction-sidebar.trash-armed .sidebar-trash-hint svg { opacity: 1; }
 
-.sidebar-palette {
+.sidebar-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.sidebar-palette {
   padding: var(--spacing-sm);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .palette-block {
@@ -473,6 +479,19 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .palette-block:hover { border-color: var(--accent); }
 .palette-block:active { cursor: grabbing; }
 .palette-block svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-dim); }
+
+.sidebar-section-label {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-sm) 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  border-top: 1px solid var(--glass-border);
+}
+.sidebar-palette-values {
+  flex-shrink: 0;
+}
 
 /* ── Canvas (Scratch-like strand layout) ─────────────────────────────────── */
 .canvas-scroll {
@@ -756,6 +775,56 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   width: auto;
 }
 
+/* ── Recursive expression blocks (ValueBlock.vue) ───────────────────────────
+   Every node — a literal or an operator — is an actual draggable block, not
+   just inline text: a small bordered/chamfered card, no puzzle-piece
+   connector (these never stack in a strand, so there's nothing to notch).
+   Reuses .palette-block's bevel/shadow language at a more compact size, and
+   plain `border` (not the drop-shadow-stack `clip-path` trick
+   .instruction-row needs) since there's no notch geometry to route around. */
+.value-card-shape {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  gap: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 5px;
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+  cursor: grab;
+  touch-action: none;
+}
+.value-card-shape:hover { border-color: var(--accent); }
+.value-card-shape:active { cursor: grabbing; }
+.value-card-shape .value-card-shape {
+  /* Nested operands read as distinct blocks without stacking up full-size
+     chrome several levels deep. */
+  padding: 1px 4px;
+}
+.value-paren {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.value-op {
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0 1px;
+}
+/* Wins over .value-card-shape's resting border/shadow by cascade order
+   (same specificity, declared later) rather than !important. */
+.value-drop-target {
+  border-color: var(--accent);
+  box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
+}
+
+/* A floating value card is nothing but its block — bare positioning
+   container, same idea as .strand-card — left/top set imperatively by
+   positionCanvas() to share the strand canvas's coordinate space. */
+.value-floating-card {
+  position: absolute;
+}
+
 /* Marks the top block of whichever strand is the current recording target
    (see "Set Recording Target" in the block context menu). */
 .recording-target-dot {
@@ -802,6 +871,17 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 .strand-snap-preview .instruction-content {
   opacity: 0;
+}
+
+/* Bare positioning wrapper, same idea as .strand-drag-ghost — the dragged
+   content is a real .value-card-shape clone, already styled correctly. */
+.value-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0.92;
 }
 
 /* ── Editor Bottom Toolbar ───────────────────────────────────────────────── */

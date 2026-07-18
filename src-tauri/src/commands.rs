@@ -1,13 +1,15 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::{loop_control, thread, Instruction, Macro, Strand, SPEED_MULTIPLIER_RANGE};
+use crate::macros::{loop_control, thread, FloatingValue, Instruction, Macro, Strand, SPEED_MULTIPLIER_RANGE};
 use crate::input::types::InputToken;
+use crate::input::value::{Evaluated, Op, Value};
 use crate::recording;
 use crate::state::{
-    build_state_dto, dto_to_hotkey_action, dto_to_instruction, emit_state_updated,
-    ComboCapture, FieldId, HotkeyActionDto, InstructionDto, Page, RecordingPhase,
-    SharedState, StateDto, UpdateCheckState,
+    build_state_dto, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
+    value_to_dto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, MacroSnapshot, Page,
+    RecordingPhase, SharedState, StateDto, UpdateCheckState, ValueDto, ValueLocation, ValueLocationDto,
 };
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Runtime, State};
@@ -22,7 +24,7 @@ fn push_undo(s: &mut crate::state::AppState) {
         if s.undo_stack.len() >= UNDO_STACK_LIMIT {
             s.undo_stack.remove(0);
         }
-        s.undo_stack.push(mac.strands.clone());
+        s.undo_stack.push(MacroSnapshot { strands: mac.strands.clone(), floating_values: mac.floating_values.clone() });
         s.redo_stack.clear();
     }
 }
@@ -322,44 +324,270 @@ pub(crate) fn edit_instruction<R: Runtime>(
     Ok(())
 }
 
+/// Locates the `Value` tree a `FieldId` names on a given instruction — the
+/// root that a `ValueLocation::Field`'s `path` then walks into via
+/// [`Value::get_mut`].
+fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
+    match (ins, field) {
+        (Instruction::Wait(d, _), FieldId::WaitDuration) => Some(d),
+        (Instruction::Wait(_, r), FieldId::WaitRandomness) => Some(r),
+        (Instruction::Token(InputToken::MoveMouse(x, _, _)), FieldId::MoveMouseX) => Some(x),
+        (Instruction::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
+        (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
+        _ => None,
+    }
+}
+
+/// Resolves a `ValueLocation` (a field slot inside an instruction, or a
+/// value block parked on canvas) down to the specific `Value` node it
+/// addresses — the one function every value-editing command in this file
+/// routes through.
+fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Option<&'a mut Value> {
+    match location {
+        ValueLocation::Field { strand_id, index, field_id, path } => {
+            let strand = mac.strand_mut(strand_id)?;
+            let ins = strand.instructions.get_mut(*index)?;
+            value_slot_mut(ins, *field_id)?.get_mut(path)
+        }
+        ValueLocation::Floating { floating_id, path } => mac.floating_value_mut(floating_id)?.value.get_mut(path),
+    }
+}
+
+/// `MoveMouseX/Y` and `ScrollAmount` were always `i32` fields; a `Number`
+/// leaf under one of them keeps that integer-only constraint even now that
+/// it's nested inside a `Value` tree. `WaitDuration`/`WaitRandomness`, and
+/// every floating value block (not tied to any specific instruction field),
+/// allow decimals.
+fn location_requires_integer(location: &ValueLocation) -> bool {
+    matches!(location, ValueLocation::Field { field_id, .. }
+        if matches!(field_id, FieldId::MoveMouseX | FieldId::MoveMouseY | FieldId::ScrollAmount))
+}
+
+/// Drops any buffered invalid-text entries in the same tree as `location`
+/// whose path is `location`'s path itself or a descendant of it — used
+/// after a subtree gets replaced wholesale (kind change, take/put), since
+/// any buffered text for a leaf that no longer exists there would otherwise
+/// linger and be shown against the wrong node.
+fn prune_value_buffers(buffers: &mut HashMap<ValueLocation, String>, location: &ValueLocation) {
+    let path = location.path();
+    buffers.retain(|loc, _| !(loc.same_root(location) && loc.path().starts_with(path)));
+}
+
+/// Applies `kind`'s default construction to `node`, in place — used by
+/// `set_value_kind` for dropping a fresh block from the sidebar onto an
+/// occupied slot (best-effort keeps the old leaf rather than discarding it,
+/// see the match arms below).
+fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
+    match kind {
+        "Number" => {
+            // Best-effort: collapsing `(2)+(3)` gives `5` instead of
+            // discarding the user's work.
+            let n = node.eval().and_then(|e| e.as_number()).unwrap_or(0.0);
+            *node = Value::number(n);
+        }
+        "Text" => {
+            let text = match node.eval() {
+                Ok(Evaluated::Text(s)) => s,
+                Ok(Evaluated::Number(n)) => n.to_string(),
+                Err(_) => String::new(),
+            };
+            *node = Value::Text { value: text };
+        }
+        "Add" | "Sub" | "Mul" | "Div" => {
+            let op = match kind {
+                "Sub" => Op::Sub,
+                "Mul" => Op::Mul,
+                "Div" => Op::Div,
+                _ => Op::Add,
+            };
+            // Already an operator: just swap it, keeping both operands (flip
+            // `+` to `×` without losing work). Otherwise promote the leaf
+            // into the new lhs.
+            let existing = std::mem::replace(node, Value::number(0.0));
+            *node = match existing {
+                Value::BinaryOp { lhs, rhs, .. } => Value::BinaryOp { op, lhs, rhs },
+                other => Value::BinaryOp { op, lhs: Box::new(other), rhs: Box::new(Value::number(0.0)) },
+            };
+        }
+        _ => return Err(format!("Unknown value kind: {kind}")),
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub(crate) fn edit_instruction_field<R: Runtime>(
+pub(crate) fn edit_value_field<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
-    strand_id: String,
-    index: usize,
-    field_id: String,
+    location: ValueLocationDto,
     text: String,
 ) -> Result<(), String> {
-    let field: FieldId = field_id.parse().map_err(|e: String| e)?;
+    let loc = location.to_location()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &mut s.current_macro {
-        if let Some(strand) = mac.strand_mut(&strand_id) {
-            if let Some(current) = strand.instructions.get(index).cloned() {
-                let parsed_ok = match (&current, field) {
-                    (Instruction::Wait(_, randomness), FieldId::WaitDuration) => {
-                        text.parse::<f64>().map(|v| strand.instructions[index] = Instruction::Wait(v, *randomness)).is_ok()
-                    }
-                    (Instruction::Wait(duration, _), FieldId::WaitRandomness) => {
-                        text.parse::<f64>().map(|v| strand.instructions[index] = Instruction::Wait(*duration, v)).is_ok()
-                    }
-                    (Instruction::Token(InputToken::MoveMouse(_, y, coord)), FieldId::MoveMouseX) => {
-                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::MoveMouse(v, *y, coord.clone()))).is_ok()
-                    }
-                    (Instruction::Token(InputToken::MoveMouse(x, _, coord)), FieldId::MoveMouseY) => {
-                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::MoveMouse(*x, v, coord.clone()))).is_ok()
-                    }
-                    (Instruction::Token(InputToken::Scroll(_, axis)), FieldId::ScrollAmount) => {
-                        text.parse::<i32>().map(|v| strand.instructions[index] = Instruction::Token(InputToken::Scroll(v, axis.clone()))).is_ok()
-                    }
-                    _ => false,
+        if let Some(node) = resolve_location_mut(mac, &loc) {
+            if matches!(node, Value::Text { .. }) {
+                // Text leaves are always valid — no invalid-buffer
+                // bookkeeping, unlike the numeric case below.
+                *node = Value::Text { value: text };
+                auto_save(&s);
+            } else {
+                let parsed = if location_requires_integer(&loc) {
+                    text.parse::<i32>().map(|v| v as f64).map_err(|_| ())
+                } else {
+                    text.parse::<f64>().map_err(|_| ())
                 };
-                s.invalid_field_buffers.insert((strand_id.clone(), index, field), text);
+                let parsed_ok = parsed.map(|v| *node = Value::number(v)).is_ok();
+                s.invalid_field_buffers.insert(loc.clone(), text);
                 if parsed_ok {
                     auto_save(&s);
                 }
             }
         }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_value_kind<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    location: ValueLocationDto,
+    kind: String,
+) -> Result<(), String> {
+    let loc = location.to_location()?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let result = if let Some(mac) = &mut s.current_macro {
+        match resolve_location_mut(mac, &loc) {
+            Some(node) => apply_value_kind(node, &kind),
+            None => Ok(()),
+        }
+    } else {
+        Ok(())
+    };
+    prune_value_buffers(&mut s.invalid_field_buffers, &loc);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    result
+}
+
+/// Removes the value at `location` and returns it — a `Field` location is
+/// left holding `Value::number(0.0)`; a `Floating` location at its own root
+/// (`path == []`) is deleted entirely; a `Floating` location at a nested
+/// path is left holding `Value::number(0.0)`, like `Field`. The first half
+/// of "drag an existing block somewhere else" — the frontend follows up
+/// with `put_value`/`create_floating_value` (or nothing, if the drop turned
+/// out to be a no-op).
+#[tauri::command]
+pub(crate) fn take_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    location: ValueLocationDto,
+) -> Result<ValueDto, String> {
+    let loc = location.to_location()?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let taken = (|| {
+        let mac = s.current_macro.as_mut()?;
+        if let ValueLocation::Floating { floating_id, path } = &loc {
+            if path.is_empty() {
+                let idx = mac.floating_values.iter().position(|f| &f.id == floating_id)?;
+                return Some(mac.floating_values.remove(idx).value);
+            }
+        }
+        let node = resolve_location_mut(mac, &loc)?;
+        Some(std::mem::replace(node, Value::number(0.0)))
+    })();
+    prune_value_buffers(&mut s.invalid_field_buffers, &loc);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    match taken {
+        Some(v) => Ok(value_to_dto(&v)),
+        None => Err("Nothing to take at that location".to_string()),
+    }
+}
+
+/// Overwrites the node at `location` with `value` — the "put" half of
+/// moving an existing block into a field/subfield slot.
+#[tauri::command]
+pub(crate) fn put_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    location: ValueLocationDto,
+    value: ValueDto,
+) -> Result<(), String> {
+    let loc = location.to_location()?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(node) = resolve_location_mut(mac, &loc) {
+            *node = dto_to_value(&value);
+        }
+    }
+    prune_value_buffers(&mut s.invalid_field_buffers, &loc);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Creates a new value block parked on open canvas — used both for a fresh
+/// block dropped from the sidebar and as the "create" half of taking an
+/// existing block out of a field and dropping it on canvas.
+#[tauri::command]
+pub(crate) fn create_floating_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    x: i32,
+    y: i32,
+    value: ValueDto,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    mac.floating_values.push(FloatingValue { id: id.clone(), x, y, value: dto_to_value(&value) });
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(id)
+}
+
+/// Repositions a floating value block — used when it's dropped on open
+/// canvas without landing on any field/subfield slot. No `push_undo`: pure
+/// repositioning, same as `move_strand`.
+#[tauri::command]
+pub(crate) fn move_floating_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    floating_id: String,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(fv) = mac.floating_value_mut(&floating_id) {
+            fv.x = x;
+            fv.y = y;
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Deletes a floating value block outright (dropped on the sidebar trash) —
+/// mirrors `remove_strand`.
+#[tauri::command]
+pub(crate) fn remove_floating_value<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    floating_id: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        mac.floating_values.retain(|f| f.id != floating_id);
+        auto_save(&s);
     }
     emit_state_updated(&app, &s);
     Ok(())
@@ -512,13 +740,14 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
 
 fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(prev_strands) = s.undo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| m.strands.clone());
+    if let Some(prev) = s.undo_stack.pop() {
+        let current = s.current_macro.as_ref().map(|m| MacroSnapshot { strands: m.strands.clone(), floating_values: m.floating_values.clone() });
         if let Some(cur) = current {
             s.redo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
-            mac.strands = prev_strands;
+            mac.strands = prev.strands;
+            mac.floating_values = prev.floating_values;
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
@@ -530,13 +759,14 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
 
 fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(next_strands) = s.redo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| m.strands.clone());
+    if let Some(next) = s.redo_stack.pop() {
+        let current = s.current_macro.as_ref().map(|m| MacroSnapshot { strands: m.strands.clone(), floating_values: m.floating_values.clone() });
         if let Some(cur) = current {
             s.undo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
-            mac.strands = next_strands;
+            mac.strands = next.strands;
+            mac.floating_values = next.floating_values;
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
@@ -598,7 +828,7 @@ pub(crate) fn remove_strand<R: Runtime>(state: State<SharedState>, app: tauri::A
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
         mac.strands.retain(|strand| strand.id != strand_id);
-        s.invalid_field_buffers.retain(|(sid, _, _), _| sid != &strand_id);
+        s.invalid_field_buffers.retain(|loc, _| loc.strand_id() != Some(strand_id.as_str()));
         auto_save(&s);
     }
     emit_state_updated(&app, &s);
@@ -694,7 +924,7 @@ pub(crate) fn merge_strand<R: Runtime>(
     };
     let idx = index.min(target.instructions.len());
     target.instructions.splice(idx..idx, dragged.instructions);
-    s.invalid_field_buffers.retain(|(sid, _, _), _| sid != &dragged_id);
+    s.invalid_field_buffers.retain(|loc, _| loc.strand_id() != Some(dragged_id.as_str()));
     auto_save(&s);
     emit_state_updated(&app, &s);
     Ok(())
@@ -1355,5 +1585,147 @@ fn run_macro_task(
             mac.run(emulator, Some(Arc::clone(&stop_flag)), speed_multiplier);
             if let Ok(mut st) = stop_flag.lock() { *st = false; }
         });
+    }
+}
+
+#[cfg(test)]
+mod value_location_tests {
+    use super::*;
+    use crate::input::types::Coordinate;
+
+    fn test_macro() -> Macro {
+        Macro {
+            id: "m".into(),
+            name: "Test".into(),
+            description: "".into(),
+            strands: vec![Strand {
+                id: "s1".into(),
+                x: 0,
+                y: 0,
+                instructions: vec![
+                    Instruction::WhenRan,
+                    Instruction::Wait(Value::number(1000.0), Value::number(0.0)),
+                ],
+            }],
+            recording_target: None,
+            speed_multiplier: 1.0,
+            floating_values: vec![FloatingValue { id: "f1".into(), x: 10, y: 20, value: Value::number(5.0) }],
+        }
+    }
+
+    #[test]
+    fn resolves_field_location() {
+        let mut mac = test_macro();
+        let loc = ValueLocation::Field { strand_id: "s1".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![] };
+        assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(1000.0)));
+    }
+
+    #[test]
+    fn resolves_floating_location() {
+        let mut mac = test_macro();
+        let loc = ValueLocation::Floating { floating_id: "f1".into(), path: vec![] };
+        assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(5.0)));
+    }
+
+    #[test]
+    fn missing_location_resolves_to_none() {
+        let mut mac = test_macro();
+        let bad_field = ValueLocation::Field { strand_id: "nope".into(), index: 0, field_id: FieldId::WaitDuration, path: vec![] };
+        assert_eq!(resolve_location_mut(&mut mac, &bad_field), None);
+        let bad_floating = ValueLocation::Floating { floating_id: "nope".into(), path: vec![] };
+        assert_eq!(resolve_location_mut(&mut mac, &bad_floating), None);
+    }
+
+    #[test]
+    fn apply_value_kind_promotes_leaf_into_operator_lhs() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Add").unwrap();
+        assert_eq!(node, Value::BinaryOp { op: Op::Add, lhs: Box::new(Value::number(5.0)), rhs: Box::new(Value::number(0.0)) });
+    }
+
+    #[test]
+    fn apply_value_kind_collapses_operator_to_number_best_effort() {
+        let mut node = Value::BinaryOp { op: Op::Add, lhs: Box::new(Value::number(2.0)), rhs: Box::new(Value::number(3.0)) };
+        apply_value_kind(&mut node, "Number").unwrap();
+        assert_eq!(node, Value::number(5.0));
+    }
+
+    #[test]
+    fn apply_value_kind_rejects_unknown_kind() {
+        let mut node = Value::number(0.0);
+        assert!(apply_value_kind(&mut node, "Bogus").is_err());
+    }
+
+    #[test]
+    fn prune_value_buffers_drops_only_descendants_of_changed_path() {
+        let mut buffers: HashMap<ValueLocation, String> = HashMap::new();
+        let field = |path: Vec<u8>| ValueLocation::Field { strand_id: "s1".into(), index: 1, field_id: FieldId::WaitDuration, path };
+        buffers.insert(field(vec![0]), "kept-sibling-subtree-root".into());
+        buffers.insert(field(vec![1]), "dropped-descendant".into());
+        buffers.insert(field(vec![1, 0]), "dropped-nested-descendant".into());
+        buffers.insert(ValueLocation::Field { strand_id: "s2".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![1] }, "kept-different-strand".into());
+
+        prune_value_buffers(&mut buffers, &field(vec![1]));
+
+        assert_eq!(buffers.len(), 2);
+        assert!(buffers.contains_key(&field(vec![0])));
+        assert!(buffers.contains_key(&ValueLocation::Field { strand_id: "s2".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![1] }));
+    }
+
+    #[test]
+    fn location_requires_integer_only_for_pixel_fields() {
+        let field = |field_id| ValueLocation::Field { strand_id: "s".into(), index: 0, field_id, path: vec![] };
+        assert!(location_requires_integer(&field(FieldId::MoveMouseX)));
+        assert!(location_requires_integer(&field(FieldId::ScrollAmount)));
+        assert!(!location_requires_integer(&field(FieldId::WaitDuration)));
+        assert!(!location_requires_integer(&ValueLocation::Floating { floating_id: "f1".into(), path: vec![] }));
+    }
+
+    #[test]
+    fn floating_values_round_trip_through_json() {
+        let mac = test_macro();
+        let json = serde_json::to_string(&mac).unwrap();
+        let back: Macro = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.floating_values, mac.floating_values);
+    }
+
+    #[test]
+    fn macro_without_floating_values_key_loads_with_empty_vec() {
+        let json = r#"{"id":"m1","name":"Old","description":"","strands":[
+            {"id":"s1","x":0,"y":0,"instructions":["WhenRan"]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        assert!(mac.floating_values.is_empty());
+    }
+
+    #[test]
+    fn legacy_bare_number_floating_value_migrates() {
+        let json = r#"{"id":"f1","x":10,"y":20,"value":5.0}"#;
+        let fv: FloatingValue = serde_json::from_str(json).unwrap();
+        assert_eq!(fv.value, Value::number(5.0));
+    }
+
+    #[test]
+    fn move_mouse_field_still_resolves_after_rework() {
+        let mut mac = Macro {
+            id: "m".into(),
+            name: "T".into(),
+            description: "".into(),
+            strands: vec![Strand {
+                id: "s1".into(),
+                x: 0,
+                y: 0,
+                instructions: vec![Instruction::Token(crate::input::types::InputToken::MoveMouse(
+                    Value::number(1.0),
+                    Value::number(2.0),
+                    Coordinate::Rel,
+                ))],
+            }],
+            recording_target: None,
+            speed_multiplier: 1.0,
+            floating_values: vec![],
+        };
+        let loc = ValueLocation::Field { strand_id: "s1".into(), index: 0, field_id: FieldId::MoveMouseY, path: vec![] };
+        assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));
     }
 }

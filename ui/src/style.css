@@ -655,7 +655,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
    that shape's boundary instead of being cut off at it. */
 .instruction-row {
   display: block;
-  margin-bottom: calc(-1 * var(--connector-notch-depth) + 2px);
+  margin-bottom: calc(-1 * var(--connector-notch-depth));
   position: relative;
   cursor: grab;
   touch-action: none;
@@ -690,6 +690,12 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   );
 }
 .instruction-row:hover {
+  /* Rows overlap their neighbor by --connector-notch-depth (see above) and
+     stack in DOM order when z-index is auto, so without this the row below
+     (painted later) would cover the bottom half of this row's accent
+     outline. A positive z-index lifts the hovered row above both
+     neighbors regardless of DOM order. */
+  z-index: 1;
   filter:
     drop-shadow(var(--shadow-sm))
     drop-shadow(1.5px 0 0 var(--accent))

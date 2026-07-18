@@ -26,8 +26,8 @@ export function clonePaletteInstruction(type: InstructionType): InstructionDto {
   return JSON.parse(JSON.stringify(paletteInstructions[type]));
 }
 
-type OperatorKind = Extract<ValueKind, 'Add' | 'Sub' | 'Mul' | 'Div'>;
-const OPERATOR_KINDS: OperatorKind[] = ['Add', 'Sub', 'Mul', 'Div'];
+type OperatorKind = Extract<ValueKind, 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random'>;
+const OPERATOR_KINDS: OperatorKind[] = ['Add', 'Sub', 'Mul', 'Div', 'Random'];
 
 function operandsFor(kind: OperatorKind): { lhs: number; rhs: number } {
   const seed = defaultValueForKind(kind);
@@ -36,7 +36,7 @@ function operandsFor(kind: OperatorKind): { lhs: number; rhs: number } {
   return { lhs, rhs };
 }
 
-// Operator prefabs (Add/Sub/Mul/Div) each carry their own editable lhs/rhs
+// Operator prefabs (Add/Sub/Mul/Div/Random) each carry their own editable lhs/rhs
 // pair — there's no nesting support here (dropping another operator onto one
 // of these fields would require the sidebar to be a valid drop target, and
 // it deliberately isn't, see isOverSidebar), so these always stay plain

@@ -8,7 +8,7 @@ import type { InstructionDto, ValueKind } from '../types';
 
 const instructionTypes = Object.keys(INSTRUCTION_TYPE_LABELS) as InstructionDto['type'][];
 
-const VALUE_KINDS: ValueKind[] = ['Number', 'Text', 'Add', 'Sub', 'Mul', 'Div'];
+const VALUE_KINDS: ValueKind[] = ['Number', 'Text', 'Add', 'Sub', 'Mul', 'Div', 'Random'];
 </script>
 
 <template>

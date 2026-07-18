@@ -3,7 +3,6 @@ use crate::input::value::Value;
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
 use crate::macros::{Instruction, Macro, Strand};
-use rand::RngExt;
 use spin_sleep::{SpinSleeper, SpinStrategy};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,8 +65,8 @@ impl Macro {
 /// pressed so far are released before returning, whether the run finished
 /// naturally or was aborted.
 ///
-/// `speed_multiplier` scales every `Wait` instruction's duration and
-/// randomness inversely — 2.0 runs waits at half their length (twice as
+/// `speed_multiplier` scales every `Wait` instruction's duration
+/// inversely — 2.0 runs waits at half their length (twice as
 /// fast), 0.5 runs them at double length (half as fast) — so it behaves
 /// like an actual playback speed rather than a wait-length multiplier. The
 /// caller combines the macro's own multiplier with the global runtime
@@ -109,7 +108,7 @@ pub(crate) fn run_instructions(
         match ins {
             Instruction::Comment(_) => {}
             Instruction::WhenRan => {}
-            Instruction::Wait(duration, randomness) => {
+            Instruction::Wait(duration) => {
                 let duration = match duration.eval_number() {
                     Ok(v) => v,
                     Err(e) => {
@@ -117,25 +116,11 @@ pub(crate) fn run_instructions(
                         continue;
                     }
                 };
-                let randomness = match randomness.eval_number() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!("Wait randomness {}, treating as 0", e);
-                        0.0
-                    }
-                };
-                let duration = duration / speed_multiplier;
-                let randomness = randomness / speed_multiplier;
-                let actual = if randomness > 0.0 {
-                    let offset = rand::rng().random_range(0.0..=randomness);
-                    if rand::random::<bool>() {
-                        duration + offset
-                    } else {
-                        (duration - offset).max(0.0)
-                    }
-                } else {
-                    duration
-                };
+                // Clamped rather than trusted as non-negative: `duration` may
+                // be an `Op::Random` node whose lower bound sits below zero
+                // (e.g. a jitter range wider than the base wait), and
+                // `Duration::from_secs_f64` panics on a negative input.
+                let actual = (duration / speed_multiplier).max(0.0);
                 deadline += Duration::from_secs_f64(actual / 1000.0);
 
                 if let Some(flag) = &stop_flag {
@@ -326,7 +311,7 @@ mod tests {
             id: id.to_string(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::WhenRan, Instruction::Wait(Value::number(wait_ms), Value::number(0.0))],
+            instructions: vec![Instruction::WhenRan, Instruction::Wait(Value::number(wait_ms))],
         }
     }
 
@@ -343,7 +328,7 @@ mod tests {
                 when_ran_strand("a", 150.0),
                 when_ran_strand("b", 150.0),
                 when_ran_strand("c", 150.0),
-                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(Value::number(150.0), Value::number(0.0))] },
+                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(Value::number(150.0))] },
             ],
             recording_target: None,
             speed_multiplier: 1.0,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A palette instruction's numeric field (Wait duration/randomness, MoveMouse
+// A palette instruction's numeric field (Wait duration, MoveMouse
 // x/y, Scroll amount) — same bare-leaf appearance as a real ValueBlock leaf
 // (see ValueBlock.vue's `boxed` comment), but deliberately not a drag
 // source/drop target: sidebar prefabs never carry operators or (future)

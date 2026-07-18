@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Recursive renderer for a `ValueDto` expression tree — a number, a piece of
 // text, or an operator block combining two nested `ValueBlock`s (rendered as
-// `lhs op rhs`, no parens). Only an operator node, or a leaf parked at the
-// root of a `Floating` location (a standalone canvas block with nothing
+// `lhs op rhs`, no parens — or `prefix lhs infix rhs` for word-phrase
+// operators like Random, see OP_LABELS below). Only an operator node, or a
+// leaf parked at the root of a `Floating` location (a standalone canvas block with nothing
 // else to grab it by), renders as an actual bordered, draggable block
 // (`.value-card-shape`); an ordinary leaf sitting in a field is just its
 // bare input — see `boxed` below. Changing what's in a slot is done by
@@ -25,7 +26,15 @@ const props = defineProps<{
   placeholder?: string;
 }>();
 
-const OP_SYMBOLS: Record<string, string> = { Add: '+', Sub: '−', Mul: '×', Div: '÷' };
+// `prefix` renders before lhs (for word-phrase operators like Random);
+// `infix` sits between lhs and rhs, symbol or word alike.
+const OP_LABELS: Record<string, { prefix?: string; infix: string }> = {
+  Add: { infix: '+' },
+  Sub: { infix: '−' },
+  Mul: { infix: '×' },
+  Div: { infix: '÷' },
+  Random: { prefix: 'pick random from', infix: 'to' },
+};
 
 const rootEl = ref<HTMLElement | null>(null);
 
@@ -64,8 +73,9 @@ function onPointerDown(e: PointerEvent) {
     @pointerdown="onPointerDown"
   >
     <template v-if="displayValue.kind === 'BinaryOp'">
+      <span v-if="OP_LABELS[displayValue.op].prefix" class="value-op">{{ OP_LABELS[displayValue.op].prefix }}</span>
       <ValueBlock :location="childLocation(0)" :value="displayValue.lhs" />
-      <span class="value-op">{{ OP_SYMBOLS[displayValue.op] }}</span>
+      <span class="value-op">{{ OP_LABELS[displayValue.op].infix }}</span>
       <ValueBlock :location="childLocation(1)" :value="displayValue.rhs" />
     </template>
     <template v-else>

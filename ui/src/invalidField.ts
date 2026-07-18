@@ -16,7 +16,7 @@ export function locationsEqual(a: ValueLocationDto, b: ValueLocationDto): boolea
  * edited (present while the typed text doesn't parse to a valid value yet)
  * and whether it's still invalid. Fields tied to a pixel-valued instruction
  * slot (MoveMouseX/Y, ScrollAmount) require an integer; everything else
- * (Wait's duration/randomness, and every floating value block, which isn't
+ * (Wait's duration, and every floating value block, which isn't
  * tied to any specific field) allows decimals — mirrors the backend's
  * `location_requires_integer`.
  */

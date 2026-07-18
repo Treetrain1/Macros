@@ -1,4 +1,4 @@
-// Pointer-drag state machine for value blocks (Number/Text/Add/Sub/Mul/Div),
+// Pointer-drag state machine for value blocks (Number/Text/Add/Sub/Mul/Div/Random),
 // deliberately separate from canvasDrag.ts's strand drag/snap machinery: a
 // value block can be dropped into a field/subfield slot or onto open canvas,
 // but must never attach to a strand's instruction list — keeping this in its

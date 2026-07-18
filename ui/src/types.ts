@@ -9,7 +9,7 @@ export type ScrollAxis = 'Vertical' | 'Horizontal';
 // A small recursive expression tree backing a numeric instruction field —
 // either a number, a piece of text, or an operator applied to two nested
 // ValueDtos (e.g. `(5) + (3)`). Mirrors src-tauri/src/state.rs's ValueDto.
-export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div';
+export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random';
 export type ValueKind = 'Number' | 'Text' | ValueOp;
 // `saved` is whatever value the operator displaced when it took over its
 // slot — not a third operand, just carried along so the backend can hand it
@@ -55,7 +55,7 @@ export function fieldLocation(strandId: string, index: number, fieldId: string):
 }
 
 export type InstructionDto =
-  | { type: 'Wait'; duration: ValueDto; randomness: ValueDto }
+  | { type: 'Wait'; duration: ValueDto }
   | { type: 'Text'; text: string }
   | { type: 'Key'; key: string; direction: KeyDirection }
   | { type: 'Button'; button: MouseButton; direction: KeyDirection }
@@ -74,7 +74,7 @@ export type InstructionType = InstructionDto['type'];
 export function defaultInstruction(type: InstructionType): InstructionDto {
   switch (type) {
     case 'WhenRan': return { type: 'WhenRan' };
-    case 'Wait': return { type: 'Wait', duration: numberValue(1000), randomness: numberValue(0) };
+    case 'Wait': return { type: 'Wait', duration: numberValue(1000) };
     case 'Text': return { type: 'Text', text: 'text' };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
     case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };

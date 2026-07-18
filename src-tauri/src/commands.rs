@@ -329,8 +329,7 @@ pub(crate) fn edit_instruction<R: Runtime>(
 /// [`Value::get_mut`].
 fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
     match (ins, field) {
-        (Instruction::Wait(d, _), FieldId::WaitDuration) => Some(d),
-        (Instruction::Wait(_, r), FieldId::WaitRandomness) => Some(r),
+        (Instruction::Wait(d), FieldId::WaitDuration) => Some(d),
         (Instruction::Token(InputToken::MoveMouse(x, _, _)), FieldId::MoveMouseX) => Some(x),
         (Instruction::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
         (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
@@ -355,9 +354,8 @@ fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Opt
 
 /// `MoveMouseX/Y` and `ScrollAmount` were always `i32` fields; a `Number`
 /// leaf under one of them keeps that integer-only constraint even now that
-/// it's nested inside a `Value` tree. `WaitDuration`/`WaitRandomness`, and
-/// every floating value block (not tied to any specific instruction field),
-/// allow decimals.
+/// it's nested inside a `Value` tree. `WaitDuration`, and every floating
+/// value block (not tied to any specific instruction field), allow decimals.
 fn location_requires_integer(location: &ValueLocation) -> bool {
     matches!(location, ValueLocation::Field { field_id, .. }
         if matches!(field_id, FieldId::MoveMouseX | FieldId::MoveMouseY | FieldId::ScrollAmount))
@@ -393,11 +391,12 @@ fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
             };
             *node = Value::Text { value: text };
         }
-        "Add" | "Sub" | "Mul" | "Div" => {
+        "Add" | "Sub" | "Mul" | "Div" | "Random" => {
             let op = match kind {
                 "Sub" => Op::Sub,
                 "Mul" => Op::Mul,
                 "Div" => Op::Div,
+                "Random" => Op::Random,
                 _ => Op::Add,
             };
             // Already an operator: just swap it, keeping both operands and
@@ -1624,7 +1623,7 @@ mod value_location_tests {
                 y: 0,
                 instructions: vec![
                     Instruction::WhenRan,
-                    Instruction::Wait(Value::number(1000.0), Value::number(0.0)),
+                    Instruction::Wait(Value::number(1000.0)),
                 ],
             }],
             recording_target: None,
@@ -1681,6 +1680,21 @@ mod value_location_tests {
         };
         apply_value_kind(&mut node, "Number").unwrap();
         assert_eq!(node, Value::number(5.0));
+    }
+
+    #[test]
+    fn apply_value_kind_random_tucks_leaf_away_as_saved() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Random").unwrap();
+        assert_eq!(
+            node,
+            Value::BinaryOp {
+                op: Op::Random,
+                lhs: Box::new(Value::number(0.0)),
+                rhs: Box::new(Value::number(0.0)),
+                saved: Box::new(Value::number(5.0)),
+            }
+        );
     }
 
     #[test]

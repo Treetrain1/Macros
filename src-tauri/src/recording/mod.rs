@@ -304,7 +304,7 @@ pub(crate) fn start_grab_thread() {
                             if let Some(prev_elapsed) = prev {
                                 let elapsed_ms = elapsed.saturating_sub(prev_elapsed).as_secs_f64() * 1000.0;
                                 if elapsed_ms > 0.0 {
-                                    q.push_back(Instruction::Wait(Value::number(elapsed_ms), Value::number(0.0)));
+                                    q.push_back(Instruction::Wait(Value::number(elapsed_ms)));
                                 }
                             }
                             q.push_back(instr);

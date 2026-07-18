@@ -1,5 +1,5 @@
 use crate::input::types::InputToken;
-use crate::input::value::Value;
+use crate::input::value::{Op, Value};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -96,8 +96,8 @@ pub(crate) struct Macro {
     /// pointer/preference, not an edit to the macro's instructions.
     #[serde(default)]
     pub(crate) recording_target: Option<String>,
-    /// Playback speed for this macro: every `Wait` instruction's duration and
-    /// randomness is divided by this when the macro runs, combined with the
+    /// Playback speed for this macro: every `Wait` instruction's duration is
+    /// divided by this when the macro runs, combined with the
     /// global runtime override (see `AppState::global_speed_multiplier`).
     /// 1.0 is normal speed, 2.0 is twice as fast (waits are half as long),
     /// 0.5 is half as fast (waits are twice as long). Clamped to
@@ -239,7 +239,7 @@ impl Macro {
 #[serde(from = "InstructionDe")]
 pub(crate) enum Instruction {
     Token(InputToken),
-    Wait(Value, Value),
+    Wait(Value),
     Command(String),
     Comment(String),
     /// Marks a strand as an entry point: the strand containing it (always at
@@ -265,7 +265,7 @@ impl std::hash::Hash for Instruction {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             Self::Token(t)   => { 0u8.hash(state); t.hash(state); }
-            Self::Wait(d, r) => { 1u8.hash(state); d.hash(state); r.hash(state); }
+            Self::Wait(d)    => { 1u8.hash(state); d.hash(state); }
             Self::Command(s) => { 2u8.hash(state); s.hash(state); }
             Self::Comment(s) => { 3u8.hash(state); s.hash(state); }
             Self::WhenRan    => { 4u8.hash(state); }
@@ -285,19 +285,48 @@ enum InstructionDe {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum WaitDe {
-    Legacy(u64),
-    Current(Value, Value),
+    /// Oldest save shape: a bare duration, no randomness field existed yet.
+    LegacyNumber(u64),
+    /// Pre-`Op::Random` save shape: `[duration, randomness]` — randomness
+    /// was a dedicated field rather than something expressed inside the
+    /// `Value` tree. Migrated into `Op::Random` below rather than dropped,
+    /// so old macros keep producing the same spread of wait times.
+    LegacyWithRandomness(Value, Value),
+    /// Current shape: a single `Value` (a plain duration, or a duration
+    /// wrapped in any operator including `Op::Random`).
+    Current(Value),
+}
+
+/// Folds a legacy `[duration, randomness]` `Wait` into today's single-`Value`
+/// shape: `duration` alone if there was never any randomness configured,
+/// otherwise `duration` wrapped in `Op::Random` spanning
+/// `[duration - randomness, duration + randomness]` — the same uniform
+/// spread the old dedicated-field jitter produced (see the removed
+/// offset/sign logic this replaced in `runner.rs`), just expressed as a
+/// value-tree node instead of a second instruction field.
+fn migrate_wait_duration(duration: Value, randomness: Value) -> Value {
+    if randomness == Value::number(0.0) {
+        return duration;
+    }
+    let zero = || Box::new(Value::number(0.0));
+    Value::BinaryOp {
+        op: Op::Random,
+        lhs: Box::new(Value::BinaryOp { op: Op::Sub, lhs: Box::new(duration.clone()), rhs: Box::new(randomness.clone()), saved: zero() }),
+        rhs: Box::new(Value::BinaryOp { op: Op::Add, lhs: Box::new(duration), rhs: Box::new(randomness), saved: zero() }),
+        saved: zero(),
+    }
 }
 
 impl From<InstructionDe> for Instruction {
     fn from(de: InstructionDe) -> Self {
         match de {
-            InstructionDe::Token(t)                    => Instruction::Token(t),
-            InstructionDe::Wait(WaitDe::Legacy(d))     => Instruction::Wait(Value::number(d as f64), Value::number(0.0)),
-            InstructionDe::Wait(WaitDe::Current(d, r)) => Instruction::Wait(d, r),
-            InstructionDe::Command(s)                  => Instruction::Command(s),
-            InstructionDe::Comment(s)                  => Instruction::Comment(s),
-            InstructionDe::WhenRan                     => Instruction::WhenRan,
+            InstructionDe::Token(t) => Instruction::Token(t),
+            InstructionDe::Wait(WaitDe::LegacyNumber(d)) => Instruction::Wait(Value::number(d as f64)),
+            InstructionDe::Wait(WaitDe::LegacyWithRandomness(d, r)) => Instruction::Wait(migrate_wait_duration(d, r)),
+            InstructionDe::Wait(WaitDe::Current(d)) => Instruction::Wait(d),
+            InstructionDe::Command(s) => Instruction::Command(s),
+            InstructionDe::Comment(s) => Instruction::Comment(s),
+            InstructionDe::WhenRan => Instruction::WhenRan,
         }
     }
 }
@@ -346,17 +375,42 @@ mod tests {
     }
 
     #[test]
-    fn legacy_bare_number_wait_fields_migrate_to_value() {
+    fn legacy_wait_with_randomness_migrates_to_random_op() {
         let json = r#"{"Wait":[1000.0,50.0]}"#;
         let ins: Instruction = serde_json::from_str(json).unwrap();
-        assert_eq!(ins, Instruction::Wait(Value::number(1000.0), Value::number(50.0)));
+        assert_eq!(
+            ins,
+            Instruction::Wait(Value::BinaryOp {
+                op: Op::Random,
+                lhs: Box::new(Value::BinaryOp {
+                    op: Op::Sub,
+                    lhs: Box::new(Value::number(1000.0)),
+                    rhs: Box::new(Value::number(50.0)),
+                    saved: Box::new(Value::number(0.0)),
+                }),
+                rhs: Box::new(Value::BinaryOp {
+                    op: Op::Add,
+                    lhs: Box::new(Value::number(1000.0)),
+                    rhs: Box::new(Value::number(50.0)),
+                    saved: Box::new(Value::number(0.0)),
+                }),
+                saved: Box::new(Value::number(0.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_wait_with_zero_randomness_migrates_to_plain_duration() {
+        let json = r#"{"Wait":[1000.0,0.0]}"#;
+        let ins: Instruction = serde_json::from_str(json).unwrap();
+        assert_eq!(ins, Instruction::Wait(Value::number(1000.0)));
     }
 
     #[test]
     fn legacy_single_arg_wait_migrates_to_value() {
         let json = r#"{"Wait":1000}"#;
         let ins: Instruction = serde_json::from_str(json).unwrap();
-        assert_eq!(ins, Instruction::Wait(Value::number(1000.0), Value::number(0.0)));
+        assert_eq!(ins, Instruction::Wait(Value::number(1000.0)));
     }
 
     #[test]

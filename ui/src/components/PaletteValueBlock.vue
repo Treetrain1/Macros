@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A sidebar "prefab" for a value block (Number/Text literal, or an
-// Add/Sub/Mul/Div operator) — same boxed .value-card-shape appearance a real
+// Add/Sub/Mul/Div/Random operator) — same boxed .value-card-shape appearance a real
 // floating/operator ValueBlock gets (see ValueBlock.vue's `boxed` comment).
 // Editable in place via paletteState.ts, but — like PaletteInstructionBlock —
 // never recurses and never registers as a value-drop target, so nothing
@@ -14,7 +14,13 @@ import AutosizeInput from './AutosizeInput.vue';
 
 const props = defineProps<{ kind: ValueKind }>();
 
-const OP_SYMBOLS: Record<string, string> = { Add: '+', Sub: '−', Mul: '×', Div: '÷' };
+const OP_LABELS: Record<string, { prefix?: string; infix: string }> = {
+  Add: { infix: '+' },
+  Sub: { infix: '−' },
+  Mul: { infix: '×' },
+  Div: { infix: '÷' },
+  Random: { prefix: 'pick random from', infix: 'to' },
+};
 
 function onPointerDown(e: PointerEvent) {
   if ((e.target as Element | null)?.closest?.('input')) return;
@@ -44,12 +50,13 @@ function onOperandInput(side: 'lhs' | 'rhs', kind: ValueKind, v: string) {
       <AutosizeInput :model-value="paletteText.value" :min-chars="4" placeholder="text" @update:model-value="onTextInput" />
     </template>
     <template v-else>
+      <span v-if="OP_LABELS[kind].prefix" class="value-op">{{ OP_LABELS[kind].prefix }}</span>
       <AutosizeInput
         :model-value="String(paletteOperators[kind].lhs)"
         :min-chars="1"
         @update:model-value="v => onOperandInput('lhs', kind, v)"
       />
-      <span class="value-op">{{ OP_SYMBOLS[kind] }}</span>
+      <span class="value-op">{{ OP_LABELS[kind].infix }}</span>
       <AutosizeInput
         :model-value="String(paletteOperators[kind].rhs)"
         :min-chars="1"

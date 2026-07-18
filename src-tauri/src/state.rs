@@ -14,7 +14,6 @@ pub(crate) type SharedState = Arc<Mutex<AppState>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum FieldId {
     WaitDuration,
-    WaitRandomness,
     MoveMouseX,
     MoveMouseY,
     ScrollAmount,
@@ -24,7 +23,6 @@ impl std::fmt::Display for FieldId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FieldId::WaitDuration => write!(f, "WaitDuration"),
-            FieldId::WaitRandomness => write!(f, "WaitRandomness"),
             FieldId::MoveMouseX => write!(f, "MoveMouseX"),
             FieldId::MoveMouseY => write!(f, "MoveMouseY"),
             FieldId::ScrollAmount => write!(f, "ScrollAmount"),
@@ -37,7 +35,6 @@ impl std::str::FromStr for FieldId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "WaitDuration" => Ok(FieldId::WaitDuration),
-            "WaitRandomness" => Ok(FieldId::WaitRandomness),
             "MoveMouseX" => Ok(FieldId::MoveMouseX),
             "MoveMouseY" => Ok(FieldId::MoveMouseY),
             "ScrollAmount" => Ok(FieldId::ScrollAmount),
@@ -279,7 +276,7 @@ pub(crate) fn location_to_dto(loc: &ValueLocation) -> ValueLocationDto {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub(crate) enum InstructionDto {
-    Wait { duration: ValueDto, randomness: ValueDto },
+    Wait { duration: ValueDto },
     Text { text: String },
     Key { key: String, direction: String },
     Button { button: String, direction: String },
@@ -402,6 +399,7 @@ fn op_to_str(op: &Op) -> &'static str {
         Op::Sub => "Sub",
         Op::Mul => "Mul",
         Op::Div => "Div",
+        Op::Random => "Random",
     }
 }
 
@@ -410,6 +408,7 @@ fn str_to_op(s: &str) -> Op {
         "Sub" => Op::Sub,
         "Mul" => Op::Mul,
         "Div" => Op::Div,
+        "Random" => Op::Random,
         _ => Op::Add,
     }
 }
@@ -442,7 +441,7 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
 
 pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
     match ins {
-        Instruction::Wait(dur, rand) => InstructionDto::Wait { duration: value_to_dto(dur), randomness: value_to_dto(rand) },
+        Instruction::Wait(dur) => InstructionDto::Wait { duration: value_to_dto(dur) },
         Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
         Instruction::WhenRan => InstructionDto::WhenRan,
@@ -473,7 +472,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
 pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
     use crate::input::{index_to_mouse_button, key_names::string_to_key};
     Some(match dto {
-        InstructionDto::Wait { duration, randomness } => Instruction::Wait(dto_to_value(duration), dto_to_value(randomness)),
+        InstructionDto::Wait { duration } => Instruction::Wait(dto_to_value(duration)),
         InstructionDto::Text { text } => Instruction::Token(InputToken::Text(text.clone())),
         InstructionDto::Key { key, direction } => {
             let mk = string_to_key(key).ok()?;

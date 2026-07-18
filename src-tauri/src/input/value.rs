@@ -1,12 +1,19 @@
+use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Arithmetic operator for a [`Value::BinaryOp`] block.
+/// Operator for a [`Value::BinaryOp`] block — arithmetic, or [`Op::Random`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Op {
     Add,
     Sub,
     Mul,
     Div,
+    /// `lhs`/`rhs` are the inclusive from/to bounds, not operands to
+    /// combine — evaluated fresh on every call to `eval`, unlike the
+    /// arithmetic ops which are pure functions of their operands. Picks an
+    /// integer when both bounds evaluate to whole numbers, otherwise a
+    /// float — see `eval`'s `Op::Random` arm.
+    Random,
 }
 
 /// A small recursive expression tree backing a numeric instruction field —
@@ -69,6 +76,14 @@ impl Value {
                             return Err("division by zero".to_string());
                         }
                         l / r
+                    }
+                    Op::Random => {
+                        let (lo, hi) = (l.min(r), l.max(r));
+                        if l.fract() == 0.0 && r.fract() == 0.0 {
+                            rand::rng().random_range(lo as i64..=hi as i64) as f64
+                        } else {
+                            rand::rng().random_range(lo..=hi)
+                        }
                     }
                 };
                 Ok(Evaluated::Number(result))
@@ -219,6 +234,49 @@ mod tests {
             saved: Box::new(Value::number(0.0)),
         };
         assert!(v.eval_number().is_err());
+    }
+
+    #[test]
+    fn eval_number_random_integer_stays_in_range_when_both_bounds_whole() {
+        let v = Value::BinaryOp {
+            op: Op::Random,
+            lhs: Box::new(Value::number(1.0)),
+            rhs: Box::new(Value::number(3.0)),
+            saved: Box::new(Value::number(0.0)),
+        };
+        for _ in 0..100 {
+            let n = v.eval_number().unwrap();
+            assert_eq!(n.fract(), 0.0);
+            assert!((1.0..=3.0).contains(&n));
+        }
+    }
+
+    #[test]
+    fn eval_number_random_float_when_a_bound_has_a_fraction() {
+        let v = Value::BinaryOp {
+            op: Op::Random,
+            lhs: Box::new(Value::number(1.0)),
+            rhs: Box::new(Value::number(2.5)),
+            saved: Box::new(Value::number(0.0)),
+        };
+        for _ in 0..100 {
+            let n = v.eval_number().unwrap();
+            assert!((1.0..=2.5).contains(&n));
+        }
+    }
+
+    #[test]
+    fn eval_number_random_handles_reversed_bounds() {
+        let v = Value::BinaryOp {
+            op: Op::Random,
+            lhs: Box::new(Value::number(5.0)),
+            rhs: Box::new(Value::number(1.0)),
+            saved: Box::new(Value::number(0.0)),
+        };
+        for _ in 0..100 {
+            let n = v.eval_number().unwrap();
+            assert!((1.0..=5.0).contains(&n));
+        }
     }
 
     #[test]

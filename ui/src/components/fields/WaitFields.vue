@@ -9,6 +9,4 @@ defineProps<{ strandId: string; index: number; instruction: Extract<InstructionD
 <template>
   <span class="instruction-label">Wait (ms):</span>
   <ValueBlock :location="fieldLocation(strandId, index, 'WaitDuration')" :value="instruction.duration" />
-  <span class="instruction-label">± random:</span>
-  <ValueBlock :location="fieldLocation(strandId, index, 'WaitRandomness')" :value="instruction.randomness" />
 </template>

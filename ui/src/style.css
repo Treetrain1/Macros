@@ -413,14 +413,42 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* ── Instruction sidebar (palette + trash) ───────────────────────────────── */
+/* Width is driven by useSidebarWidth.ts's inline style (user-resizable via
+   .sidebar-resize-handle below); flex-shrink:0 keeps the flex row from
+   compressing it to fit .canvas-wrap. */
 .instruction-sidebar {
-  width: 190px;
   flex-shrink: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--glass-border);
   background: var(--glass-bg);
   overflow: hidden;
+}
+
+/* A thin strip along the sidebar's own right edge, not a separate flex
+   sibling — sits inside .instruction-sidebar's overflow:hidden box (rather
+   than straddling it) so the full hit area stays clickable. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.sidebar-resize-handle:hover,
+body.sidebar-resizing .sidebar-resize-handle {
+  background: var(--accent);
+  opacity: 0.5;
+}
+/* Keeps the resize cursor and stops text selection for the whole drag, not
+   just while the pointer stays exactly over the (6px-wide) handle. */
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .sidebar-trash-hint {
   display: flex;
@@ -449,36 +477,33 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: auto;
   display: flex;
   flex-direction: column;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* Each prefab is only as wide as its own content — same as a real
+   .strand-body's rows — instead of being stretched to fill the sidebar, so
+   it reads as an actual block rather than a full-width list item. A prefab
+   wider than the sidebar itself just scrolls into view (.sidebar-scroll's
+   overflow-x above) rather than getting clipped or wrapped. */
 .sidebar-palette {
   padding: var(--spacing-sm);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.palette-block {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  background: linear-gradient(160deg, var(--bg3), var(--bg2));
-  box-shadow: var(--bevel-top), var(--shadow-sm);
-  font-size: 13px;
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-.palette-block:hover { border-color: var(--accent); }
-.palette-block:active { cursor: grabbing; }
-.palette-block svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-dim); }
+/* .instruction-row normally cancels its own bottom tab space with a negative
+   margin so a stack of *connected* rows (see .strand-body) touches with zero
+   seam. Sidebar prefabs are standalone blocks, not a strand, so that
+   cancellation would just pull the next unrelated prefab up into this one's
+   tab — reset it back to a plain gap (handled by .sidebar-palette's `gap`
+   above). */
+.sidebar-palette .instruction-row { margin-bottom: 0; }
 
 .sidebar-section-label {
   flex-shrink: 0;
@@ -788,8 +813,9 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
    a leaf parked at the root of a floating canvas value, which needs
    something to grab) gets the fuller .value-card-shape treatment: a small
    bordered/chamfered card, no puzzle-piece connector (these never stack in
-   a strand, so there's nothing to notch). Reuses .palette-block's
-   bevel/shadow language at a more compact size, and plain `border` (not the
+   a strand, so there's nothing to notch). Shares its bevel/shadow language
+   with the sidebar's palette blocks at a more compact size, and plain
+   `border` (not the
    drop-shadow-stack `clip-path` trick .instruction-row needs) since there's
    no notch geometry to route around. */
 .value-block {
@@ -1067,7 +1093,7 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 /* Disable interactive elements while recording */
 #macro-editor.recording .strand-empty-hint,
-#macro-editor.recording .palette-block,
+#macro-editor.recording .palette-prefab,
 #macro-editor.recording #undo-btn,
 #macro-editor.recording #redo-btn,
 #macro-editor.recording #clear-instructions-btn,

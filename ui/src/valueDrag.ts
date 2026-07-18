@@ -14,9 +14,9 @@
 // needed since nothing needs to preserve Vue component identity mid-drag.
 import { state } from './store';
 import { capturePointer, clientToCanvas, isOverSidebar, setSidebarArmed } from './canvasDrag';
-import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, setValueKind, takeValue } from './tauri';
+import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
+import { paletteValueFor } from './paletteState';
 import type { ValueDto, ValueKind, ValueLocationDto } from './types';
-import { defaultValueForKind } from './types';
 
 type ValueDragSource =
   | { kind: 'existing'; location: ValueLocationDto; value: ValueDto }
@@ -228,7 +228,12 @@ function onPointerUp(e: PointerEvent) {
       }
       if (finished.dropTarget) {
         if (finished.source.kind === 'fresh') {
-          await setValueKind(finished.dropTarget.location, finished.source.valueKind);
+          // Whatever the sidebar prefab currently holds (its edited literal,
+          // or lhs/rhs for an operator) is what lands here — put_value fully
+          // replaces the target node (tucking its prior content away as
+          // `saved` when the incoming value is itself an operator), so this
+          // subsumes the old "just pick a kind, get zeroed defaults" flow.
+          await putValue(finished.dropTarget.location, paletteValueFor(finished.source.valueKind));
         } else {
           const taken = await takeValue(finished.source.location);
           await putValue(finished.dropTarget.location, taken);
@@ -238,7 +243,7 @@ function onPointerUp(e: PointerEvent) {
       // Open canvas.
       const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
       if (finished.source.kind === 'fresh') {
-        await createFloatingValue(x, y, defaultValueForKind(finished.source.valueKind));
+        await createFloatingValue(x, y, paletteValueFor(finished.source.valueKind));
       } else if (finished.source.location.kind === 'Floating' && finished.source.location.path.length === 0) {
         // Whole floating block, just repositioned — no content change.
         await moveFloatingValue(finished.source.location.floating_id, x, y);

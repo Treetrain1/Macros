@@ -67,6 +67,25 @@ export type InstructionDto =
 
 export type InstructionType = InstructionDto['type'];
 
+// Fresh instruction for a given type — mirrors src-tauri/src/commands.rs's
+// instruction defaults. Used both to seed a brand-new drop from the sidebar
+// (when the palette hasn't been touched) and, via paletteState.ts, as the
+// starting point for a prefab's editable state.
+export function defaultInstruction(type: InstructionType): InstructionDto {
+  switch (type) {
+    case 'WhenRan': return { type: 'WhenRan' };
+    case 'Wait': return { type: 'Wait', duration: numberValue(1000), randomness: numberValue(0) };
+    case 'Text': return { type: 'Text', text: 'text' };
+    case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
+    case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };
+    case 'MoveMouse': return { type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };
+    case 'Scroll': return { type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
+    case 'Command': return { type: 'Command', command: '' };
+    case 'Comment': return { type: 'Comment', comment: '' };
+    default: return { type: 'Comment', comment: '' };
+  }
+}
+
 export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan']);
 
 export function isHeaderType(type: InstructionDto['type']): boolean {

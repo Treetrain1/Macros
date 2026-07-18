@@ -8,8 +8,9 @@
 // original) for the specific bugs this exact structure avoids.
 import { state } from './store';
 import { addInstruction, addStrand, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
+import { clonePaletteInstruction } from './paletteState';
 import type { InstructionDto, MacroDto } from './types';
-import { isHeaderType, numberValue } from './types';
+import { isHeaderType } from './types';
 
 // Strand x/y from the backend are canvas-space coordinates that can go
 // negative; canvas-inner is sized to the strands' bounding box each render,
@@ -313,21 +314,6 @@ interface PaletteDragState {
   snap: { targetId: string; index: number } | null;
 }
 let paletteDrag: PaletteDragState | null = null;
-
-export function defaultInstruction(type: InstructionDto['type']): InstructionDto {
-  switch (type) {
-    case 'WhenRan': return { type: 'WhenRan' };
-    case 'Wait': return { type: 'Wait', duration: numberValue(1000), randomness: numberValue(0) };
-    case 'Text': return { type: 'Text', text: 'text' };
-    case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
-    case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };
-    case 'MoveMouse': return { type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };
-    case 'Scroll': return { type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
-    case 'Command': return { type: 'Command', command: '' };
-    case 'Comment': return { type: 'Comment', comment: '' };
-    default: return { type: 'Comment', comment: '' };
-  }
-}
 
 export function beginPickup(e: PointerEvent, strandId: string, index: number) {
   if (state.recording_phase.phase === 'Active') return;
@@ -659,7 +645,7 @@ function onPointerUp(e: PointerEvent) {
     finished.ghostEl.remove();
 
     if (!isOverSidebar(e)) {
-      const ins = defaultInstruction(finished.insType);
+      const ins = clonePaletteInstruction(finished.insType);
       void (async () => {
         try {
           if (finished.snap) {

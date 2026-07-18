@@ -776,20 +776,27 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 }
 
 /* ── Recursive expression blocks (ValueBlock.vue) ───────────────────────────
-   Every node — a literal or an operator — is an actual draggable block, not
-   just inline text: a small bordered/chamfered card, no puzzle-piece
-   connector (these never stack in a strand, so there's nothing to notch).
-   Reuses .palette-block's bevel/shadow language at a more compact size, and
-   plain `border` (not the drop-shadow-stack `clip-path` trick
-   .instruction-row needs) since there's no notch geometry to route around. */
-.value-card-shape {
+   An ordinary leaf sitting in a field is just its bare input — no chrome of
+   its own, only a transparent border reserving space for .value-drop-target
+   below so highlighting one doesn't shift layout. Only an operator node (or
+   a leaf parked at the root of a floating canvas value, which needs
+   something to grab) gets the fuller .value-card-shape treatment: a small
+   bordered/chamfered card, no puzzle-piece connector (these never stack in
+   a strand, so there's nothing to notch). Reuses .palette-block's
+   bevel/shadow language at a more compact size, and plain `border` (not the
+   drop-shadow-stack `clip-path` trick .instruction-row needs) since there's
+   no notch geometry to route around. */
+.value-block {
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+.value-card-shape {
   gap: 2px;
   padding: 2px 6px;
-  border: 1px solid var(--glass-border);
-  border-radius: 5px;
+  border-color: var(--glass-border);
   background: linear-gradient(160deg, var(--bg3), var(--bg2));
   box-shadow: var(--bevel-top), var(--shadow-sm);
   cursor: grab;
@@ -798,13 +805,9 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 .value-card-shape:hover { border-color: var(--accent); }
 .value-card-shape:active { cursor: grabbing; }
 .value-card-shape .value-card-shape {
-  /* Nested operands read as distinct blocks without stacking up full-size
+  /* Nested operators read as distinct blocks without stacking up full-size
      chrome several levels deep. */
   padding: 1px 4px;
-}
-.value-paren {
-  color: var(--text-dim);
-  font-size: 12px;
 }
 .value-op {
   font-weight: 600;
@@ -812,9 +815,13 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   padding: 0 1px;
 }
 /* Wins over .value-card-shape's resting border/shadow by cascade order
-   (same specificity, declared later) rather than !important. */
+   (same specificity, declared later) rather than !important. Applies to
+   bare inputs too (border-color alone), but the extra glow is reserved for
+   boxed blocks. */
 .value-drop-target {
   border-color: var(--accent);
+}
+.value-drop-target.value-card-shape {
   box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
 }
 

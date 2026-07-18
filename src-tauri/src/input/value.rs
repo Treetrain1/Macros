@@ -11,16 +11,21 @@ pub(crate) enum Op {
 
 /// A small recursive expression tree backing a numeric instruction field —
 /// either a number, a piece of text, or an operator applied to two nested
-/// `Value`s (e.g. `(5) + (3)`). Groundwork for a future macro-wide variable
+/// `Value`s (e.g. `5 + 3`). Groundwork for a future macro-wide variable
 /// system: today only `Instruction::Wait` and the `MoveMouse`/`Scroll`
 /// tokens embed one, always evaluated back down to a number via
 /// [`Value::eval_number`].
+///
+/// `BinaryOp::saved` is the value the operator displaced when it took over
+/// the slot — not one of the operator's operands, and not addressable via
+/// `get_mut`'s path. It just rides along so the UI can restore it verbatim
+/// if the operator is later dragged back out of the slot.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub(crate) enum Value {
     Number { value: f64 },
     Text { value: String },
-    BinaryOp { op: Op, lhs: Box<Value>, rhs: Box<Value> },
+    BinaryOp { op: Op, lhs: Box<Value>, rhs: Box<Value>, saved: Box<Value> },
 }
 
 /// The result of evaluating a [`Value`] tree — still either a number or
@@ -52,7 +57,7 @@ impl Value {
         match self {
             Value::Number { value } => Ok(Evaluated::Number(*value)),
             Value::Text { value } => Ok(Evaluated::Text(value.clone())),
-            Value::BinaryOp { op, lhs, rhs } => {
+            Value::BinaryOp { op, lhs, rhs, .. } => {
                 let l = lhs.eval()?.as_number()?;
                 let r = rhs.eval()?.as_number()?;
                 let result = match op {
@@ -108,11 +113,12 @@ impl std::hash::Hash for Value {
                 1u8.hash(state);
                 value.hash(state);
             }
-            Value::BinaryOp { op, lhs, rhs } => {
+            Value::BinaryOp { op, lhs, rhs, saved } => {
                 2u8.hash(state);
                 op.hash(state);
                 lhs.hash(state);
                 rhs.hash(state);
+                saved.hash(state);
             }
         }
     }
@@ -128,12 +134,24 @@ impl<'de> Deserialize<'de> for Value {
     where
         D: Deserializer<'de>,
     {
+        fn default_saved() -> Box<Value> {
+            Box::new(Value::number(0.0))
+        }
+
         #[derive(Deserialize)]
         #[serde(tag = "kind")]
         enum Tagged {
             Number { value: f64 },
             Text { value: String },
-            BinaryOp { op: Op, lhs: Box<Value>, rhs: Box<Value> },
+            BinaryOp {
+                op: Op,
+                lhs: Box<Value>,
+                rhs: Box<Value>,
+                // Older save files predate `saved` entirely — falls back to
+                // a plain zero, same spirit as `ValueDe::Legacy` below.
+                #[serde(default = "default_saved")]
+                saved: Box<Value>,
+            },
         }
 
         #[derive(Deserialize)]
@@ -147,7 +165,7 @@ impl<'de> Deserialize<'de> for Value {
             ValueDe::Legacy(n) => Value::Number { value: n },
             ValueDe::Current(Tagged::Number { value }) => Value::Number { value },
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
-            ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs }) => Value::BinaryOp { op, lhs, rhs },
+            ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs, saved }) => Value::BinaryOp { op, lhs, rhs, saved },
         })
     }
 }
@@ -168,6 +186,7 @@ mod tests {
             op: Op::Add,
             lhs: Box::new(Value::number(2.0)),
             rhs: Box::new(Value::Text { value: "3".into() }),
+            saved: Box::new(Value::number(0.0)),
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: Value = serde_json::from_str(&json).unwrap();
@@ -183,15 +202,22 @@ mod tests {
                 op: Op::Add,
                 lhs: Box::new(Value::number(2.0)),
                 rhs: Box::new(Value::number(3.0)),
+                saved: Box::new(Value::number(0.0)),
             }),
             rhs: Box::new(Value::number(4.0)),
+            saved: Box::new(Value::number(0.0)),
         };
         assert_eq!(v.eval_number(), Ok(20.0));
     }
 
     #[test]
     fn eval_number_division_by_zero_errs() {
-        let v = Value::BinaryOp { op: Op::Div, lhs: Box::new(Value::number(1.0)), rhs: Box::new(Value::number(0.0)) };
+        let v = Value::BinaryOp {
+            op: Op::Div,
+            lhs: Box::new(Value::number(1.0)),
+            rhs: Box::new(Value::number(0.0)),
+            saved: Box::new(Value::number(0.0)),
+        };
         assert!(v.eval_number().is_err());
     }
 
@@ -201,6 +227,7 @@ mod tests {
             op: Op::Add,
             lhs: Box::new(Value::Text { value: "5".into() }),
             rhs: Box::new(Value::number(3.0)),
+            saved: Box::new(Value::number(0.0)),
         };
         assert_eq!(v.eval_number(), Ok(8.0));
     }
@@ -216,7 +243,13 @@ mod tests {
         let mut v = Value::BinaryOp {
             op: Op::Add,
             lhs: Box::new(Value::number(1.0)),
-            rhs: Box::new(Value::BinaryOp { op: Op::Mul, lhs: Box::new(Value::number(2.0)), rhs: Box::new(Value::number(3.0)) }),
+            rhs: Box::new(Value::BinaryOp {
+                op: Op::Mul,
+                lhs: Box::new(Value::number(2.0)),
+                rhs: Box::new(Value::number(3.0)),
+                saved: Box::new(Value::number(0.0)),
+            }),
+            saved: Box::new(Value::number(0.0)),
         };
         assert_eq!(v.get_mut(&[1, 0]), Some(&mut Value::number(2.0)));
         assert_eq!(v.get_mut(&[0]), Some(&mut Value::number(1.0)));

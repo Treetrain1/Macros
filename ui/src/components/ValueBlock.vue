@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // Recursive renderer for a `ValueDto` expression tree — a number, a piece of
 // text, or an operator block combining two nested `ValueBlock`s (rendered as
-// `(lhs) op (rhs)`). Every node, leaf or operator, renders as an actual
-// draggable block (`.value-card-shape`, no puzzle-piece connector — these
-// never stack in a strand): changing what's in a slot is done by dragging a
-// different block from the sidebar's "Operator" section (or an existing
-// block) onto it, via valueDrag.ts — there's no in-place kind picker here
-// anymore. `location` addresses this node (see invalidField.ts / tauri.ts's
-// editValueField/setValueKind/takeValue/putValue); a `<script setup>` SFC
-// can reference itself by filename, so no explicit self-registration is
-// needed for the recursion below.
+// `lhs op rhs`, no parens). Only an operator node, or a leaf parked at the
+// root of a `Floating` location (a standalone canvas block with nothing
+// else to grab it by), renders as an actual bordered, draggable block
+// (`.value-card-shape`); an ordinary leaf sitting in a field is just its
+// bare input — see `boxed` below. Changing what's in a slot is done by
+// dragging a different block from the sidebar's "Operator" section (or an
+// existing block) onto it, via valueDrag.ts — there's no in-place kind
+// picker here anymore. `location` addresses this node (see invalidField.ts
+// / tauri.ts's editValueField/setValueKind/takeValue/putValue); a `<script
+// setup>` SFC can reference itself by filename, so no explicit
+// self-registration is needed for the recursion below.
 import { computed, ref } from 'vue';
 import { editValueField } from '../tauri';
 import { getInvalidText } from '../invalidField';
@@ -29,6 +31,9 @@ const rootEl = ref<HTMLElement | null>(null);
 
 const buf = computed(() => (props.value.kind === 'Number' ? getInvalidText(props.location) : null));
 
+const boxed = computed(() =>
+  props.value.kind === 'BinaryOp' || (props.location.kind === 'Floating' && props.location.path.length === 0));
+
 function childLocation(step: number): ValueLocationDto {
   return { ...props.location, path: [...props.location.path, step] } as ValueLocationDto;
 }
@@ -47,18 +52,15 @@ function onPointerDown(e: PointerEvent) {
 <template>
   <span
     ref="rootEl"
-    class="value-block value-card-shape"
+    class="value-block"
+    :class="{ 'value-card-shape': boxed }"
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
   >
     <template v-if="value.kind === 'BinaryOp'">
-      <span class="value-paren">(</span>
       <ValueBlock :location="childLocation(0)" :value="value.lhs" />
-      <span class="value-paren">)</span>
       <span class="value-op">{{ OP_SYMBOLS[value.op] }}</span>
-      <span class="value-paren">(</span>
       <ValueBlock :location="childLocation(1)" :value="value.rhs" />
-      <span class="value-paren">)</span>
     </template>
     <template v-else>
       <AutosizeInput

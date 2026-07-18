@@ -400,13 +400,21 @@ fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
                 "Div" => Op::Div,
                 _ => Op::Add,
             };
-            // Already an operator: just swap it, keeping both operands (flip
-            // `+` to `×` without losing work). Otherwise promote the leaf
-            // into the new lhs.
+            // Already an operator: just swap it, keeping both operands and
+            // whatever it's shadowing (flip `+` to `×` without losing
+            // work). Otherwise the operator takes over the slot fresh —
+            // the old value is tucked away as `saved` rather than promoted
+            // into `lhs`, so it comes back untouched if this operator is
+            // ever dragged back out.
             let existing = std::mem::replace(node, Value::number(0.0));
             *node = match existing {
-                Value::BinaryOp { lhs, rhs, .. } => Value::BinaryOp { op, lhs, rhs },
-                other => Value::BinaryOp { op, lhs: Box::new(other), rhs: Box::new(Value::number(0.0)) },
+                Value::BinaryOp { lhs, rhs, saved, .. } => Value::BinaryOp { op, lhs, rhs, saved },
+                other => Value::BinaryOp {
+                    op,
+                    lhs: Box::new(Value::number(0.0)),
+                    rhs: Box::new(Value::number(0.0)),
+                    saved: Box::new(other),
+                },
             };
         }
         _ => return Err(format!("Unknown value kind: {kind}")),
@@ -473,12 +481,13 @@ pub(crate) fn set_value_kind<R: Runtime>(
 }
 
 /// Removes the value at `location` and returns it — a `Field` location is
-/// left holding `Value::number(0.0)`; a `Floating` location at its own root
-/// (`path == []`) is deleted entirely; a `Floating` location at a nested
-/// path is left holding `Value::number(0.0)`, like `Field`. The first half
-/// of "drag an existing block somewhere else" — the frontend follows up
-/// with `put_value`/`create_floating_value` (or nothing, if the drop turned
-/// out to be a no-op).
+/// left holding whatever the taken node was shadowing (its `saved`, for an
+/// operator) or `Value::number(0.0)` (for a leaf, which has nothing to
+/// restore); a `Floating` location at its own root (`path == []`) is
+/// deleted entirely; a `Floating` location at a nested path behaves like
+/// `Field`. The first half of "drag an existing block somewhere else" —
+/// the frontend follows up with `put_value`/`create_floating_value` (or
+/// nothing, if the drop turned out to be a no-op).
 #[tauri::command]
 pub(crate) fn take_value<R: Runtime>(
     state: State<SharedState>,
@@ -497,7 +506,11 @@ pub(crate) fn take_value<R: Runtime>(
             }
         }
         let node = resolve_location_mut(mac, &loc)?;
-        Some(std::mem::replace(node, Value::number(0.0)))
+        let restored = match &*node {
+            Value::BinaryOp { saved, .. } => (**saved).clone(),
+            _ => Value::number(0.0),
+        };
+        Some(std::mem::replace(node, restored))
     })();
     prune_value_buffers(&mut s.invalid_field_buffers, &loc);
     auto_save(&s);
@@ -509,7 +522,10 @@ pub(crate) fn take_value<R: Runtime>(
 }
 
 /// Overwrites the node at `location` with `value` — the "put" half of
-/// moving an existing block into a field/subfield slot.
+/// moving an existing block into a field/subfield slot. If the incoming
+/// value is an operator, whatever it's shadowing gets overwritten with the
+/// destination's prior content — restoring an operator always hands back
+/// what was in the slot it currently occupies, not wherever it started out.
 #[tauri::command]
 pub(crate) fn put_value<R: Runtime>(
     state: State<SharedState>,
@@ -522,7 +538,11 @@ pub(crate) fn put_value<R: Runtime>(
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
         if let Some(node) = resolve_location_mut(mac, &loc) {
-            *node = dto_to_value(&value);
+            let mut incoming = dto_to_value(&value);
+            if let Value::BinaryOp { saved, .. } = &mut incoming {
+                *saved = Box::new(node.clone());
+            }
+            *node = incoming;
         }
     }
     prune_value_buffers(&mut s.invalid_field_buffers, &loc);
@@ -1637,15 +1657,28 @@ mod value_location_tests {
     }
 
     #[test]
-    fn apply_value_kind_promotes_leaf_into_operator_lhs() {
+    fn apply_value_kind_tucks_leaf_away_as_saved() {
         let mut node = Value::number(5.0);
         apply_value_kind(&mut node, "Add").unwrap();
-        assert_eq!(node, Value::BinaryOp { op: Op::Add, lhs: Box::new(Value::number(5.0)), rhs: Box::new(Value::number(0.0)) });
+        assert_eq!(
+            node,
+            Value::BinaryOp {
+                op: Op::Add,
+                lhs: Box::new(Value::number(0.0)),
+                rhs: Box::new(Value::number(0.0)),
+                saved: Box::new(Value::number(5.0)),
+            }
+        );
     }
 
     #[test]
     fn apply_value_kind_collapses_operator_to_number_best_effort() {
-        let mut node = Value::BinaryOp { op: Op::Add, lhs: Box::new(Value::number(2.0)), rhs: Box::new(Value::number(3.0)) };
+        let mut node = Value::BinaryOp {
+            op: Op::Add,
+            lhs: Box::new(Value::number(2.0)),
+            rhs: Box::new(Value::number(3.0)),
+            saved: Box::new(Value::number(0.0)),
+        };
         apply_value_kind(&mut node, "Number").unwrap();
         assert_eq!(node, Value::number(5.0));
     }

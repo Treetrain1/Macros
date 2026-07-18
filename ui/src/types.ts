@@ -11,10 +11,14 @@ export type ScrollAxis = 'Vertical' | 'Horizontal';
 // ValueDtos (e.g. `(5) + (3)`). Mirrors src-tauri/src/state.rs's ValueDto.
 export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div';
 export type ValueKind = 'Number' | 'Text' | ValueOp;
+// `saved` is whatever value the operator displaced when it took over its
+// slot — not a third operand, just carried along so the backend can hand it
+// straight back if this operator block is later dragged out of the slot
+// (see src-tauri/src/input/value.rs's `Value::BinaryOp`).
 export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
-  | { kind: 'BinaryOp'; op: ValueOp; lhs: ValueDto; rhs: ValueDto };
+  | { kind: 'BinaryOp'; op: ValueOp; lhs: ValueDto; rhs: ValueDto; saved: ValueDto };
 
 export function numberValue(value: number): ValueDto {
   return { kind: 'Number', value };
@@ -26,7 +30,7 @@ export function defaultValueForKind(kind: ValueKind): ValueDto {
   switch (kind) {
     case 'Number': return { kind: 'Number', value: 0 };
     case 'Text': return { kind: 'Text', value: '' };
-    default: return { kind: 'BinaryOp', op: kind, lhs: numberValue(0), rhs: numberValue(0) };
+    default: return { kind: 'BinaryOp', op: kind, lhs: numberValue(0), rhs: numberValue(0), saved: numberValue(0) };
   }
 }
 

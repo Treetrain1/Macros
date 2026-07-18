@@ -184,7 +184,7 @@ pub(crate) struct KeyCaptureDto {
 pub(crate) enum ValueDto {
     Number { value: f64 },
     Text { value: String },
-    BinaryOp { op: String, lhs: Box<ValueDto>, rhs: Box<ValueDto> },
+    BinaryOp { op: String, lhs: Box<ValueDto>, rhs: Box<ValueDto>, saved: Box<ValueDto> },
 }
 
 #[derive(Serialize, Clone)]
@@ -418,10 +418,11 @@ pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
     match value {
         Value::Number { value } => ValueDto::Number { value: *value },
         Value::Text { value } => ValueDto::Text { value: value.clone() },
-        Value::BinaryOp { op, lhs, rhs } => ValueDto::BinaryOp {
+        Value::BinaryOp { op, lhs, rhs, saved } => ValueDto::BinaryOp {
             op: op_to_str(op).to_string(),
             lhs: Box::new(value_to_dto(lhs)),
             rhs: Box::new(value_to_dto(rhs)),
+            saved: Box::new(value_to_dto(saved)),
         },
     }
 }
@@ -430,10 +431,11 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
     match dto {
         ValueDto::Number { value } => Value::Number { value: *value },
         ValueDto::Text { value } => Value::Text { value: value.clone() },
-        ValueDto::BinaryOp { op, lhs, rhs } => Value::BinaryOp {
+        ValueDto::BinaryOp { op, lhs, rhs, saved } => Value::BinaryOp {
             op: str_to_op(op),
             lhs: Box::new(dto_to_value(lhs)),
             rhs: Box::new(dto_to_value(rhs)),
+            saved: Box::new(dto_to_value(saved)),
         },
     }
 }

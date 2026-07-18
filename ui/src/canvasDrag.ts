@@ -427,8 +427,11 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
       if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
         // For the "after last row" boundary, the insertion point is 6px
         // above the boundary: the last row's margin-bottom: -6px means the
-        // next item starts 6 px above its border-box bottom.
-        const insY = idx === rows.length ? y - 6 : y;
+        // next item starts 6 px above its border-box bottom. That 6px is a
+        // canvas-space (unscaled) constant, but `y` here is already a
+        // measured, zoomed screen coordinate — scale the offset too, or it
+        // over/undershoots the real gap at any zoom besides 1.
+        const insY = idx === rows.length ? y - 6 * canvasZoom : y;
         best = { targetId: id, index: idx, dist, y: insY, left: cardRect.left, width: cardRect.width };
       }
     }

@@ -807,15 +807,16 @@ body.sidebar-resizing {
 }
 
 /* ── Recursive expression blocks (ValueBlock.vue) ───────────────────────────
-   An ordinary leaf sitting in a field is just its bare input — no chrome of
-   its own, only a transparent border reserving space for .value-drop-target
-   below so highlighting one doesn't shift layout. Only an operator node (or
-   a leaf parked at the root of a floating canvas value, which needs
-   something to grab) gets the fuller .value-card-shape treatment: a small
-   bordered/chamfered card, no puzzle-piece connector (these never stack in
-   a strand, so there's nothing to notch). Shares its bevel/shadow language
-   with the sidebar's palette blocks at a more compact size, and plain
-   `border` (not the
+   An ordinary leaf sitting in a field — never dragged, just typed into — is
+   just its bare input — no chrome of its own, only a transparent border
+   reserving space for .value-drop-target below so highlighting one doesn't
+   shift layout. An operator node, a leaf parked at the root of a floating
+   canvas value (which needs something to grab), or a leaf dropped into its
+   slot as its own block (valueDrag.ts's capsuleLocations) gets the fuller
+   .value-card-shape treatment instead: a small bordered/chamfered card, no
+   puzzle-piece connector (these never stack in a strand, so there's
+   nothing to notch). Shares its bevel/shadow language with the sidebar's
+   palette blocks at a more compact size, and plain `border` (not the
    drop-shadow-stack `clip-path` trick .instruction-row needs) since there's
    no notch geometry to route around. */
 .value-block {

@@ -18,7 +18,36 @@ import { capturePointer, clientToCanvas, isOverSidebar, setSidebarArmed } from '
 import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
 import { numberValue } from './types';
+import { locationsEqual } from './invalidField';
 import type { ValueDto, ValueKind, ValueLocationDto } from './types';
+
+// Field/subfield locations whose current leaf (Number/Text) got there by
+// being dropped as its own block — from the sidebar's Number/Text prefab, or
+// an existing block dragged over — rather than just being the field's
+// unremarkable native content. ValueBlock.vue's `boxed` consults this so a
+// dropped-in leaf keeps its `.value-card-shape` capsule look (and stays
+// pickup-draggable) instead of flattening into a bare input like an
+// ordinary field. A BinaryOp doesn't need an entry (already boxed by kind),
+// but dropping one over a previously-marked location still clears the mark
+// via markOrUnmark below, so a stale entry can't linger under new content.
+// Purely a frontend affordance — not persisted, so it won't survive a
+// reload or reflect an undo/redo that changes a slot's content underneath it.
+export const capsuleLocations = ref<ValueLocationDto[]>([]);
+
+export function isCapsuleLocation(location: ValueLocationDto): boolean {
+  return capsuleLocations.value.some(l => locationsEqual(l, location));
+}
+
+function markOrUnmark(location: ValueLocationDto, value: ValueDto) {
+  const isLeaf = value.kind === 'Number' || value.kind === 'Text';
+  const already = isCapsuleLocation(location);
+  if (isLeaf && !already) capsuleLocations.value.push(location);
+  else if (!isLeaf && already) capsuleLocations.value = capsuleLocations.value.filter(l => !locationsEqual(l, location));
+}
+
+function unmarkCapsule(location: ValueLocationDto) {
+  if (isCapsuleLocation(location)) capsuleLocations.value = capsuleLocations.value.filter(l => !locationsEqual(l, location));
+}
 
 // While an existing field/subfield value is mid-drag, the ValueBlock at its
 // origin location renders this instead of its real prop — the exact value
@@ -239,6 +268,7 @@ function onPointerUp(e: PointerEvent) {
             await removeFloatingValue(loc.floating_id);
           } else {
             await takeValue(loc); // discard — resets the source slot to a default
+            unmarkCapsule(loc);
           }
         }
         // Fresh-from-sidebar dropped back on the sidebar: never created, nothing to undo.
@@ -251,10 +281,14 @@ function onPointerUp(e: PointerEvent) {
           // replaces the target node (tucking its prior content away as
           // `saved` when the incoming value is itself an operator), so this
           // subsumes the old "just pick a kind, get zeroed defaults" flow.
-          await putValue(finished.dropTarget.location, paletteValueFor(finished.source.valueKind));
+          const dropped = paletteValueFor(finished.source.valueKind);
+          await putValue(finished.dropTarget.location, dropped);
+          markOrUnmark(finished.dropTarget.location, dropped);
         } else {
           const taken = await takeValue(finished.source.location);
+          unmarkCapsule(finished.source.location);
           await putValue(finished.dropTarget.location, taken);
+          markOrUnmark(finished.dropTarget.location, taken);
         }
         return;
       }
@@ -278,6 +312,7 @@ function onPointerUp(e: PointerEvent) {
         await moveFloatingValue(floatingId, x, y);
       } else {
         const taken = await takeValue(finished.source.location);
+        unmarkCapsule(finished.source.location);
         await createFloatingValue(x, y, taken);
       }
     } catch (err) {

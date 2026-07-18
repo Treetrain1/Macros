@@ -37,6 +37,8 @@ import {
   Scissors,
   ClipboardPaste,
   Layers,
+  Upload,
+  Download,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -76,6 +78,8 @@ export const ICONS = {
   scissors: Scissors,
   'clipboard-paste': ClipboardPaste,
   layers: Layers,
+  upload: Upload,
+  download: Download,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;

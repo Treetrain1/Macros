@@ -31,7 +31,7 @@ fn macro_file_path(id: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn read_macro_file(path: &Path) -> Result<Macro, String> {
+pub(crate) fn read_macro_file(path: &Path) -> Result<Macro, String> {
     let contents = fs::read_to_string(path)
         .map_err(|err| format!("Failed to read macro file '{}': {}", path.display(), err))?;
     let mut mac: Macro = serde_json::from_str(&contents)
@@ -40,7 +40,7 @@ fn read_macro_file(path: &Path) -> Result<Macro, String> {
     Ok(mac)
 }
 
-fn write_macro_file(path: &Path, mac: &Macro) -> Result<(), String> {
+pub(crate) fn write_macro_file(path: &Path, mac: &Macro) -> Result<(), String> {
     let serialized = serde_json::to_string_pretty(mac)
         .map_err(|err| format!("Failed to serialize macro '{}': {}", mac.name, err))?;
 

@@ -23,6 +23,8 @@ export const setTitle = (title: string) => invoke<void>('set_title', { title });
 export const setMacroSpeedMultiplier = (multiplier: number) =>
   invoke<void>('set_macro_speed_multiplier', { multiplier });
 export const saveMacro = () => invoke<void>('save_macro');
+export const exportMacro = (macroId: string) => invoke<void>('export_macro', { macroId });
+export const importMacro = () => invoke<void>('import_macro');
 
 // ─── Instructions ───────────────────────────────────────────────────────────
 export const addInstruction = (strandId: string, index: number, instruction: InstructionDto) =>

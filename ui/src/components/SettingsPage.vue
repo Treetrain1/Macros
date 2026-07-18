@@ -4,6 +4,7 @@ import WarningBanners from './WarningBanners.vue';
 import GlobalHotkeysSection from './GlobalHotkeysSection.vue';
 import PerMacroHotkeysSection from './PerMacroHotkeysSection.vue';
 import TcpServerSection from './TcpServerSection.vue';
+import ImportExportSection from './ImportExportSection.vue';
 import UpdatesSection from './UpdatesSection.vue';
 </script>
 
@@ -15,6 +16,7 @@ import UpdatesSection from './UpdatesSection.vue';
       <GlobalHotkeysSection />
       <PerMacroHotkeysSection />
       <TcpServerSection />
+      <ImportExportSection />
       <UpdatesSection />
     </div>
   </div>

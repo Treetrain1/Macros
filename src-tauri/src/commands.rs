@@ -194,6 +194,65 @@ pub(crate) fn save_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppH
     Ok(())
 }
 
+/// Strips characters illegal in filenames on common platforms, so a macro's
+/// freeform name can double as a sane default export filename.
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() { "macro".to_string() } else { trimmed.to_string() }
+}
+
+/// Exports a single macro to a user-chosen `.macro` file (same JSON shape as
+/// the app's own on-disk storage, just under a different extension so it
+/// reads as a portable macro file rather than an app-internal one).
+#[tauri::command]
+pub(crate) async fn export_macro(macro_id: String) -> Result<(), String> {
+    let macros = config::get_macros_from_config();
+    let mac = macros.into_iter().find(|m| m.id == macro_id).ok_or("Macro not found")?;
+
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Export Macro")
+        .set_file_name(&format!("{}.macro", sanitize_filename(&mac.name)))
+        .add_filter("Macro", &["macro"])
+        .save_file()
+        .await;
+
+    let Some(file) = file else { return Ok(()); };
+    config::write_macro_file(file.path(), &mac)
+}
+
+/// Imports a `.macro` file as a brand-new macro (fresh id, so importing never
+/// collides with or overwrites an existing macro — even a re-imported copy of
+/// one already in the library lands as a separate entry).
+#[tauri::command]
+pub(crate) async fn import_macro<R: Runtime>(state: State<'_, SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Import Macro")
+        .add_filter("Macro", &["macro"])
+        .pick_file()
+        .await;
+
+    let Some(file) = file else { return Ok(()); };
+    let mut mac = config::read_macro_file(file.path())?;
+    mac.id = uuid::Uuid::new_v4().simple().to_string();
+    let new_id = mac.id.clone();
+    mac.add()?;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    refresh_macro_list(&mut s);
+    if let Some((idx, found)) = s.macros_list.iter().enumerate().find(|(_, m)| m.id == new_id).map(|(i, m)| (i, m.clone())) {
+        s.macro_selected = Some(idx);
+        s.current_macro = Some(found);
+        config::set_selected_macro_id(Some(&new_id));
+    }
+    s.invalid_field_buffers.clear();
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 // ─── Instructions ──────────────────────────────────────────────────────────
 
 #[tauri::command]

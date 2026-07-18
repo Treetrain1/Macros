@@ -20,6 +20,7 @@ rand.workspace = true
 slotmap.workspace = true
 tokio.workspace = true
 spin_sleep.workspace = true
+rfd.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

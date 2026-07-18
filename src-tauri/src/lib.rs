@@ -159,6 +159,8 @@ pub fn run() {
             commands::set_title,
             commands::set_macro_speed_multiplier,
             commands::save_macro,
+            commands::export_macro,
+            commands::import_macro,
             commands::add_instruction,
             commands::edit_instruction,
             commands::edit_instruction_field,

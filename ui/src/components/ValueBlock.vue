@@ -14,8 +14,8 @@
 // self-registration is needed for the recursion below.
 import { computed, ref } from 'vue';
 import { editValueField } from '../tauri';
-import { getInvalidText } from '../invalidField';
-import { beginValuePickup } from '../valueDrag';
+import { getInvalidText, locationsEqual } from '../invalidField';
+import { beginValuePickup, dragReveal } from '../valueDrag';
 import AutosizeInput from './AutosizeInput.vue';
 import type { ValueDto, ValueLocationDto } from '../types';
 
@@ -29,10 +29,16 @@ const OP_SYMBOLS: Record<string, string> = { Add: '+', Sub: '−', Mul: '×', Di
 
 const rootEl = ref<HTMLElement | null>(null);
 
-const buf = computed(() => (props.value.kind === 'Number' ? getInvalidText(props.location) : null));
+// While this exact slot is the origin of an in-flight value drag, show what
+// take_value will actually leave behind instead of the (about-to-be-taken)
+// real value — see valueDrag.ts's dragReveal.
+const displayValue = computed(() =>
+  dragReveal.value && locationsEqual(dragReveal.value.location, props.location) ? dragReveal.value.value : props.value);
+
+const buf = computed(() => (displayValue.value.kind === 'Number' ? getInvalidText(props.location) : null));
 
 const boxed = computed(() =>
-  props.value.kind === 'BinaryOp' || (props.location.kind === 'Floating' && props.location.path.length === 0));
+  displayValue.value.kind === 'BinaryOp' || (props.location.kind === 'Floating' && props.location.path.length === 0));
 
 function childLocation(step: number): ValueLocationDto {
   return { ...props.location, path: [...props.location.path, step] } as ValueLocationDto;
@@ -57,14 +63,14 @@ function onPointerDown(e: PointerEvent) {
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
   >
-    <template v-if="value.kind === 'BinaryOp'">
-      <ValueBlock :location="childLocation(0)" :value="value.lhs" />
-      <span class="value-op">{{ OP_SYMBOLS[value.op] }}</span>
-      <ValueBlock :location="childLocation(1)" :value="value.rhs" />
+    <template v-if="displayValue.kind === 'BinaryOp'">
+      <ValueBlock :location="childLocation(0)" :value="displayValue.lhs" />
+      <span class="value-op">{{ OP_SYMBOLS[displayValue.op] }}</span>
+      <ValueBlock :location="childLocation(1)" :value="displayValue.rhs" />
     </template>
     <template v-else>
       <AutosizeInput
-        :model-value="value.kind === 'Number' ? (buf?.text ?? String(value.value)) : value.value"
+        :model-value="displayValue.kind === 'Number' ? (buf?.text ?? String(displayValue.value)) : displayValue.value"
         :min-chars="2"
         :invalid="buf?.invalid ?? false"
         :placeholder="placeholder"

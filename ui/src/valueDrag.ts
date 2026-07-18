@@ -12,11 +12,22 @@
 // cloned ghost (never a real-DOM-node move), and take/put/create calls only
 // fire at drop time, not at pickup — there's no split-at-pickup equivalent
 // needed since nothing needs to preserve Vue component identity mid-drag.
+import { ref } from 'vue';
 import { state } from './store';
 import { capturePointer, clientToCanvas, isOverSidebar, setSidebarArmed } from './canvasDrag';
 import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
+import { numberValue } from './types';
 import type { ValueDto, ValueKind, ValueLocationDto } from './types';
+
+// While an existing field/subfield value is mid-drag, the ValueBlock at its
+// origin location renders this instead of its real prop — the exact value
+// take_value would leave behind (an operator's `saved` operand, or a bare
+// zero for a leaf; see src-tauri/src/commands.rs's take_value) — so the slot
+// reads correctly the instant the block lifts off, rather than sitting blank
+// until the drop's async take/put round trip lands and Vue re-renders it for
+// real. Consulted by ValueBlock.vue via locationsEqual.
+export const dragReveal = ref<{ location: ValueLocationDto; value: ValueDto } | null>(null);
 
 type ValueDragSource =
   | { kind: 'existing'; location: ValueLocationDto; value: ValueDto }
@@ -39,13 +50,6 @@ interface ValueDragState {
   source: ValueDragSource;
   dropTarget: { el: HTMLElement; location: ValueLocationDto } | null;
   overTrash: boolean;
-  // For an 'existing' pickup, the real on-screen block being dragged — hidden
-  // (not moved/cloned away) for the duration so the field it came from reads
-  // as empty immediately, instead of only updating once the drop's async
-  // take/put round trip lands. Restored on pointerup regardless of outcome;
-  // Vue's own re-render (once the backend call resolves) settles the rest,
-  // same idea as canvasDrag.ts's hiddenRowEls.
-  hiddenSourceEl: HTMLElement | null;
 }
 let valueDrag: ValueDragState | null = null;
 
@@ -106,10 +110,13 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
   const offsetX = isFresh ? rect.width / 2 : e.clientX - rect.left;
   const offsetY = isFresh ? rect.height / 2 : e.clientY - rect.top;
 
-  let hiddenSourceEl: HTMLElement | null = null;
   if (candidate.source.kind === 'existing') {
-    hiddenSourceEl = candidate.anchorEl;
-    hiddenSourceEl.style.visibility = 'hidden';
+    const { location, value } = candidate.source;
+    // A whole floating block (root, empty path) has no field left behind to
+    // reveal anything in — the card itself is what's moving/disappearing.
+    if (!(location.kind === 'Floating' && location.path.length === 0)) {
+      dragReveal.value = { location, value: value.kind === 'BinaryOp' ? value.saved : numberValue(0) };
+    }
   }
 
   valueDrag = {
@@ -120,7 +127,6 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
     source: candidate.source,
     dropTarget: null,
     overTrash: false,
-    hiddenSourceEl,
   };
   positionGhost(e);
 }
@@ -210,7 +216,7 @@ function onPointerUp(e: PointerEvent) {
   clearDropHighlight();
   setSidebarArmed(false);
   finished.ghostEl.remove();
-  if (finished.hiddenSourceEl) finished.hiddenSourceEl.style.visibility = '';
+  dragReveal.value = null;
 
   void (async () => {
     try {

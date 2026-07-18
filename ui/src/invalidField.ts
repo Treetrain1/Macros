@@ -1,7 +1,7 @@
 import { state } from './store';
 import type { ValueLocationDto } from './types';
 
-function locationsEqual(a: ValueLocationDto, b: ValueLocationDto): boolean {
+export function locationsEqual(a: ValueLocationDto, b: ValueLocationDto): boolean {
   if (a.kind !== b.kind) return false;
   if (a.path.length !== b.path.length || !a.path.every((p, i) => p === b.path[i])) return false;
   if (a.kind === 'Field' && b.kind === 'Field') {

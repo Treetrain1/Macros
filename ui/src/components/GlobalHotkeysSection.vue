@@ -11,6 +11,13 @@ function bindingFor(type: NamedActionType) {
 function isCapturing(type: NamedActionType) {
   return state.combo_capture?.kind === 'Named' && state.combo_capture.action?.type === type;
 }
+function defaultDisplayFor(type: NamedActionType) {
+  return state.named_hotkey_defaults.find(d => d.action.type === type)?.combo_display ?? null;
+}
+function isAtDefault(type: NamedActionType) {
+  const def = defaultDisplayFor(type);
+  return def == null || bindingFor(type)?.combo_display === def;
+}
 </script>
 
 <template>
@@ -31,7 +38,7 @@ function isCapturing(type: NamedActionType) {
           {{ isCapturing(type) ? (NO_COMBO_ACTIONS.has(type) ? 'Press a key…' : 'Press combo…') : (bindingFor(type)?.combo_display ?? 'Not set') }}
         </button>
         <button
-          v-show="!isCapturing(type) && bindingFor(type)?.combo_display != null"
+          v-show="!isCapturing(type) && !isAtDefault(type)"
           @click="resetHotkeyToDefault({ type })"
         >Default</button>
         <AppButton

@@ -135,6 +135,7 @@ pub(crate) struct StateDto {
     pub(crate) page: String,
     pub(crate) combo_capture: Option<ComboCaptureDto>,
     pub(crate) hotkey_bindings: Vec<HotkeyBindingDto>,
+    pub(crate) named_hotkey_defaults: Vec<NamedHotkeyDefaultDto>,
     pub(crate) pending_macro_hotkey: Option<PendingMacroHotkeyDto>,
     pub(crate) invalid_field_buffers: Vec<InvalidFieldDto>,
     pub(crate) ipc_port_text: String,
@@ -209,6 +210,12 @@ pub(crate) struct HotkeyBindingDto {
     pub(crate) action: HotkeyActionDto,
     pub(crate) combo_display: String,
     pub(crate) macro_name: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct NamedHotkeyDefaultDto {
+    pub(crate) action: HotkeyActionDto,
+    pub(crate) combo_display: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -428,6 +435,24 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         }
     }).collect();
 
+    const NAMED_HOTKEY_ACTIONS: [HotkeyAction; 9] = [
+        HotkeyAction::RunMacro,
+        HotkeyAction::StopLoop,
+        HotkeyAction::NextMacro,
+        HotkeyAction::PrevMacro,
+        HotkeyAction::ToggleLoop,
+        HotkeyAction::StartRecordingImmediate,
+        HotkeyAction::StopRecording,
+        HotkeyAction::Undo,
+        HotkeyAction::Redo,
+    ];
+    let named_hotkey_defaults: Vec<NamedHotkeyDefaultDto> = NAMED_HOTKEY_ACTIONS.iter().map(|action| {
+        NamedHotkeyDefaultDto {
+            action: hotkey_action_to_dto(action),
+            combo_display: crate::config::default_combo_for_action(action).map(|c| c.format()),
+        }
+    }).collect();
+
     let pending_macro_hotkey = s.pending_macro_hotkey.as_ref().map(|(idx, combo)| PendingMacroHotkeyDto {
         macro_index: *idx,
         combo_display: combo.as_ref().map(|c| c.format()),
@@ -480,6 +505,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         page: match s.page { Page::Main => "Main".to_string(), Page::Settings => "Settings".to_string() },
         combo_capture,
         hotkey_bindings,
+        named_hotkey_defaults,
         pending_macro_hotkey,
         invalid_field_buffers,
         ipc_port_text: s.ipc_port_text.clone(),

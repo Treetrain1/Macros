@@ -65,6 +65,11 @@ export interface HotkeyBindingDto {
   macro_name: string | null;
 }
 
+export interface NamedHotkeyDefaultDto {
+  action: HotkeyActionDto;
+  combo_display: string | null;
+}
+
 export interface ComboCaptureDto {
   kind: 'Named' | 'Pending';
   action: HotkeyActionDto | null;
@@ -121,6 +126,7 @@ export interface StateDto {
   page: PageName;
   combo_capture: ComboCaptureDto | null;
   hotkey_bindings: HotkeyBindingDto[];
+  named_hotkey_defaults: NamedHotkeyDefaultDto[];
   pending_macro_hotkey: PendingMacroHotkeyDto | null;
   invalid_field_buffers: InvalidFieldDto[];
   ipc_port_text: string;
@@ -153,6 +159,7 @@ export function emptyState(): StateDto {
     page: 'Main',
     combo_capture: null,
     hotkey_bindings: [],
+    named_hotkey_defaults: [],
     pending_macro_hotkey: null,
     invalid_field_buffers: [],
     ipc_port_text: '',

@@ -27,8 +27,8 @@ import type { ValueDto, ValueKind, ValueLocationDto } from './types';
 // unremarkable native content. ValueBlock.vue's `boxed` consults this so a
 // dropped-in leaf keeps its `.value-card-shape` capsule look (and stays
 // pickup-draggable) instead of flattening into a bare input like an
-// ordinary field. A BinaryOp doesn't need an entry (already boxed by kind),
-// but dropping one over a previously-marked location still clears the mark
+// ordinary field. A BinaryOp/Join doesn't need an entry (already boxed by
+// kind), but dropping one over a previously-marked location still clears the mark
 // via markOrUnmark below, so a stale entry can't linger under new content.
 // Purely a frontend affordance — not persisted, so it won't survive a
 // reload or reflect an undo/redo that changes a slot's content underneath it.
@@ -157,7 +157,7 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
       candidate.anchorEl.style.visibility = 'hidden';
       hiddenAnchorEl = candidate.anchorEl;
     } else {
-      dragReveal.value = { location, value: value.kind === 'BinaryOp' ? value.saved : numberValue(0) };
+      dragReveal.value = { location, value: value.kind === 'BinaryOp' || value.kind === 'Join' ? value.saved : numberValue(0) };
     }
   }
 

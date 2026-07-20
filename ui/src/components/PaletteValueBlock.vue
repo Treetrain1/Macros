@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// A sidebar "prefab" for a value block (Number/Text literal, or an
-// Add/Sub/Mul/Div/Random operator) — same boxed .value-card-shape appearance a real
+// A sidebar "prefab" for a value block (Number/Text literal, an
+// Add/Sub/Mul/Div/Random operator, or a Join/Join3 text-concatenation
+// operator) — same boxed .value-card-shape appearance a real
 // floating/operator ValueBlock gets (see ValueBlock.vue's `boxed` comment).
 // Editable in place via paletteState.ts, but — like PaletteInstructionBlock —
 // never recurses and never registers as a value-drop target, so nothing
@@ -8,7 +9,7 @@
 // whole sidebar already refuses value drops outright (isOverSidebar in
 // canvasDrag.ts), so this simply never opts into that machinery.
 import type { ValueKind } from '../types';
-import { paletteNumber, paletteOperators, paletteText } from '../paletteState';
+import { paletteJoins, paletteNumber, paletteOperators, paletteText } from '../paletteState';
 import { beginValuePaletteDrag } from '../valueDrag';
 import AutosizeInput from './AutosizeInput.vue';
 
@@ -21,6 +22,10 @@ const OP_LABELS: Record<string, { prefix?: string; infix: string }> = {
   Div: { infix: '/' },
   Random: { prefix: 'pick random from', infix: 'to' },
 };
+
+function isJoinKind(kind: ValueKind): kind is 'Join' | 'Join3' {
+  return kind === 'Join' || kind === 'Join3';
+}
 
 function onPointerDown(e: PointerEvent) {
   if ((e.target as Element | null)?.closest?.('input')) return;
@@ -35,9 +40,13 @@ function onTextInput(v: string) {
   paletteText.value = v;
 }
 function onOperandInput(side: 'lhs' | 'rhs', kind: ValueKind, v: string) {
-  if (kind === 'Number' || kind === 'Text') return;
+  if (kind === 'Number' || kind === 'Text' || isJoinKind(kind)) return;
   const n = Number(v);
   if (v.trim() !== '' && !isNaN(n)) paletteOperators[kind][side] = n;
+}
+function onJoinArgInput(kind: ValueKind, index: number, v: string) {
+  if (!isJoinKind(kind)) return;
+  paletteJoins[kind][index] = v;
 }
 </script>
 
@@ -48,6 +57,17 @@ function onOperandInput(side: 'lhs' | 'rhs', kind: ValueKind, v: string) {
     </template>
     <template v-else-if="kind === 'Text'">
       <AutosizeInput :model-value="paletteText.value" :min-chars="4" placeholder="text" @update:model-value="onTextInput" />
+    </template>
+    <template v-else-if="isJoinKind(kind)">
+      <span class="value-op">join</span>
+      <AutosizeInput
+        v-for="(arg, i) in paletteJoins[kind]"
+        :key="i"
+        :model-value="arg"
+        :min-chars="4"
+        placeholder="text"
+        @update:model-value="v => onJoinArgInput(kind, i, v)"
+      />
     </template>
     <template v-else>
       <span v-if="OP_LABELS[kind].prefix" class="value-op">{{ OP_LABELS[kind].prefix }}</span>

@@ -17,22 +17,28 @@ pub(crate) enum Op {
 }
 
 /// A small recursive expression tree backing a numeric instruction field —
-/// either a number, a piece of text, or an operator applied to two nested
-/// `Value`s (e.g. `5 + 3`). Groundwork for a future macro-wide variable
-/// system: today only `Instruction::Wait` and the `MoveMouse`/`Scroll`
-/// tokens embed one, always evaluated back down to a number via
-/// [`Value::eval_number`].
+/// either a number, a piece of text, an operator applied to two nested
+/// `Value`s (e.g. `5 + 3`), or a `Join` concatenating 2-3 nested `Value`s as
+/// text. Groundwork for a future macro-wide variable system: today only
+/// `Instruction::Wait` and the `MoveMouse`/`Scroll` tokens embed one, always
+/// evaluated back down to a number via [`Value::eval_number`]; `Instruction`'s
+/// `Text` token embeds one evaluated to a string via [`Value::eval_text`].
 ///
-/// `BinaryOp::saved` is the value the operator displaced when it took over
-/// the slot — not one of the operator's operands, and not addressable via
-/// `get_mut`'s path. It just rides along so the UI can restore it verbatim
-/// if the operator is later dragged back out of the slot.
+/// `BinaryOp::saved`/`Join::saved` is the value the operator displaced when
+/// it took over the slot — not one of the operator's operands, and not
+/// addressable via `get_mut`'s path. It just rides along so the UI can
+/// restore it verbatim if the operator is later dragged back out of the slot.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub(crate) enum Value {
     Number { value: f64 },
     Text { value: String },
     BinaryOp { op: Op, lhs: Box<Value>, rhs: Box<Value>, saved: Box<Value> },
+    /// Concatenates `args` (2 or 3 of them, depending on which palette entry
+    /// it was dropped from — `Join` vs `Join3`) as text. No `Op` of its own:
+    /// unlike `BinaryOp`, there's only one thing a `Join` block does, so
+    /// there's nothing to discriminate on beyond `args.len()`.
+    Join { args: Vec<Value>, saved: Box<Value> },
 }
 
 /// The result of evaluating a [`Value`] tree — still either a number or
@@ -88,6 +94,13 @@ impl Value {
                 };
                 Ok(Evaluated::Number(result))
             }
+            Value::Join { args, .. } => {
+                let mut s = String::new();
+                for a in args {
+                    s.push_str(&a.eval_text()?);
+                }
+                Ok(Evaluated::Text(s))
+            }
         }
     }
 
@@ -98,9 +111,9 @@ impl Value {
     }
 
     /// Evaluates the tree down to a string — the entry point the `Text`
-    /// instruction token calls. A `Text` leaf passes through verbatim; a
-    /// `Number` leaf or a `BinaryOp` result (always numeric, even for
-    /// `Op::Random`) gets stringified.
+    /// instruction token calls. A `Text` leaf or a `Join` result passes
+    /// through verbatim; a `Number` leaf or a `BinaryOp` result (always
+    /// numeric, even for `Op::Random`) gets stringified.
     pub(crate) fn eval_text(&self) -> Result<String, String> {
         Ok(match self.eval()? {
             Evaluated::Text(s) => s,
@@ -109,19 +122,20 @@ impl Value {
     }
 
     /// Walks `path` (`0` steps into `lhs`, `1` into `rhs` at each
-    /// `BinaryOp`) down to the addressed node; an empty path returns `self`.
+    /// `BinaryOp`; `n` steps into `args[n]` at each `Join`) down to the
+    /// addressed node; an empty path returns `self`.
     pub(crate) fn get_mut(&mut self, path: &[u8]) -> Option<&mut Value> {
         match path.split_first() {
             None => Some(self),
-            Some((0, rest)) => match self {
-                Value::BinaryOp { lhs, .. } => lhs.get_mut(rest),
+            Some((&step, rest)) => match self {
+                Value::BinaryOp { lhs, rhs, .. } => match step {
+                    0 => lhs.get_mut(rest),
+                    1 => rhs.get_mut(rest),
+                    _ => None,
+                },
+                Value::Join { args, .. } => args.get_mut(step as usize)?.get_mut(rest),
                 _ => None,
             },
-            Some((1, rest)) => match self {
-                Value::BinaryOp { rhs, .. } => rhs.get_mut(rest),
-                _ => None,
-            },
-            Some(_) => None,
         }
     }
 }
@@ -144,6 +158,11 @@ impl std::hash::Hash for Value {
                 op.hash(state);
                 lhs.hash(state);
                 rhs.hash(state);
+                saved.hash(state);
+            }
+            Value::Join { args, saved } => {
+                3u8.hash(state);
+                args.hash(state);
                 saved.hash(state);
             }
         }
@@ -178,6 +197,11 @@ impl<'de> Deserialize<'de> for Value {
                 #[serde(default = "default_saved")]
                 saved: Box<Value>,
             },
+            Join {
+                args: Vec<Value>,
+                #[serde(default = "default_saved")]
+                saved: Box<Value>,
+            },
         }
 
         #[derive(Deserialize)]
@@ -197,6 +221,7 @@ impl<'de> Deserialize<'de> for Value {
             ValueDe::Current(Tagged::Number { value }) => Value::Number { value },
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
             ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs, saved }) => Value::BinaryOp { op, lhs, rhs, saved },
+            ValueDe::Current(Tagged::Join { args, saved }) => Value::Join { args, saved },
         })
     }
 }
@@ -353,5 +378,44 @@ mod tests {
         assert_eq!(v.get_mut(&[1, 0]), Some(&mut Value::number(2.0)));
         assert_eq!(v.get_mut(&[0]), Some(&mut Value::number(1.0)));
         assert_eq!(v.get_mut(&[5]), None);
+    }
+
+    #[test]
+    fn eval_text_joins_two_args() {
+        let v = Value::Join {
+            args: vec![Value::Text { value: "foo".into() }, Value::Text { value: "bar".into() }],
+            saved: Box::new(Value::number(0.0)),
+        };
+        assert_eq!(v.eval_text(), Ok("foobar".to_string()));
+    }
+
+    #[test]
+    fn eval_text_joins_three_args_and_stringifies_numbers() {
+        let v = Value::Join {
+            args: vec![Value::Text { value: "a".into() }, Value::number(2.0), Value::Text { value: "c".into() }],
+            saved: Box::new(Value::number(0.0)),
+        };
+        assert_eq!(v.eval_text(), Ok("a2c".to_string()));
+    }
+
+    #[test]
+    fn get_mut_walks_join_args() {
+        let mut v = Value::Join {
+            args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }, Value::Text { value: "c".into() }],
+            saved: Box::new(Value::number(0.0)),
+        };
+        assert_eq!(v.get_mut(&[2]), Some(&mut Value::Text { value: "c".into() }));
+        assert_eq!(v.get_mut(&[3]), None);
+    }
+
+    #[test]
+    fn join_tagged_shape_round_trips() {
+        let v = Value::Join {
+            args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
+            saved: Box::new(Value::number(0.0)),
+        };
+        let json = serde_json::to_string(&v).unwrap();
+        let back: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v, back);
     }
 }

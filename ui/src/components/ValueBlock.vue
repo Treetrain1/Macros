@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Recursive renderer for a `ValueDto` expression tree — a number, a piece of
-// text, or an operator block combining two nested `ValueBlock`s (rendered as
+// text, an operator block combining two nested `ValueBlock`s (rendered as
 // `lhs op rhs`, no parens — or `prefix lhs infix rhs` for word-phrase
-// operators like Random, see OP_LABELS below). An operator node, a leaf
+// operators like Random, see OP_LABELS below), or a `Join` block combining
+// 2-3 nested `ValueBlock`s (rendered as `join arg1 arg2[ arg3]`). An operator node, a leaf
 // parked at the root of a `Floating` location (a standalone canvas block
 // with nothing else to grab it by), or a leaf that landed in its slot by
 // being dropped there as its own block (tracked ephemerally by
@@ -53,6 +54,7 @@ const buf = computed(() => (displayValue.value.kind === 'Number' ? getInvalidTex
 
 const boxed = computed(() =>
   displayValue.value.kind === 'BinaryOp' ||
+  displayValue.value.kind === 'Join' ||
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
@@ -89,6 +91,12 @@ function onPointerDown(e: PointerEvent) {
       <ValueBlock :location="childLocation(0)" :value="displayValue.lhs" />
       <span class="value-op">{{ OP_LABELS[displayValue.op].infix }}</span>
       <ValueBlock :location="childLocation(1)" :value="displayValue.rhs" />
+    </template>
+    <template v-else-if="displayValue.kind === 'Join'">
+      <span class="value-op">join</span>
+      <template v-for="(arg, i) in displayValue.args" :key="i">
+        <ValueBlock :location="childLocation(i)" :value="arg" />
+      </template>
     </template>
     <template v-else>
       <AutosizeInput

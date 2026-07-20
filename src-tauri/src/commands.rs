@@ -432,6 +432,23 @@ fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
                 },
             };
         }
+        "Join" | "Join3" => {
+            let arity = if kind == "Join" { 2 } else { 3 };
+            let existing = std::mem::replace(node, Value::number(0.0));
+            *node = match existing {
+                // Swapping arity keeps as many existing args as fit, padding
+                // any new slots with empty text — same "don't lose work"
+                // spirit as swapping between arithmetic ops above.
+                Value::Join { mut args, saved } => {
+                    args.resize_with(arity, || Value::Text { value: String::new() });
+                    Value::Join { args, saved }
+                }
+                other => Value::Join {
+                    args: std::iter::repeat_with(|| Value::Text { value: String::new() }).take(arity).collect(),
+                    saved: Box::new(other),
+                },
+            };
+        }
         _ => return Err(format!("Unknown value kind: {kind}")),
     }
     Ok(())
@@ -530,7 +547,7 @@ pub(crate) fn take_value<R: Runtime>(
         }
         let node = resolve_location_mut(mac, &loc)?;
         let restored = match &*node {
-            Value::BinaryOp { saved, .. } => (**saved).clone(),
+            Value::BinaryOp { saved, .. } | Value::Join { saved, .. } => (**saved).clone(),
             _ => Value::number(0.0),
         };
         Some(std::mem::replace(node, restored))
@@ -562,7 +579,7 @@ pub(crate) fn put_value<R: Runtime>(
     if let Some(mac) = &mut s.current_macro {
         if let Some(node) = resolve_location_mut(mac, &loc) {
             let mut incoming = dto_to_value(&value);
-            if let Value::BinaryOp { saved, .. } = &mut incoming {
+            if let Value::BinaryOp { saved, .. } | Value::Join { saved, .. } = &mut incoming {
                 *saved = Box::new(node.clone());
             }
             *node = incoming;
@@ -1731,6 +1748,55 @@ mod value_location_tests {
     fn apply_value_kind_rejects_unknown_kind() {
         let mut node = Value::number(0.0);
         assert!(apply_value_kind(&mut node, "Bogus").is_err());
+    }
+
+    #[test]
+    fn apply_value_kind_join_tucks_leaf_away_as_saved() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Join").unwrap();
+        assert_eq!(
+            node,
+            Value::Join {
+                args: vec![Value::Text { value: String::new() }, Value::Text { value: String::new() }],
+                saved: Box::new(Value::number(5.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn apply_value_kind_join3_grows_existing_join_args() {
+        let mut node = Value::Join {
+            args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
+            saved: Box::new(Value::number(9.0)),
+        };
+        apply_value_kind(&mut node, "Join3").unwrap();
+        assert_eq!(
+            node,
+            Value::Join {
+                args: vec![
+                    Value::Text { value: "a".into() },
+                    Value::Text { value: "b".into() },
+                    Value::Text { value: String::new() },
+                ],
+                saved: Box::new(Value::number(9.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn apply_value_kind_join_shrinks_existing_join3_args() {
+        let mut node = Value::Join {
+            args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }, Value::Text { value: "c".into() }],
+            saved: Box::new(Value::number(0.0)),
+        };
+        apply_value_kind(&mut node, "Join").unwrap();
+        assert_eq!(
+            node,
+            Value::Join {
+                args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
+                saved: Box::new(Value::number(0.0)),
+            }
+        );
     }
 
     #[test]

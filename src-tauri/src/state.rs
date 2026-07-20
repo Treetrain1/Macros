@@ -186,6 +186,7 @@ pub(crate) enum ValueDto {
     Number { value: f64 },
     Text { value: String },
     BinaryOp { op: String, lhs: Box<ValueDto>, rhs: Box<ValueDto>, saved: Box<ValueDto> },
+    Join { args: Vec<ValueDto>, saved: Box<ValueDto> },
 }
 
 #[derive(Serialize, Clone)]
@@ -438,6 +439,9 @@ pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
             rhs: Box::new(value_to_dto(rhs)),
             saved: Box::new(value_to_dto(saved)),
         },
+        Value::Join { args, saved } => {
+            ValueDto::Join { args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
+        }
     }
 }
 
@@ -451,6 +455,9 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
             rhs: Box::new(dto_to_value(rhs)),
             saved: Box::new(dto_to_value(saved)),
         },
+        ValueDto::Join { args, saved } => {
+            Value::Join { args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
+        }
     }
 }
 

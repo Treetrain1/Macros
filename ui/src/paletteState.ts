@@ -8,7 +8,7 @@
 // canvas when it's dragged out — see clonePaletteInstruction/paletteValueFor,
 // consumed by canvasDrag.ts and valueDrag.ts at drop time.
 import { reactive } from 'vue';
-import { defaultInstruction, defaultValueForKind, numberValue } from './types';
+import { defaultInstruction, defaultValueForKind, numberValue, textValue } from './types';
 import type { InstructionDto, InstructionType, ValueDto, ValueKind } from './types';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
@@ -50,12 +50,30 @@ const textSeed = defaultValueForKind('Text');
 export const paletteNumber = reactive({ value: numberSeed.kind === 'Number' ? numberSeed.value : 0 });
 export const paletteText = reactive({ value: textSeed.kind === 'Text' ? textSeed.value : '' });
 
+type JoinKind = Extract<ValueKind, 'Join' | 'Join3'>;
+const JOIN_ARITY: Record<JoinKind, number> = { Join: 2, Join3: 3 };
+
+function joinArgsFor(kind: JoinKind): string[] {
+  const seed = defaultValueForKind(kind);
+  return seed.kind === 'Join' ? seed.args.map(a => (a.kind === 'Text' ? a.value : '')) : [];
+}
+
+// Join/Join3 prefabs each carry their own editable list of text args (2 or 3
+// of them) — same "no nesting support in the palette" reasoning as
+// paletteOperators above.
+export const paletteJoins: Record<JoinKind, string[]> = reactive(
+  Object.fromEntries((Object.keys(JOIN_ARITY) as JoinKind[]).map(k => [k, joinArgsFor(k)])) as Record<JoinKind, string[]>,
+);
+
 /** The full ValueDto a value-palette entry currently represents, built from
  * its live edited state — what actually lands on the canvas (as a floating
  * value or dropped into a field) when that entry is dragged out. */
 export function paletteValueFor(kind: ValueKind): ValueDto {
   if (kind === 'Number') return numberValue(paletteNumber.value);
   if (kind === 'Text') return { kind: 'Text', value: paletteText.value };
+  if (kind === 'Join' || kind === 'Join3') {
+    return { kind: 'Join', args: paletteJoins[kind].map(textValue), saved: numberValue(0) };
+  }
   const { lhs, rhs } = paletteOperators[kind];
   return { kind: 'BinaryOp', op: kind, lhs: numberValue(lhs), rhs: numberValue(rhs), saved: numberValue(0) };
 }

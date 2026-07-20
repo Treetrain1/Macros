@@ -7,7 +7,8 @@ use crate::recording;
 use crate::state::{
     build_state_dto, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
     value_to_dto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, MacroSnapshot, Page,
-    RecordingPhase, SharedState, StateDto, UpdateCheckState, ValueDto, ValueLocation, ValueLocationDto,
+    RecordingPhase, SharedState, StateDto, TextEditSession, UpdateCheckState, ValueDto, ValueLocation,
+    ValueLocationDto,
 };
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -20,6 +21,9 @@ const REMOVE_CONFIRM_TIMEOUT_SECS: u64 = 3;
 const UNDO_STACK_LIMIT: usize = 50;
 
 fn push_undo(s: &mut crate::state::AppState) {
+    // Any mutation other than a continuing keystroke ends the current text-
+    // edit group, so the next keystroke there (if any) starts a fresh one.
+    s.text_edit_session = None;
     if let Some(mac) = &s.current_macro {
         if s.undo_stack.len() >= UNDO_STACK_LIMIT {
             s.undo_stack.remove(0);
@@ -88,6 +92,7 @@ pub(crate) fn select_macro<R: Runtime>(state: State<SharedState>, app: tauri::Ap
     s.undo_stack.clear();
     s.redo_stack.clear();
     s.invalid_field_buffers.clear();
+    s.text_edit_session = None;
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -312,6 +317,16 @@ pub(crate) fn edit_instruction<R: Runtime>(
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
+    // `Command`/`Comment` are freeform text, edited keystroke-by-keystroke —
+    // coalesce those into one undo group like `edit_value_field` does. Every
+    // other instruction kind here is a discrete dropdown pick, so it always
+    // gets its own undo step.
+    let session = matches!(ins, Instruction::Command(_) | Instruction::Comment(_))
+        .then(|| TextEditSession::Instruction { strand_id: strand_id.clone(), index });
+    if s.text_edit_session != session || session.is_none() {
+        push_undo(&mut s);
+    }
+    s.text_edit_session = session;
     if let Some(mac) = &mut s.current_macro {
         if let Some(strand) = mac.strand_mut(&strand_id) {
             if index < strand.instructions.len() {
@@ -431,6 +446,14 @@ pub(crate) fn edit_value_field<R: Runtime>(
 ) -> Result<(), String> {
     let loc = location.to_location()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    // Coalesce a run of keystrokes into this field into a single undo step —
+    // only the first keystroke of a session (or the first after some other
+    // edit interrupts it, per `push_undo`) opens a new one.
+    let session = Some(TextEditSession::Value(loc.clone()));
+    if s.text_edit_session != session {
+        push_undo(&mut s);
+    }
+    s.text_edit_session = session;
     if let Some(mac) = &mut s.current_macro {
         if let Some(node) = resolve_location_mut(mac, &loc) {
             if matches!(node, Value::Text { .. }) {
@@ -549,44 +572,6 @@ pub(crate) fn put_value<R: Runtime>(
     auto_save(&s);
     emit_state_updated(&app, &s);
     Ok(())
-}
-
-/// Overwrites the node at `location` with `value` in place, atomically
-/// returning whatever it displaced — the "eject a boxed target" half of
-/// dropping a block onto an existing operator/capsule/floating card (see
-/// `apply_value_kind`'s sibling logic in the frontend's valueDrag.ts). Unlike
-/// `take_value` followed by `put_value`, this never removes a `Floating`
-/// location's root entry from `floating_values` — a `Floating` `path: []`
-/// target keeps its id/x/y and just gets new content, which a plain
-/// `take_value` (whose whole-card-removal special case exists for *picking a
-/// floating card up*, not for replacing what's parked at one) would have
-/// deleted out from under the follow-up `put_value`.
-#[tauri::command]
-pub(crate) fn swap_value<R: Runtime>(
-    state: State<SharedState>,
-    app: tauri::AppHandle<R>,
-    location: ValueLocationDto,
-    value: ValueDto,
-) -> Result<ValueDto, String> {
-    let loc = location.to_location()?;
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    push_undo(&mut s);
-    let old = (|| {
-        let mac = s.current_macro.as_mut()?;
-        let node = resolve_location_mut(mac, &loc)?;
-        let mut incoming = dto_to_value(&value);
-        if let Value::BinaryOp { saved, .. } = &mut incoming {
-            *saved = Box::new(node.clone());
-        }
-        Some(std::mem::replace(node, incoming))
-    })();
-    prune_value_buffers(&mut s.invalid_field_buffers, &loc);
-    auto_save(&s);
-    emit_state_updated(&app, &s);
-    match old {
-        Some(v) => Ok(value_to_dto(&v)),
-        None => Err("Nothing to swap at that location".to_string()),
-    }
 }
 
 /// Creates a new value block parked on open canvas — used both for a fresh
@@ -809,6 +794,11 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
+        // The snapshot just popped was the one a resumed edit would've
+        // coalesced into — without this, the next keystroke into the same
+        // field would see a "continuing" session and skip pushing a new
+        // undo step, making the just-undone state itself un-undo-able.
+        s.text_edit_session = None;
         auto_save(&s);
     }
     emit_state_updated(app, &s);
@@ -828,6 +818,7 @@ fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
+        s.text_edit_session = None;
         auto_save(&s);
     }
     emit_state_updated(app, &s);

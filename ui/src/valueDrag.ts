@@ -15,7 +15,7 @@
 import { ref } from 'vue';
 import { state } from './store';
 import { capturePointer, clientToCanvas, getCanvasZoom, isOverSidebar, setSidebarArmed } from './canvasDrag';
-import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, swapValue, takeValue } from './tauri';
+import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
 import { numberValue } from './types';
 import { locationsEqual } from './invalidField';
@@ -290,27 +290,34 @@ function onPointerUp(e: PointerEvent) {
           unmarkCapsule(finished.source.location);
         }
 
-        // A boxed target (an operator, a floating card, or a leaf capsule
-        // dropped in earlier — see `boxed` in ValueBlock.vue) is a real block
-        // someone placed there on purpose, so replacing it shouldn't just
-        // quietly disappear it into the incoming operator's `saved` — swap it
-        // out and eject it as its own floating card next to the target
-        // instead, so it visibly reads as "moved aside" rather than deleted.
-        // swapValue rather than take_value+put_value: take_value's
-        // whole-card-removal special case for a `Floating` root (correct
-        // when *picking a floating card up*) would otherwise delete the
-        // target's entry out from under the follow-up put_value, leaving
-        // nowhere for `incoming` to land. An unboxed target is just ordinary
-        // field content (typed in, not dragged in), so it keeps the plain
-        // put_value-absorbs-the-old-value behavior. Read the class off the
-        // live element rather than the value tree — there's no frontend
-        // helper to resolve an arbitrary location to its current ValueDto,
-        // and the rendered class already reflects exactly the same `boxed`
-        // check we'd otherwise have to duplicate.
-        if (targetEl.classList.contains('value-card-shape')) {
+        // A floating card's root is just a positioned container holding one
+        // value, not "a block someone placed there on purpose" the way an
+        // operator embedded in a field is — it's the slot itself, there's no
+        // separate outer thing to keep distinct from what's inside it. So
+        // dropping onto one always swaps its content in place via put_value
+        // (old content tucked away as the incoming operator's `saved`,
+        // exactly like any other unboxed slot) rather than ejecting the old
+        // value as a separate stray card next to it; the card keeps its
+        // id/x/y throughout.
+        const isFloatingRoot = targetLoc.kind === 'Floating' && targetLoc.path.length === 0;
+
+        // A boxed *field* target (an operator, or a leaf capsule dropped in
+        // earlier — see `boxed` in ValueBlock.vue) is a real block someone
+        // placed there on purpose, so replacing it shouldn't just quietly
+        // disappear it into the incoming operator's `saved` — take it out
+        // and eject it as its own floating card next to the field first, so
+        // it visibly reads as "moved aside" rather than deleted. An unboxed
+        // target is just ordinary field content (typed in, not dragged in),
+        // so it keeps the plain put_value-absorbs-the-old-value behavior.
+        // Read the class off the live element rather than the value tree —
+        // there's no frontend helper to resolve an arbitrary location to its
+        // current ValueDto, and the rendered class already reflects exactly
+        // the same `boxed` check we'd otherwise have to duplicate.
+        if (!isFloatingRoot && targetEl.classList.contains('value-card-shape')) {
           const r = targetEl.getBoundingClientRect();
           const [x, y] = clientToCanvas(r.right + 16, r.top);
-          const displaced = await swapValue(targetLoc, incoming);
+          const displaced = await takeValue(targetLoc);
+          await putValue(targetLoc, incoming);
           markOrUnmark(targetLoc, incoming);
           await createFloatingValue(x, y, displaced);
         } else {

@@ -18,7 +18,7 @@ const OP_LABELS: Record<string, { prefix?: string; infix: string }> = {
   Add: { infix: '+' },
   Sub: { infix: '−' },
   Mul: { infix: '×' },
-  Div: { infix: '÷' },
+  Div: { infix: '/' },
   Random: { prefix: 'pick random from', infix: 'to' },
 };
 

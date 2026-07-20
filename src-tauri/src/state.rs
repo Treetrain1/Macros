@@ -106,6 +106,7 @@ pub(crate) struct AppState {
     pub(crate) key_capture: Option<(String, usize)>,
     pub(crate) undo_stack: Vec<MacroSnapshot>,
     pub(crate) redo_stack: Vec<MacroSnapshot>,
+    pub(crate) text_edit_session: Option<TextEditSession>,
     pub(crate) recording_phase: RecordingPhase,
     pub(crate) recording_countdown_generation: u64,
     pub(crate) record_mouse_relative: bool,
@@ -235,6 +236,17 @@ impl ValueLocation {
             ValueLocation::Floating { .. } => None,
         }
     }
+}
+
+/// Identifies the field currently being typed into, so `commands::push_undo`
+/// can be skipped for keystrokes that continue an edit already in progress —
+/// otherwise every keystroke would land its own undo step. Any other
+/// mutation (a fresh field, a drag, an undo/redo, …) resets this to `None`
+/// via `push_undo`, so the next keystroke there starts a new group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TextEditSession {
+    Value(ValueLocation),
+    Instruction { strand_id: String, index: usize },
 }
 
 /// Wire shape for `ValueLocation` — received from the frontend as command

@@ -1774,6 +1774,31 @@ mod value_location_tests {
     }
 
     #[test]
+    fn apply_value_kind_new_line_tucks_leaf_away_as_saved_with_no_args() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "NewLine").unwrap();
+        assert_eq!(node, Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(5.0)) });
+    }
+
+    #[test]
+    fn apply_value_kind_tab_tucks_leaf_away_as_saved_with_no_args() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Tab").unwrap();
+        assert_eq!(node, Value::Op { op: Op::Tab, args: vec![], saved: Box::new(Value::number(5.0)) });
+    }
+
+    #[test]
+    fn apply_value_kind_swapping_join_to_new_line_drops_args() {
+        let mut node = Value::Op {
+            op: Op::Join,
+            args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
+            saved: Box::new(Value::number(9.0)),
+        };
+        apply_value_kind(&mut node, "NewLine").unwrap();
+        assert_eq!(node, Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(9.0)) });
+    }
+
+    #[test]
     fn prune_value_buffers_drops_only_descendants_of_changed_path() {
         let mut buffers: HashMap<ValueLocation, String> = HashMap::new();
         let field = |path: Vec<u8>| ValueLocation::Field { strand_id: "s1".into(), index: 1, field_id: FieldId::WaitDuration, path };

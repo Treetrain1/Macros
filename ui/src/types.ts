@@ -11,7 +11,7 @@ export type ScrollAxis = 'Vertical' | 'Horizontal';
 // either a number, a piece of text, or an operator applied to its nested
 // `args` (e.g. `(5) + (3)`, or `join "a" "b"`). Mirrors
 // src-tauri/src/state.rs's ValueDto.
-export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random' | 'Join';
+export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random' | 'Join' | 'NewLine' | 'Tab';
 // 'Join'/'Join3' are two distinct palette entries (2 vs 3 args) that both
 // produce an `{ kind: 'Op', op: 'Join', ... }` ValueDto — there's no `Join3`
 // on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.

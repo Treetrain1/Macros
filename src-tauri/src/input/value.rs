@@ -1,8 +1,9 @@
 use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Operator for a [`Value::Op`] block — arithmetic, [`Op::Random`], or
-/// [`Op::Join`] (text concatenation).
+/// Operator for a [`Value::Op`] block — arithmetic, [`Op::Random`],
+/// [`Op::Join`] (text concatenation), or a zero-arity text constant
+/// (`Op::NewLine`, `Op::Tab`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Op {
     Add,
@@ -19,6 +20,10 @@ pub(crate) enum Op {
     /// operator today (2 or 3 args, depending on which palette entry it was
     /// dropped from; see `OPERATOR_KINDS`'s `"Join"`/`"Join3"` rows).
     Join,
+    /// Zero-arity text constants — `args` is always empty. `eval` ignores
+    /// `args` entirely for these.
+    NewLine,
+    Tab,
 }
 
 /// A small recursive expression tree backing a numeric instruction field —
@@ -82,6 +87,9 @@ pub(crate) const OPERATOR_KINDS: &[OperatorKindSpec] = &[
     OperatorKindSpec { kind: "Random", op: Op::Random, arity: 2, default_arg: || Value::number(0.0) },
     OperatorKindSpec { kind: "Join", op: Op::Join, arity: 2, default_arg: || Value::Text { value: String::new() } },
     OperatorKindSpec { kind: "Join3", op: Op::Join, arity: 3, default_arg: || Value::Text { value: String::new() } },
+    // `default_arg` is unused for these — arity 0 means it's never called.
+    OperatorKindSpec { kind: "NewLine", op: Op::NewLine, arity: 0, default_arg: || Value::Text { value: String::new() } },
+    OperatorKindSpec { kind: "Tab", op: Op::Tab, arity: 0, default_arg: || Value::Text { value: String::new() } },
 ];
 
 impl Value {
@@ -100,6 +108,8 @@ impl Value {
                 }
                 Ok(Evaluated::Text(s))
             }
+            Value::Op { op: Op::NewLine, .. } => Ok(Evaluated::Text("\n".to_string())),
+            Value::Op { op: Op::Tab, .. } => Ok(Evaluated::Text("\t".to_string())),
             Value::Op { op, args, .. } => {
                 let l = args[0].eval()?.as_number()?;
                 let r = args[1].eval()?.as_number()?;
@@ -121,7 +131,7 @@ impl Value {
                             rand::rng().random_range(lo..=hi)
                         }
                     }
-                    Op::Join => unreachable!("Op::Join matched above"),
+                    Op::Join | Op::NewLine | Op::Tab => unreachable!("matched above"),
                 };
                 Ok(Evaluated::Number(result))
             }
@@ -135,9 +145,10 @@ impl Value {
     }
 
     /// Evaluates the tree down to a string — the entry point the `Text`
-    /// instruction token calls. A `Text` leaf or an `Op::Join` result passes
-    /// through verbatim; a `Number` leaf or another `Op` result (always
-    /// numeric, even for `Op::Random`) gets stringified.
+    /// instruction token calls. A `Text` leaf or a text-producing `Op`
+    /// (`Join`, `NewLine`, `Tab`) result passes through verbatim; a `Number`
+    /// leaf or another `Op` result (always numeric, even for `Op::Random`)
+    /// gets stringified.
     pub(crate) fn eval_text(&self) -> Result<String, String> {
         Ok(match self.eval()? {
             Evaluated::Text(s) => s,
@@ -426,6 +437,18 @@ mod tests {
         };
         assert_eq!(v.get_mut(&[2]), Some(&mut Value::Text { value: "c".into() }));
         assert_eq!(v.get_mut(&[3]), None);
+    }
+
+    #[test]
+    fn eval_text_new_line_is_constant_regardless_of_args() {
+        let v = Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_text(), Ok("\n".to_string()));
+    }
+
+    #[test]
+    fn eval_text_tab_is_constant_regardless_of_args() {
+        let v = Value::Op { op: Op::Tab, args: vec![], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_text(), Ok("\t".to_string()));
     }
 
     #[test]

@@ -34,6 +34,9 @@ export const OPERATOR_KINDS: OperatorKindSpec[] = [
   { kind: 'Random', op: 'Random', arity: 2, argType: 'number', prefix: 'pick random from', infix: 'to' },
   { kind: 'Join', op: 'Join', arity: 2, argType: 'text', prefix: 'join' },
   { kind: 'Join3', op: 'Join', arity: 3, argType: 'text', prefix: 'join' },
+  // Zero-arity text constants — argType is unused (no args to render).
+  { kind: 'NewLine', op: 'NewLine', arity: 0, argType: 'text', prefix: 'new line' },
+  { kind: 'Tab', op: 'Tab', arity: 0, argType: 'text', prefix: 'tab character' },
 ];
 
 export function specForKind(kind: ValueKind): OperatorKindSpec | undefined {

@@ -1,14 +1,13 @@
 <script setup lang="ts">
 // Recursive renderer for a `ValueDto` expression tree — a number, a piece of
-// text, an operator block combining two nested `ValueBlock`s (rendered as
-// `lhs op rhs`, no parens — or `prefix lhs infix rhs` for word-phrase
-// operators like Random, see OP_LABELS below), or a `Join` block combining
-// 2-3 nested `ValueBlock`s (rendered as `join arg1 arg2[ arg3]`). An operator node, a leaf
-// parked at the root of a `Floating` location (a standalone canvas block
-// with nothing else to grab it by), or a leaf that landed in its slot by
-// being dropped there as its own block (tracked ephemerally by
-// valueDrag.ts's capsuleLocations, since the ValueDto itself can't tell a
-// dropped-in leaf apart from an ordinary one) renders as an actual bordered,
+// text, or an operator block combining its nested `args` into `ValueBlock`s
+// (rendered as `prefix arg1 infix arg2[ infix arg3 ...]`, labels looked up
+// from valueOps.ts's registry — no parens). An operator node, a leaf parked
+// at the root of a `Floating` location (a standalone canvas block with
+// nothing else to grab it by), or a leaf that landed in its slot by being
+// dropped there as its own block (tracked ephemerally by valueDrag.ts's
+// capsuleLocations, since the ValueDto itself can't tell a dropped-in leaf
+// apart from an ordinary one) renders as an actual bordered,
 // pickup-draggable block (`.value-card-shape`); an ordinary leaf sitting in
 // a field — never dragged, just typed into — is just its bare input, not
 // draggable — see `boxed` below and `onPointerDown`'s gate on it. Changing
@@ -23,6 +22,7 @@ import { computed, ref } from 'vue';
 import { editValueField } from '../tauri';
 import { getInvalidText, locationsEqual } from '../invalidField';
 import { beginValuePickup, dragReveal, isCapsuleLocation } from '../valueDrag';
+import { labelForOp } from '../valueOps';
 import AutosizeInput from './AutosizeInput.vue';
 import type { ValueDto, ValueLocationDto } from '../types';
 
@@ -31,16 +31,6 @@ const props = defineProps<{
   value: ValueDto;
   placeholder?: string;
 }>();
-
-// `prefix` renders before lhs (for word-phrase operators like Random);
-// `infix` sits between lhs and rhs, symbol or word alike.
-const OP_LABELS: Record<string, { prefix?: string; infix: string }> = {
-  Add: { infix: '+' },
-  Sub: { infix: '−' },
-  Mul: { infix: '×' },
-  Div: { infix: '/' },
-  Random: { prefix: 'pick random from', infix: 'to' },
-};
 
 const rootEl = ref<HTMLElement | null>(null);
 
@@ -52,9 +42,10 @@ const displayValue = computed(() =>
 
 const buf = computed(() => (displayValue.value.kind === 'Number' ? getInvalidText(props.location) : null));
 
+const label = computed(() => (displayValue.value.kind === 'Op' ? labelForOp(displayValue.value.op) : undefined));
+
 const boxed = computed(() =>
-  displayValue.value.kind === 'BinaryOp' ||
-  displayValue.value.kind === 'Join' ||
+  displayValue.value.kind === 'Op' ||
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
@@ -86,15 +77,10 @@ function onPointerDown(e: PointerEvent) {
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
   >
-    <template v-if="displayValue.kind === 'BinaryOp'">
-      <span v-if="OP_LABELS[displayValue.op].prefix" class="value-op">{{ OP_LABELS[displayValue.op].prefix }}</span>
-      <ValueBlock :location="childLocation(0)" :value="displayValue.lhs" />
-      <span class="value-op">{{ OP_LABELS[displayValue.op].infix }}</span>
-      <ValueBlock :location="childLocation(1)" :value="displayValue.rhs" />
-    </template>
-    <template v-else-if="displayValue.kind === 'Join'">
-      <span class="value-op">join</span>
+    <template v-if="displayValue.kind === 'Op'">
+      <span v-if="label?.prefix" class="value-op">{{ label.prefix }}</span>
       <template v-for="(arg, i) in displayValue.args" :key="i">
+        <span v-if="i > 0 && label?.infix" class="value-op">{{ label.infix }}</span>
         <ValueBlock :location="childLocation(i)" :value="arg" />
       </template>
     </template>

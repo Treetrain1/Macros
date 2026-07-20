@@ -1,5 +1,6 @@
 // Mirrors src-tauri/src/state.rs's StateDto and friends exactly (serde field
 // names/shapes are a fixed contract with the Rust backend — do not rename).
+import { defaultArgFor, specForKind } from './valueOps';
 
 export type KeyDirection = 'Click' | 'Press' | 'Release';
 export type MouseButton = 'Left' | 'Right' | 'Middle' | 'Side' | 'Extra';
@@ -7,23 +8,22 @@ export type Coordinate = 'Absolute' | 'Relative';
 export type ScrollAxis = 'Vertical' | 'Horizontal';
 
 // A small recursive expression tree backing a numeric instruction field —
-// either a number, a piece of text, an operator applied to two nested
-// ValueDtos (e.g. `(5) + (3)`), or a Join concatenating 2-3 nested ValueDtos
-// as text. Mirrors src-tauri/src/state.rs's ValueDto.
-export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random';
+// either a number, a piece of text, or an operator applied to its nested
+// `args` (e.g. `(5) + (3)`, or `join "a" "b"`). Mirrors
+// src-tauri/src/state.rs's ValueDto.
+export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random' | 'Join';
 // 'Join'/'Join3' are two distinct palette entries (2 vs 3 args) that both
-// produce a `{ kind: 'Join', ... }` ValueDto — there's no `Join3` kind on the
-// wire, only `args.length` differs. See defaultValueForKind below.
-export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join' | 'Join3';
+// produce an `{ kind: 'Op', op: 'Join', ... }` ValueDto — there's no `Join3`
+// on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.
+export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3';
 // `saved` is whatever value the operator displaced when it took over its
-// slot — not one of the operator's operands, just carried along so the
-// backend can hand it straight back if this operator block is later dragged
-// out of the slot (see src-tauri/src/input/value.rs's `Value::BinaryOp`/`Join`).
+// slot — not one of the operator's args, just carried along so the backend
+// can hand it straight back if this operator block is later dragged out of
+// the slot (see src-tauri/src/input/value.rs's `Value::Op`).
 export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
-  | { kind: 'BinaryOp'; op: ValueOp; lhs: ValueDto; rhs: ValueDto; saved: ValueDto }
-  | { kind: 'Join'; args: ValueDto[]; saved: ValueDto };
+  | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto };
 
 export function numberValue(value: number): ValueDto {
   return { kind: 'Number', value };
@@ -34,21 +34,21 @@ export function textValue(value: string): ValueDto {
 }
 
 // Fresh default tree for a value block just dragged off the sidebar palette
-// — mirrors src-tauri/src/commands.rs's `apply_value_kind` defaults.
+// — mirrors src-tauri/src/commands.rs's `apply_value_kind` defaults. Looks
+// up arity/argument-type in valueOps.ts's registry rather than hardcoding
+// per-kind cases, so a new operator never needs a new case here.
 export function defaultValueForKind(kind: ValueKind): ValueDto {
-  switch (kind) {
-    case 'Number': return { kind: 'Number', value: 0 };
-    case 'Text': return { kind: 'Text', value: '' };
-    case 'Join': return { kind: 'Join', args: [textValue(''), textValue('')], saved: numberValue(0) };
-    case 'Join3': return { kind: 'Join', args: [textValue(''), textValue(''), textValue('')], saved: numberValue(0) };
-    default: return { kind: 'BinaryOp', op: kind, lhs: numberValue(0), rhs: numberValue(0), saved: numberValue(0) };
-  }
+  if (kind === 'Number') return { kind: 'Number', value: 0 };
+  if (kind === 'Text') return { kind: 'Text', value: '' };
+  const spec = specForKind(kind);
+  if (!spec) throw new Error(`Unknown value kind: ${kind}`);
+  return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, () => defaultArgFor(spec)), saved: numberValue(0) };
 }
 
 // Addresses a single Value node: either inside an instruction's field
 // (Field) or inside a value block parked on canvas (Floating), at `path`
-// within that root (0=lhs/1=rhs at each BinaryOp level, 0..N-1 into args at
-// each Join level). Mirrors src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
+// within that root (0..N-1 into args at each Op level). Mirrors
+// src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
 export type ValueLocationDto =
   | { kind: 'Field'; strand_id: string; index: number; field_id: string; path: number[] }
   | { kind: 'Floating'; floating_id: string; path: number[] };

@@ -4,11 +4,15 @@ import { INSTRUCTION_TYPE_LABELS } from '../icons';
 import PaletteInstructionBlock from './PaletteInstructionBlock.vue';
 import PaletteValueBlock from './PaletteValueBlock.vue';
 import { beginSidebarResize, sidebarWidth } from '../composables/useSidebarWidth';
+import { OPERATOR_KINDS } from '../valueOps';
 import type { InstructionDto, ValueKind } from '../types';
 
 const instructionTypes = Object.keys(INSTRUCTION_TYPE_LABELS) as InstructionDto['type'][];
 
-const VALUE_KINDS: ValueKind[] = ['Number', 'Text', 'Add', 'Sub', 'Mul', 'Div', 'Random', 'Join', 'Join3'];
+// Number/Text literals, plus every operator registered in valueOps.ts's
+// OPERATOR_KINDS — adding an operator there is enough to get it a palette
+// entry, no edit needed here.
+const VALUE_KINDS: ValueKind[] = ['Number', 'Text', ...OPERATOR_KINDS.map(s => s.kind)];
 </script>
 
 <template>

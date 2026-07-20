@@ -10,6 +10,8 @@
 import { reactive } from 'vue';
 import { defaultInstruction, defaultValueForKind, numberValue, textValue } from './types';
 import type { InstructionDto, InstructionType, ValueDto, ValueKind } from './types';
+import { OPERATOR_KINDS, specForKind } from './valueOps';
+import type { OperatorKindSpec, OperatorValueKind } from './valueOps';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
   'WhenRan', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'Comment',
@@ -26,23 +28,20 @@ export function clonePaletteInstruction(type: InstructionType): InstructionDto {
   return JSON.parse(JSON.stringify(paletteInstructions[type]));
 }
 
-type OperatorKind = Extract<ValueKind, 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random'>;
-const OPERATOR_KINDS: OperatorKind[] = ['Add', 'Sub', 'Mul', 'Div', 'Random'];
-
-function operandsFor(kind: OperatorKind): { lhs: number; rhs: number } {
-  const seed = defaultValueForKind(kind);
-  const lhs = seed.kind === 'BinaryOp' && seed.lhs.kind === 'Number' ? seed.lhs.value : 0;
-  const rhs = seed.kind === 'BinaryOp' && seed.rhs.kind === 'Number' ? seed.rhs.value : 0;
-  return { lhs, rhs };
+function argsFor(spec: OperatorKindSpec): (number | string)[] {
+  const seed = defaultValueForKind(spec.kind);
+  if (seed.kind !== 'Op') return [];
+  return seed.args.map(a => (a.kind === 'Number' ? a.value : a.kind === 'Text' ? a.value : ''));
 }
 
-// Operator prefabs (Add/Sub/Mul/Div/Random) each carry their own editable lhs/rhs
-// pair — there's no nesting support here (dropping another operator onto one
-// of these fields would require the sidebar to be a valid drop target, and
-// it deliberately isn't, see isOverSidebar), so these always stay plain
-// number leaves.
-export const paletteOperators: Record<OperatorKind, { lhs: number; rhs: number }> = reactive(
-  Object.fromEntries(OPERATOR_KINDS.map(k => [k, operandsFor(k)])) as Record<OperatorKind, { lhs: number; rhs: number }>,
+// Every operator prefab (Add/Sub/Mul/Div/Random/Join/Join3, and whatever's
+// added to valueOps.ts's OPERATOR_KINDS next) carries its own editable arg
+// list, numbers or text per its `argType` — there's no nesting support here
+// (dropping another operator onto one of these fields would require the
+// sidebar to be a valid drop target, and it deliberately isn't, see
+// isOverSidebar), so these always stay plain leaves.
+export const paletteOperatorArgs: Record<OperatorValueKind, (number | string)[]> = reactive(
+  Object.fromEntries(OPERATOR_KINDS.map(s => [s.kind, argsFor(s)])) as Record<OperatorValueKind, (number | string)[]>,
 );
 
 const numberSeed = defaultValueForKind('Number');
@@ -50,30 +49,19 @@ const textSeed = defaultValueForKind('Text');
 export const paletteNumber = reactive({ value: numberSeed.kind === 'Number' ? numberSeed.value : 0 });
 export const paletteText = reactive({ value: textSeed.kind === 'Text' ? textSeed.value : '' });
 
-type JoinKind = Extract<ValueKind, 'Join' | 'Join3'>;
-const JOIN_ARITY: Record<JoinKind, number> = { Join: 2, Join3: 3 };
-
-function joinArgsFor(kind: JoinKind): string[] {
-  const seed = defaultValueForKind(kind);
-  return seed.kind === 'Join' ? seed.args.map(a => (a.kind === 'Text' ? a.value : '')) : [];
-}
-
-// Join/Join3 prefabs each carry their own editable list of text args (2 or 3
-// of them) — same "no nesting support in the palette" reasoning as
-// paletteOperators above.
-export const paletteJoins: Record<JoinKind, string[]> = reactive(
-  Object.fromEntries((Object.keys(JOIN_ARITY) as JoinKind[]).map(k => [k, joinArgsFor(k)])) as Record<JoinKind, string[]>,
-);
-
 /** The full ValueDto a value-palette entry currently represents, built from
  * its live edited state — what actually lands on the canvas (as a floating
  * value or dropped into a field) when that entry is dragged out. */
 export function paletteValueFor(kind: ValueKind): ValueDto {
   if (kind === 'Number') return numberValue(paletteNumber.value);
-  if (kind === 'Text') return { kind: 'Text', value: paletteText.value };
-  if (kind === 'Join' || kind === 'Join3') {
-    return { kind: 'Join', args: paletteJoins[kind].map(textValue), saved: numberValue(0) };
-  }
-  const { lhs, rhs } = paletteOperators[kind];
-  return { kind: 'BinaryOp', op: kind, lhs: numberValue(lhs), rhs: numberValue(rhs), saved: numberValue(0) };
+  if (kind === 'Text') return textValue(paletteText.value);
+  const spec = specForKind(kind);
+  if (!spec) throw new Error(`Unknown value kind: ${kind}`);
+  const args = paletteOperatorArgs[kind as OperatorValueKind];
+  return {
+    kind: 'Op',
+    op: spec.op,
+    args: args.map(v => (spec.argType === 'text' ? textValue(String(v)) : numberValue(Number(v)))),
+    saved: numberValue(0),
+  };
 }

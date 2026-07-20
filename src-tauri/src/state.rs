@@ -185,8 +185,7 @@ pub(crate) struct KeyCaptureDto {
 pub(crate) enum ValueDto {
     Number { value: f64 },
     Text { value: String },
-    BinaryOp { op: String, lhs: Box<ValueDto>, rhs: Box<ValueDto>, saved: Box<ValueDto> },
-    Join { args: Vec<ValueDto>, saved: Box<ValueDto> },
+    Op { op: Op, args: Vec<ValueDto>, saved: Box<ValueDto> },
 }
 
 #[derive(Serialize, Clone)]
@@ -409,38 +408,12 @@ fn str_to_axis(s: &str) -> Axis {
     }
 }
 
-fn op_to_str(op: &Op) -> &'static str {
-    match op {
-        Op::Add => "Add",
-        Op::Sub => "Sub",
-        Op::Mul => "Mul",
-        Op::Div => "Div",
-        Op::Random => "Random",
-    }
-}
-
-fn str_to_op(s: &str) -> Op {
-    match s {
-        "Sub" => Op::Sub,
-        "Mul" => Op::Mul,
-        "Div" => Op::Div,
-        "Random" => Op::Random,
-        _ => Op::Add,
-    }
-}
-
 pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
     match value {
         Value::Number { value } => ValueDto::Number { value: *value },
         Value::Text { value } => ValueDto::Text { value: value.clone() },
-        Value::BinaryOp { op, lhs, rhs, saved } => ValueDto::BinaryOp {
-            op: op_to_str(op).to_string(),
-            lhs: Box::new(value_to_dto(lhs)),
-            rhs: Box::new(value_to_dto(rhs)),
-            saved: Box::new(value_to_dto(saved)),
-        },
-        Value::Join { args, saved } => {
-            ValueDto::Join { args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
+        Value::Op { op, args, saved } => {
+            ValueDto::Op { op: *op, args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
         }
     }
 }
@@ -449,14 +422,8 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
     match dto {
         ValueDto::Number { value } => Value::Number { value: *value },
         ValueDto::Text { value } => Value::Text { value: value.clone() },
-        ValueDto::BinaryOp { op, lhs, rhs, saved } => Value::BinaryOp {
-            op: str_to_op(op),
-            lhs: Box::new(dto_to_value(lhs)),
-            rhs: Box::new(dto_to_value(rhs)),
-            saved: Box::new(dto_to_value(saved)),
-        },
-        ValueDto::Join { args, saved } => {
-            Value::Join { args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
+        ValueDto::Op { op, args, saved } => {
+            Value::Op { op: *op, args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
         }
     }
 }

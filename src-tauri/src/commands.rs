@@ -2,7 +2,7 @@ use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::macros::{loop_control, thread, FloatingValue, Instruction, Macro, Strand, SPEED_MULTIPLIER_RANGE};
 use crate::input::types::InputToken;
-use crate::input::value::{Evaluated, Op, Value};
+use crate::input::value::{Evaluated, Value, OPERATOR_KINDS};
 use crate::recording;
 use crate::state::{
     build_state_dto, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
@@ -407,49 +407,31 @@ fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
             };
             *node = Value::Text { value: text };
         }
-        "Add" | "Sub" | "Mul" | "Div" | "Random" => {
-            let op = match kind {
-                "Sub" => Op::Sub,
-                "Mul" => Op::Mul,
-                "Div" => Op::Div,
-                "Random" => Op::Random,
-                _ => Op::Add,
-            };
-            // Already an operator: just swap it, keeping both operands and
-            // whatever it's shadowing (flip `+` to `×` without losing
-            // work). Otherwise the operator takes over the slot fresh —
-            // the old value is tucked away as `saved` rather than promoted
-            // into `lhs`, so it comes back untouched if this operator is
-            // ever dragged back out.
+        _ => {
+            // Any other kind is an operator — looked up in the shared
+            // registry (`value.rs`'s `OPERATOR_KINDS`) rather than matched
+            // by hand here, so a new operator never needs a new arm in this
+            // function. Already an operator: just swap it, resizing `args`
+            // to the new arity (padding with fresh default args) and
+            // keeping whatever it's shadowing — flip `+` to `×`, or grow
+            // `Join` to `Join3`, without losing work. Otherwise the operator
+            // takes over the slot fresh — the old value is tucked away as
+            // `saved` rather than promoted into `args`, so it comes back
+            // untouched if this operator is ever dragged back out.
+            let spec = OPERATOR_KINDS.iter().find(|s| s.kind == kind).ok_or_else(|| format!("Unknown value kind: {kind}"))?;
             let existing = std::mem::replace(node, Value::number(0.0));
             *node = match existing {
-                Value::BinaryOp { lhs, rhs, saved, .. } => Value::BinaryOp { op, lhs, rhs, saved },
-                other => Value::BinaryOp {
-                    op,
-                    lhs: Box::new(Value::number(0.0)),
-                    rhs: Box::new(Value::number(0.0)),
-                    saved: Box::new(other),
-                },
-            };
-        }
-        "Join" | "Join3" => {
-            let arity = if kind == "Join" { 2 } else { 3 };
-            let existing = std::mem::replace(node, Value::number(0.0));
-            *node = match existing {
-                // Swapping arity keeps as many existing args as fit, padding
-                // any new slots with empty text — same "don't lose work"
-                // spirit as swapping between arithmetic ops above.
-                Value::Join { mut args, saved } => {
-                    args.resize_with(arity, || Value::Text { value: String::new() });
-                    Value::Join { args, saved }
+                Value::Op { mut args, saved, .. } => {
+                    args.resize_with(spec.arity, spec.default_arg);
+                    Value::Op { op: spec.op, args, saved }
                 }
-                other => Value::Join {
-                    args: std::iter::repeat_with(|| Value::Text { value: String::new() }).take(arity).collect(),
+                other => Value::Op {
+                    op: spec.op,
+                    args: std::iter::repeat_with(spec.default_arg).take(spec.arity).collect(),
                     saved: Box::new(other),
                 },
             };
         }
-        _ => return Err(format!("Unknown value kind: {kind}")),
     }
     Ok(())
 }
@@ -547,7 +529,7 @@ pub(crate) fn take_value<R: Runtime>(
         }
         let node = resolve_location_mut(mac, &loc)?;
         let restored = match &*node {
-            Value::BinaryOp { saved, .. } | Value::Join { saved, .. } => (**saved).clone(),
+            Value::Op { saved, .. } => (**saved).clone(),
             _ => Value::number(0.0),
         };
         Some(std::mem::replace(node, restored))
@@ -579,7 +561,7 @@ pub(crate) fn put_value<R: Runtime>(
     if let Some(mac) = &mut s.current_macro {
         if let Some(node) = resolve_location_mut(mac, &loc) {
             let mut incoming = dto_to_value(&value);
-            if let Value::BinaryOp { saved, .. } | Value::Join { saved, .. } = &mut incoming {
+            if let Value::Op { saved, .. } = &mut incoming {
                 *saved = Box::new(node.clone());
             }
             *node = incoming;
@@ -1658,6 +1640,7 @@ fn run_macro_task(
 mod value_location_tests {
     use super::*;
     use crate::input::types::Coordinate;
+    use crate::input::value::Op;
 
     fn test_macro() -> Macro {
         Macro {
@@ -1708,23 +1691,14 @@ mod value_location_tests {
         apply_value_kind(&mut node, "Add").unwrap();
         assert_eq!(
             node,
-            Value::BinaryOp {
-                op: Op::Add,
-                lhs: Box::new(Value::number(0.0)),
-                rhs: Box::new(Value::number(0.0)),
-                saved: Box::new(Value::number(5.0)),
-            }
+            Value::Op { op: Op::Add, args: vec![Value::number(0.0), Value::number(0.0)], saved: Box::new(Value::number(5.0)) }
         );
     }
 
     #[test]
     fn apply_value_kind_collapses_operator_to_number_best_effort() {
-        let mut node = Value::BinaryOp {
-            op: Op::Add,
-            lhs: Box::new(Value::number(2.0)),
-            rhs: Box::new(Value::number(3.0)),
-            saved: Box::new(Value::number(0.0)),
-        };
+        let mut node =
+            Value::Op { op: Op::Add, args: vec![Value::number(2.0), Value::number(3.0)], saved: Box::new(Value::number(0.0)) };
         apply_value_kind(&mut node, "Number").unwrap();
         assert_eq!(node, Value::number(5.0));
     }
@@ -1735,12 +1709,7 @@ mod value_location_tests {
         apply_value_kind(&mut node, "Random").unwrap();
         assert_eq!(
             node,
-            Value::BinaryOp {
-                op: Op::Random,
-                lhs: Box::new(Value::number(0.0)),
-                rhs: Box::new(Value::number(0.0)),
-                saved: Box::new(Value::number(5.0)),
-            }
+            Value::Op { op: Op::Random, args: vec![Value::number(0.0), Value::number(0.0)], saved: Box::new(Value::number(5.0)) }
         );
     }
 
@@ -1756,7 +1725,8 @@ mod value_location_tests {
         apply_value_kind(&mut node, "Join").unwrap();
         assert_eq!(
             node,
-            Value::Join {
+            Value::Op {
+                op: Op::Join,
                 args: vec![Value::Text { value: String::new() }, Value::Text { value: String::new() }],
                 saved: Box::new(Value::number(5.0)),
             }
@@ -1765,14 +1735,16 @@ mod value_location_tests {
 
     #[test]
     fn apply_value_kind_join3_grows_existing_join_args() {
-        let mut node = Value::Join {
+        let mut node = Value::Op {
+            op: Op::Join,
             args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
             saved: Box::new(Value::number(9.0)),
         };
         apply_value_kind(&mut node, "Join3").unwrap();
         assert_eq!(
             node,
-            Value::Join {
+            Value::Op {
+                op: Op::Join,
                 args: vec![
                     Value::Text { value: "a".into() },
                     Value::Text { value: "b".into() },
@@ -1785,14 +1757,16 @@ mod value_location_tests {
 
     #[test]
     fn apply_value_kind_join_shrinks_existing_join3_args() {
-        let mut node = Value::Join {
+        let mut node = Value::Op {
+            op: Op::Join,
             args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }, Value::Text { value: "c".into() }],
             saved: Box::new(Value::number(0.0)),
         };
         apply_value_kind(&mut node, "Join").unwrap();
         assert_eq!(
             node,
-            Value::Join {
+            Value::Op {
+                op: Op::Join,
                 args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
                 saved: Box::new(Value::number(0.0)),
             }

@@ -309,10 +309,12 @@ fn migrate_wait_duration(duration: Value, randomness: Value) -> Value {
         return duration;
     }
     let zero = || Box::new(Value::number(0.0));
-    Value::BinaryOp {
+    Value::Op {
         op: Op::Random,
-        lhs: Box::new(Value::BinaryOp { op: Op::Sub, lhs: Box::new(duration.clone()), rhs: Box::new(randomness.clone()), saved: zero() }),
-        rhs: Box::new(Value::BinaryOp { op: Op::Add, lhs: Box::new(duration), rhs: Box::new(randomness), saved: zero() }),
+        args: vec![
+            Value::Op { op: Op::Sub, args: vec![duration.clone(), randomness.clone()], saved: zero() },
+            Value::Op { op: Op::Add, args: vec![duration, randomness], saved: zero() },
+        ],
         saved: zero(),
     }
 }
@@ -380,20 +382,20 @@ mod tests {
         let ins: Instruction = serde_json::from_str(json).unwrap();
         assert_eq!(
             ins,
-            Instruction::Wait(Value::BinaryOp {
+            Instruction::Wait(Value::Op {
                 op: Op::Random,
-                lhs: Box::new(Value::BinaryOp {
-                    op: Op::Sub,
-                    lhs: Box::new(Value::number(1000.0)),
-                    rhs: Box::new(Value::number(50.0)),
-                    saved: Box::new(Value::number(0.0)),
-                }),
-                rhs: Box::new(Value::BinaryOp {
-                    op: Op::Add,
-                    lhs: Box::new(Value::number(1000.0)),
-                    rhs: Box::new(Value::number(50.0)),
-                    saved: Box::new(Value::number(0.0)),
-                }),
+                args: vec![
+                    Value::Op {
+                        op: Op::Sub,
+                        args: vec![Value::number(1000.0), Value::number(50.0)],
+                        saved: Box::new(Value::number(0.0)),
+                    },
+                    Value::Op {
+                        op: Op::Add,
+                        args: vec![Value::number(1000.0), Value::number(50.0)],
+                        saved: Box::new(Value::number(0.0)),
+                    },
+                ],
                 saved: Box::new(Value::number(0.0)),
             })
         );

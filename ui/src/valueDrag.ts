@@ -15,7 +15,7 @@
 import { ref } from 'vue';
 import { state } from './store';
 import { capturePointer, clientToCanvas, getCanvasZoom, isOverSidebar, setSidebarArmed } from './canvasDrag';
-import { createFloatingValue, moveFloatingValue, putValue, removeFloatingValue, takeValue } from './tauri';
+import { createFloatingValue, moveFloatingValue, previewValue, putValue, removeFloatingValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
 import { numberValue } from './types';
 import { locationsEqual } from './invalidField';
@@ -58,6 +58,43 @@ function unmarkCapsule(location: ValueLocationDto) {
 // real. Consulted by ValueBlock.vue via locationsEqual.
 export const dragReveal = ref<{ location: ValueLocationDto; value: ValueDto } | null>(null);
 
+const EVAL_PREVIEW_TIMEOUT_MS = 2500;
+
+// A pointerdown-then-pointerup on an operator block that never crossed the
+// drag threshold (see `onPointerUp` below) samples-evaluates that exact node
+// and shows the result here — ValueBlock.vue renders a small tooltip beside
+// whichever block's location matches. Auto-dismisses after a timeout, and
+// any new pickup clears a stale one immediately rather than leaving it to
+// linger under a different block.
+export const evalPreview = ref<{ location: ValueLocationDto; text: string; error: boolean } | null>(null);
+let evalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showEvalPreview(location: ValueLocationDto, text: string, error: boolean) {
+  if (evalPreviewTimer) clearTimeout(evalPreviewTimer);
+  evalPreview.value = { location, text, error };
+  evalPreviewTimer = setTimeout(() => {
+    evalPreview.value = null;
+    evalPreviewTimer = null;
+  }, EVAL_PREVIEW_TIMEOUT_MS);
+}
+
+function clearEvalPreview() {
+  if (evalPreviewTimer) {
+    clearTimeout(evalPreviewTimer);
+    evalPreviewTimer = null;
+  }
+  evalPreview.value = null;
+}
+
+async function previewClickedOperator(location: ValueLocationDto, value: ValueDto) {
+  try {
+    const text = await previewValue(value);
+    showEvalPreview(location, text, false);
+  } catch (err) {
+    showEvalPreview(location, String(err), true);
+  }
+}
+
 type ValueDragSource =
   | { kind: 'existing'; location: ValueLocationDto; value: ValueDto }
   | { kind: 'fresh'; valueKind: ValueKind };
@@ -97,6 +134,7 @@ export function beginValuePickup(e: PointerEvent, location: ValueLocationDto, va
   if (e.button !== undefined && e.button !== 0) return;
   e.preventDefault();
   capturePointer(e);
+  clearEvalPreview();
   valueDragCandidate = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, anchorEl, source: { kind: 'existing', location, value } };
 }
 
@@ -108,6 +146,7 @@ export function beginValuePaletteDrag(e: PointerEvent, valueKind: ValueKind, anc
   if (e.button !== undefined && e.button !== 0) return;
   e.preventDefault();
   capturePointer(e);
+  clearEvalPreview();
   valueDragCandidate = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, anchorEl, source: { kind: 'fresh', valueKind } };
 }
 
@@ -254,7 +293,15 @@ function onPointerMove(e: PointerEvent) {
 
 function onPointerUp(e: PointerEvent) {
   if (valueDragCandidate && valueDragCandidate.pointerId === e.pointerId) {
+    const candidate = valueDragCandidate;
     valueDragCandidate = null;
+    // Never crossed the drag threshold — a plain click. A real pointerup
+    // (not a cancel) on an existing operator block samples-evaluates it; a
+    // leaf, a palette prefab, or a cancelled gesture does nothing, same as
+    // today.
+    if (e.type === 'pointerup' && candidate.source.kind === 'existing' && candidate.source.value.kind === 'Op') {
+      void previewClickedOperator(candidate.source.location, candidate.source.value);
+    }
   }
   if (!valueDrag || valueDrag.pointerId !== e.pointerId) return;
 

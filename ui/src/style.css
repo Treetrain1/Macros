@@ -827,6 +827,7 @@ body.sidebar-resizing {
   border-radius: 5px;
 }
 .value-card-shape {
+  position: relative;
   gap: 2px;
   padding: 2px 6px;
   border-color: var(--glass-border);
@@ -857,6 +858,43 @@ body.sidebar-resizing {
 }
 .value-drop-target.value-card-shape {
   box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
+}
+
+/* Click-to-sample-evaluate tooltip (ValueBlock.vue's `preview`, driven by
+   valueDrag.ts's evalPreview) — anchored to the clicked operator's own
+   .value-card-shape (hence that rule's `position: relative` above),
+   floating above it rather than shifting any layout. Self-dismisses after a
+   timeout in JS; the fade-in here is purely cosmetic. */
+.value-eval-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  z-index: 21;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  /* `pre-wrap` (not `nowrap`) so an embedded newline/tab from the
+     NewLine/Tab operators actually renders as one — `nowrap` collapses
+     whitespace, including \n, down to a single space. */
+  white-space: pre-wrap;
+  max-width: 260px;
+  pointer-events: none;
+  animation: value-eval-tooltip-in var(--dur-base) var(--ease-standard);
+}
+.value-eval-tooltip-error {
+  border-color: var(--red);
+  color: var(--red);
+}
+@keyframes value-eval-tooltip-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(3px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* A floating value card is nothing but its block — bare positioning

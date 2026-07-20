@@ -17,11 +17,14 @@
 // picker here anymore. `location` addresses this node (see invalidField.ts
 // / tauri.ts's editValueField/setValueKind/takeValue/putValue); a `<script
 // setup>` SFC can reference itself by filename, so no explicit
-// self-registration is needed for the recursion below.
+// self-registration is needed for the recursion below. Clicking (not
+// dragging) an operator block samples-evaluates just that node and shows the
+// result in a small tooltip — see `preview` below and valueDrag.ts's
+// onPointerUp/previewClickedOperator.
 import { computed, ref } from 'vue';
 import { editValueField } from '../tauri';
 import { getInvalidText, locationsEqual } from '../invalidField';
-import { beginValuePickup, dragReveal, isCapsuleLocation } from '../valueDrag';
+import { beginValuePickup, dragReveal, evalPreview, isCapsuleLocation } from '../valueDrag';
 import { labelForOp } from '../valueOps';
 import AutosizeInput from './AutosizeInput.vue';
 import type { ValueDto, ValueLocationDto } from '../types';
@@ -43,6 +46,12 @@ const displayValue = computed(() =>
 const buf = computed(() => (displayValue.value.kind === 'Number' ? getInvalidText(props.location) : null));
 
 const label = computed(() => (displayValue.value.kind === 'Op' ? labelForOp(displayValue.value.op) : undefined));
+
+// Set only for the exact operator node that was last clicked (not dragged)
+// — see valueDrag.ts's onPointerUp/previewClickedOperator. Auto-clears
+// itself after a timeout, so this just reflects whatever's currently live.
+const preview = computed(() =>
+  evalPreview.value && locationsEqual(evalPreview.value.location, props.location) ? evalPreview.value : null);
 
 const boxed = computed(() =>
   displayValue.value.kind === 'Op' ||
@@ -93,5 +102,6 @@ function onPointerDown(e: PointerEvent) {
         @update:model-value="onEdit"
       />
     </template>
+    <span v-if="preview" class="value-eval-tooltip" :class="{ 'value-eval-tooltip-error': preview.error }">{{ preview.text }}</span>
   </span>
 </template>

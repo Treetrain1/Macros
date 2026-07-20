@@ -573,6 +573,18 @@ pub(crate) fn put_value<R: Runtime>(
     Ok(())
 }
 
+/// One-shot sample evaluation of a value tree, for the click-to-preview
+/// tooltip on operator blocks (`ValueBlock.vue`'s pointerup handling in
+/// `valueDrag.ts`) — stateless, doesn't touch `AppState` or emit any update.
+/// Uses `eval_text` (not `eval_number`) so a `Join`/`NewLine`/`Tab` preview
+/// reads as text rather than erroring as "not a number"; a numeric result
+/// still comes back stringified. `Op::Random` samples fresh every call, same
+/// as it would during an actual macro run.
+#[tauri::command]
+pub(crate) fn preview_value(value: ValueDto) -> Result<String, String> {
+    dto_to_value(&value).eval_text()
+}
+
 /// Creates a new value block parked on open canvas — used both for a fresh
 /// block dropped from the sidebar and as the "create" half of taking an
 /// existing block out of a field and dropping it on canvas.
@@ -1869,5 +1881,35 @@ mod value_location_tests {
         };
         let loc = ValueLocation::Field { strand_id: "s1".into(), index: 0, field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));
+    }
+
+    #[test]
+    fn preview_value_stringifies_numeric_result() {
+        let dto = ValueDto::Op {
+            op: Op::Add,
+            args: vec![ValueDto::Number { value: 2.0 }, ValueDto::Number { value: 3.0 }],
+            saved: Box::new(ValueDto::Number { value: 0.0 }),
+        };
+        assert_eq!(preview_value(dto), Ok("5".to_string()));
+    }
+
+    #[test]
+    fn preview_value_joins_text_args() {
+        let dto = ValueDto::Op {
+            op: Op::Join,
+            args: vec![ValueDto::Text { value: "foo".into() }, ValueDto::Text { value: "bar".into() }],
+            saved: Box::new(ValueDto::Number { value: 0.0 }),
+        };
+        assert_eq!(preview_value(dto), Ok("foobar".to_string()));
+    }
+
+    #[test]
+    fn preview_value_surfaces_eval_errors() {
+        let dto = ValueDto::Op {
+            op: Op::Div,
+            args: vec![ValueDto::Number { value: 1.0 }, ValueDto::Number { value: 0.0 }],
+            saved: Box::new(ValueDto::Number { value: 0.0 }),
+        };
+        assert!(preview_value(dto).is_err());
     }
 }

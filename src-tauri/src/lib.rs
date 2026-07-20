@@ -168,6 +168,7 @@ pub fn run() {
             commands::set_value_kind,
             commands::take_value,
             commands::put_value,
+            commands::preview_value,
             commands::create_floating_value,
             commands::move_floating_value,
             commands::remove_floating_value,

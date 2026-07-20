@@ -1,10 +1,7 @@
 use std::sync::OnceLock;
 
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
-use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions,
-    CGEventTapPlacement, CGEventType, CGMouseButton, EventField,
-};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType, CGMouseButton, CallbackResult, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use foreign_types::ForeignType;
@@ -395,7 +392,7 @@ pub(super) fn start_capture_thread(
                             let cur = event.get_flags();
                             let prev = {
                                 let Ok(mut g) = prev_flags.lock() else {
-                                    return Some(event.clone());
+                                    return CallbackResult::Replace(event.clone());
                                 };
                                 let p = *g;
                                 *g = cur;
@@ -419,7 +416,7 @@ pub(super) fn start_capture_thread(
                                     }
                                 }
                             }
-                            return Some(event.clone());
+                            return CallbackResult::Replace(event.clone())
                         }
 
                         let capture_ev: Option<CaptureEvent> = match ev_type {
@@ -438,15 +435,15 @@ pub(super) fn start_capture_thread(
                             if let Ok(mut cb) = cb_kb.lock() {
                                 let ts = CaptureTimestamp::Hardware(cgevent_hardware_timestamp(event));
                                 if matches!(cb(ev, ts), CaptureDecision::Suppress) {
-                                    return None;
+                                    return CallbackResult::Drop;
                                 }
                             }
                         }
-                        Some(event.clone())
+                        CallbackResult::Replace(event.clone())
                     },
                 ) {
                     Ok(tap) => {
-                        let src = tap.mach_port.create_runloop_source(0).unwrap();
+                        let src = tap.mach_port().create_runloop_source(0).unwrap();
                         run_loop.add_source(&src, unsafe { kCFRunLoopDefaultMode });
                         tap.enable();
                         _kb_src = Some(src);
@@ -507,11 +504,11 @@ pub(super) fn start_capture_thread(
                                 cb(ev, ts); // CaptureDecision is ignored for listen-only taps
                             }
                         }
-                        Some(event.clone())
+                        CallbackResult::Replace(event.clone())
                     },
                 ) {
                     Ok(tap) => {
-                        let src = tap.mach_port.create_runloop_source(1).unwrap();
+                        let src = tap.mach_port().create_runloop_source(1).unwrap();
                         run_loop.add_source(&src, unsafe { kCFRunLoopDefaultMode });
                         tap.enable();
                         _mouse_src = Some(src);

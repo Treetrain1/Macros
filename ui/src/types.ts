@@ -11,7 +11,9 @@ export type ScrollAxis = 'Vertical' | 'Horizontal';
 // either a number, a piece of text, or an operator applied to its nested
 // `args` (e.g. `(5) + (3)`, or `join "a" "b"`). Mirrors
 // src-tauri/src/state.rs's ValueDto.
-export type ValueOp = 'Add' | 'Sub' | 'Mul' | 'Div' | 'Random' | 'Join' | 'NewLine' | 'Tab';
+export type ValueOp =
+  | 'Add' | 'Sub' | 'Mul' | 'Div' | 'Mod' | 'Round' | 'Random' | 'Join' | 'NewLine' | 'Tab'
+  | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case';
 // 'Join'/'Join3' are two distinct palette entries (2 vs 3 args) that both
 // produce an `{ kind: 'Op', op: 'Join', ... }` ValueDto — there's no `Join3`
 // on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.
@@ -42,7 +44,7 @@ export function defaultValueForKind(kind: ValueKind): ValueDto {
   if (kind === 'Text') return { kind: 'Text', value: '' };
   const spec = specForKind(kind);
   if (!spec) throw new Error(`Unknown value kind: ${kind}`);
-  return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, () => defaultArgFor(spec)), saved: numberValue(0) };
+  return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
 }
 
 // Addresses a single Value node: either inside an instruction's field

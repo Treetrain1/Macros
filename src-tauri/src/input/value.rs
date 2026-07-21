@@ -2,14 +2,20 @@ use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Operator for a [`Value::Op`] block — arithmetic, [`Op::Random`],
-/// [`Op::Join`] (text concatenation), or a zero-arity text constant
-/// (`Op::NewLine`, `Op::Tab`).
+/// [`Op::Join`] (text concatenation), a zero-arity text constant
+/// (`Op::NewLine`, `Op::Tab`), or one of the text/lookup operators below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Op {
     Add,
     Sub,
     Mul,
     Div,
+    /// `args[0] % args[1]`, always in `[0, args[1])` (via `f64::rem_euclid`)
+    /// rather than Rust's `%`, so a negative left-hand side still reads as a
+    /// normal "wrap around" mod. Errs like `Div` on a zero right-hand side.
+    Mod,
+    /// `args[0]` rounded to the nearest whole number (half away from zero).
+    Round,
     /// `args[0]`/`args[1]` are the inclusive from/to bounds, not operands to
     /// combine — evaluated fresh on every call to `eval`, unlike the
     /// arithmetic ops which are pure functions of their operands. Picks an
@@ -24,6 +30,24 @@ pub(crate) enum Op {
     /// `args` entirely for these.
     NewLine,
     Tab,
+    /// 1-based index of `args[0]` (the needle) inside `args[1]` (the
+    /// haystack), both as text; `0` if not found. Character-based, not
+    /// byte-based, so it agrees with `Op::LetterOf`'s indexing.
+    IndexOf,
+    /// Same as `IndexOf`, but the index of the last occurrence.
+    LastIndexOf,
+    /// The single character at `args[0]` (1-based) of `args[1]` (as text).
+    /// Errs if the index is out of range.
+    LetterOf,
+    /// Character count of `args[0]` (as text).
+    Length,
+    /// Upper/lowercases `args[0]` (as text) depending on `args[1]`, which is
+    /// never a user-editable value slot despite being a plain `Value::Text`
+    /// leaf like any other arg — it's driven entirely by an in-place
+    /// dropdown (`"Upper"`/`"Lower"`) rather than the drag/drop machinery,
+    /// same spirit as `Random`'s bounds not being "operands". See
+    /// `OPERATOR_KINDS`'s `"Case"` row and the frontend's `enumArg` spec.
+    Case,
 }
 
 /// A small recursive expression tree backing a numeric instruction field —
@@ -68,29 +92,75 @@ impl Evaluated {
 
 /// Static per-palette-entry metadata driving default construction when a
 /// block is dropped from the sidebar — the single place a new operator's
-/// arity and default argument type need registering. Arity lives on the
-/// *kind string*, not on `Op` itself, since `Op::Join` alone doesn't have
-/// one true arity (2 vs 3 is just which palette entry it came from).
+/// arity and default arguments need registering. Arity lives on the *kind
+/// string*, not on `Op` itself, since `Op::Join` alone doesn't have one true
+/// arity (2 vs 3 is just which palette entry it came from).
 /// `commands.rs`'s `apply_value_kind` is the only consumer.
 pub(crate) struct OperatorKindSpec {
     pub(crate) kind: &'static str,
     pub(crate) op: Op,
     pub(crate) arity: usize,
-    pub(crate) default_arg: fn() -> Value,
+    /// Builds the full default `args` vec (one entry per arg, in order) —
+    /// a function rather than a fixed `Vec` since `Value` isn't `Const`.
+    /// Per-index rather than a single repeated default so mixed-type
+    /// operators (e.g. `LetterOf`'s number-then-text pair) can give each
+    /// slot its own default.
+    pub(crate) default_args: fn() -> Vec<Value>,
+}
+
+fn text_default() -> Value {
+    Value::Text { value: String::new() }
 }
 
 pub(crate) const OPERATOR_KINDS: &[OperatorKindSpec] = &[
-    OperatorKindSpec { kind: "Add", op: Op::Add, arity: 2, default_arg: || Value::number(0.0) },
-    OperatorKindSpec { kind: "Sub", op: Op::Sub, arity: 2, default_arg: || Value::number(0.0) },
-    OperatorKindSpec { kind: "Mul", op: Op::Mul, arity: 2, default_arg: || Value::number(0.0) },
-    OperatorKindSpec { kind: "Div", op: Op::Div, arity: 2, default_arg: || Value::number(0.0) },
-    OperatorKindSpec { kind: "Random", op: Op::Random, arity: 2, default_arg: || Value::number(0.0) },
-    OperatorKindSpec { kind: "Join", op: Op::Join, arity: 2, default_arg: || Value::Text { value: String::new() } },
-    OperatorKindSpec { kind: "Join3", op: Op::Join, arity: 3, default_arg: || Value::Text { value: String::new() } },
-    // `default_arg` is unused for these — arity 0 means it's never called.
-    OperatorKindSpec { kind: "NewLine", op: Op::NewLine, arity: 0, default_arg: || Value::Text { value: String::new() } },
-    OperatorKindSpec { kind: "Tab", op: Op::Tab, arity: 0, default_arg: || Value::Text { value: String::new() } },
+    OperatorKindSpec { kind: "Add", op: Op::Add, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Sub", op: Op::Sub, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Mul", op: Op::Mul, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Div", op: Op::Div, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Mod", op: Op::Mod, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Round", op: Op::Round, arity: 1, default_args: || vec![Value::number(0.0)] },
+    OperatorKindSpec { kind: "Random", op: Op::Random, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Join", op: Op::Join, arity: 2, default_args: || vec![text_default(), text_default()] },
+    OperatorKindSpec { kind: "Join3", op: Op::Join, arity: 3, default_args: || vec![text_default(), text_default(), text_default()] },
+    // `default_args` is unused for these — arity 0 means it's never called.
+    OperatorKindSpec { kind: "NewLine", op: Op::NewLine, arity: 0, default_args: Vec::new },
+    OperatorKindSpec { kind: "Tab", op: Op::Tab, arity: 0, default_args: Vec::new },
+    OperatorKindSpec { kind: "IndexOf", op: Op::IndexOf, arity: 2, default_args: || vec![text_default(), text_default()] },
+    OperatorKindSpec { kind: "LastIndexOf", op: Op::LastIndexOf, arity: 2, default_args: || vec![text_default(), text_default()] },
+    OperatorKindSpec { kind: "LetterOf", op: Op::LetterOf, arity: 2, default_args: || vec![Value::number(1.0), text_default()] },
+    OperatorKindSpec { kind: "Length", op: Op::Length, arity: 1, default_args: || vec![text_default()] },
+    // `args[1]` defaults to the dropdown's "uppercase" option — see
+    // `Op::Case`'s doc comment.
+    OperatorKindSpec {
+        kind: "Case",
+        op: Op::Case,
+        arity: 2,
+        default_args: || vec![text_default(), Value::Text { value: "Upper".to_string() }],
+    },
 ];
+
+/// 1-based char index of the first occurrence of `needle` in `haystack`, or
+/// `0` if `needle` is empty, longer than `haystack`, or not found. Scans by
+/// `char`, not byte, so it agrees with `Op::LetterOf`'s indexing on
+/// multi-byte text.
+fn char_index_of(haystack: &str, needle: &str) -> usize {
+    let h: Vec<char> = haystack.chars().collect();
+    let n: Vec<char> = needle.chars().collect();
+    if n.is_empty() || n.len() > h.len() {
+        return 0;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()] == n[..]).map_or(0, |i| i + 1)
+}
+
+/// Same as [`char_index_of`], but the last occurrence.
+fn char_last_index_of(haystack: &str, needle: &str) -> usize {
+    let h: Vec<char> = haystack.chars().collect();
+    let n: Vec<char> = needle.chars().collect();
+    if n.is_empty() || n.len() > h.len() {
+        return 0;
+    }
+    (0..=h.len() - n.len()).rev().find(|&i| h[i..i + n.len()] == n[..]).map_or(0, |i| i + 1)
+}
 
 impl Value {
     pub(crate) fn number(value: f64) -> Self {
@@ -110,6 +180,32 @@ impl Value {
             }
             Value::Op { op: Op::NewLine, .. } => Ok(Evaluated::Text("\n".to_string())),
             Value::Op { op: Op::Tab, .. } => Ok(Evaluated::Text("\t".to_string())),
+            Value::Op { op: Op::Length, args, .. } => Ok(Evaluated::Number(args[0].eval_text()?.chars().count() as f64)),
+            Value::Op { op: Op::IndexOf, args, .. } => {
+                let needle = args[0].eval_text()?;
+                let haystack = args[1].eval_text()?;
+                Ok(Evaluated::Number(char_index_of(&haystack, &needle) as f64))
+            }
+            Value::Op { op: Op::LastIndexOf, args, .. } => {
+                let needle = args[0].eval_text()?;
+                let haystack = args[1].eval_text()?;
+                Ok(Evaluated::Number(char_last_index_of(&haystack, &needle) as f64))
+            }
+            Value::Op { op: Op::LetterOf, args, .. } => {
+                let index = args[0].eval_number()? as i64;
+                let text = args[1].eval_text()?;
+                let chars: Vec<char> = text.chars().collect();
+                if index < 1 || index as usize > chars.len() {
+                    return Err(format!("letter {index} is out of range for a {}-character value", chars.len()));
+                }
+                Ok(Evaluated::Text(chars[index as usize - 1].to_string()))
+            }
+            Value::Op { op: Op::Case, args, .. } => {
+                let text = args[0].eval_text()?;
+                let upper = args[1].eval_text()? == "Upper";
+                Ok(Evaluated::Text(if upper { text.to_uppercase() } else { text.to_lowercase() }))
+            }
+            Value::Op { op: Op::Round, args, .. } => Ok(Evaluated::Number(args[0].eval_number()?.round())),
             Value::Op { op, args, .. } => {
                 let l = args[0].eval()?.as_number()?;
                 let r = args[1].eval()?.as_number()?;
@@ -123,6 +219,12 @@ impl Value {
                         }
                         l / r
                     }
+                    Op::Mod => {
+                        if r == 0.0 {
+                            return Err("mod by zero".to_string());
+                        }
+                        l.rem_euclid(r)
+                    }
                     Op::Random => {
                         let (lo, hi) = (l.min(r), l.max(r));
                         if l.fract() == 0.0 && r.fract() == 0.0 {
@@ -131,7 +233,8 @@ impl Value {
                             rand::rng().random_range(lo..=hi)
                         }
                     }
-                    Op::Join | Op::NewLine | Op::Tab => unreachable!("matched above"),
+                    Op::Join | Op::NewLine | Op::Tab | Op::Length | Op::IndexOf | Op::LastIndexOf | Op::LetterOf | Op::Case
+                    | Op::Round => unreachable!("matched above"),
                 };
                 Ok(Evaluated::Number(result))
             }
@@ -146,9 +249,9 @@ impl Value {
 
     /// Evaluates the tree down to a string — the entry point the `Text`
     /// instruction token calls. A `Text` leaf or a text-producing `Op`
-    /// (`Join`, `NewLine`, `Tab`) result passes through verbatim; a `Number`
-    /// leaf or another `Op` result (always numeric, even for `Op::Random`)
-    /// gets stringified.
+    /// (`Join`, `NewLine`, `Tab`, `LetterOf`, `Case`) result passes through
+    /// verbatim; a `Number` leaf or another `Op` result (always numeric,
+    /// even for `Op::Random`) gets stringified.
     pub(crate) fn eval_text(&self) -> Result<String, String> {
         Ok(match self.eval()? {
             Evaluated::Text(s) => s,
@@ -461,5 +564,81 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         let back: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
+    }
+
+    fn text(s: &str) -> Value {
+        Value::Text { value: s.to_string() }
+    }
+
+    #[test]
+    fn eval_number_mod_wraps_like_rem_euclid() {
+        let v = Value::Op { op: Op::Mod, args: vec![Value::number(-1.0), Value::number(5.0)], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(4.0));
+    }
+
+    #[test]
+    fn eval_number_mod_by_zero_errs() {
+        let v = Value::Op { op: Op::Mod, args: vec![Value::number(1.0), Value::number(0.0)], saved: Box::new(Value::number(0.0)) };
+        assert!(v.eval_number().is_err());
+    }
+
+    #[test]
+    fn eval_number_round_rounds_half_away_from_zero() {
+        let v = Value::Op { op: Op::Round, args: vec![Value::number(2.5)], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(3.0));
+    }
+
+    #[test]
+    fn eval_number_length_counts_chars_not_bytes() {
+        let v = Value::Op { op: Op::Length, args: vec![text("héllo")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(5.0));
+    }
+
+    #[test]
+    fn eval_number_index_of_is_one_based() {
+        let v = Value::Op { op: Op::IndexOf, args: vec![text("lo"), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(4.0));
+    }
+
+    #[test]
+    fn eval_number_index_of_not_found_is_zero() {
+        let v = Value::Op { op: Op::IndexOf, args: vec![text("xyz"), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(0.0));
+    }
+
+    #[test]
+    fn eval_number_last_index_of_finds_final_occurrence() {
+        let v = Value::Op { op: Op::LastIndexOf, args: vec![text("l"), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_number(), Ok(4.0));
+    }
+
+    #[test]
+    fn eval_text_letter_of_is_one_based() {
+        let v = Value::Op { op: Op::LetterOf, args: vec![Value::number(1.0), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_text(), Ok("h".to_string()));
+    }
+
+    #[test]
+    fn eval_text_letter_of_out_of_range_errs() {
+        let v = Value::Op { op: Op::LetterOf, args: vec![Value::number(6.0), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert!(v.eval_text().is_err());
+    }
+
+    #[test]
+    fn eval_text_letter_of_rejects_zero_index() {
+        let v = Value::Op { op: Op::LetterOf, args: vec![Value::number(0.0), text("hello")], saved: Box::new(Value::number(0.0)) };
+        assert!(v.eval_text().is_err());
+    }
+
+    #[test]
+    fn eval_text_case_uppercases_by_default_flag() {
+        let v = Value::Op { op: Op::Case, args: vec![text("Hello"), text("Upper")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_text(), Ok("HELLO".to_string()));
+    }
+
+    #[test]
+    fn eval_text_case_lowercases_when_flagged() {
+        let v = Value::Op { op: Op::Case, args: vec![text("Hello"), text("Lower")], saved: Box::new(Value::number(0.0)) };
+        assert_eq!(v.eval_text(), Ok("hello".to_string()));
     }
 }

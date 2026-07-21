@@ -422,14 +422,15 @@ fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
             let existing = std::mem::replace(node, Value::number(0.0));
             *node = match existing {
                 Value::Op { mut args, saved, .. } => {
-                    args.resize_with(spec.arity, spec.default_arg);
+                    let mut defaults = (spec.default_args)();
+                    if args.len() < spec.arity {
+                        args.extend(defaults.split_off(args.len()));
+                    } else {
+                        args.truncate(spec.arity);
+                    }
                     Value::Op { op: spec.op, args, saved }
                 }
-                other => Value::Op {
-                    op: spec.op,
-                    args: std::iter::repeat_with(spec.default_arg).take(spec.arity).collect(),
-                    saved: Box::new(other),
-                },
+                other => Value::Op { op: spec.op, args: (spec.default_args)(), saved: Box::new(other) },
             };
         }
     }
@@ -1808,6 +1809,44 @@ mod value_location_tests {
         };
         apply_value_kind(&mut node, "NewLine").unwrap();
         assert_eq!(node, Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(9.0)) });
+    }
+
+    #[test]
+    fn apply_value_kind_round_tucks_leaf_away_as_saved_with_one_arg() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Round").unwrap();
+        assert_eq!(node, Value::Op { op: Op::Round, args: vec![Value::number(0.0)], saved: Box::new(Value::number(5.0)) });
+    }
+
+    #[test]
+    fn apply_value_kind_case_defaults_second_arg_to_upper() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Case").unwrap();
+        assert_eq!(
+            node,
+            Value::Op {
+                op: Op::Case,
+                args: vec![Value::Text { value: String::new() }, Value::Text { value: "Upper".into() }],
+                saved: Box::new(Value::number(5.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn apply_value_kind_letter_of_grows_from_round_with_mixed_type_default() {
+        // Round (arity 1) -> LetterOf (arity 2): the surviving first arg
+        // keeps its value untouched, and the newly-added second slot gets
+        // LetterOf's own default type (text), not Round's (number).
+        let mut node = Value::Op { op: Op::Round, args: vec![Value::number(7.0)], saved: Box::new(Value::number(0.0)) };
+        apply_value_kind(&mut node, "LetterOf").unwrap();
+        assert_eq!(
+            node,
+            Value::Op {
+                op: Op::LetterOf,
+                args: vec![Value::number(7.0), Value::Text { value: String::new() }],
+                saved: Box::new(Value::number(0.0)),
+            }
+        );
     }
 
     #[test]

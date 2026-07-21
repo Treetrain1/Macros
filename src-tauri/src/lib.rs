@@ -23,15 +23,6 @@ pub fn run() {
     let _ = tracing_log::LogTracer::init();
 
     tauri::Builder::<Cef>::default()
-        .command_line_args([
-            ("--ozone-platform".to_string(), Some("x11".to_string())),
-            // Chromium's GPU process runs its own sandbox on top of `no_sandbox`
-            // (which only disables the main/renderer sandbox), and on some Linux
-            // setups that sandbox blocks the Mesa DRI loader from opening its own
-            // driver (dri_gbm.so) with EACCES, which crashes the GPU process
-            // instead of falling back to software rendering.
-            ("--disable-gpu-sandbox".to_string(), None),
-        ])
         .setup(|app| {
             let settings = config::load_settings();
 

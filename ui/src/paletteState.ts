@@ -36,7 +36,7 @@ function argsFor(spec: OperatorKindSpec): (number | string)[] {
 
 // Every operator prefab (Add/Sub/Mul/Div/Random/Join/Join3, and whatever's
 // added to valueOps.ts's OPERATOR_KINDS next) carries its own editable arg
-// list, numbers or text per its `argType` — there's no nesting support here
+// list, numbers or text per its `argTypes` — there's no nesting support here
 // (dropping another operator onto one of these fields would require the
 // sidebar to be a valid drop target, and it deliberately isn't, see
 // isOverSidebar), so these always stay plain leaves.
@@ -61,7 +61,7 @@ export function paletteValueFor(kind: ValueKind): ValueDto {
   return {
     kind: 'Op',
     op: spec.op,
-    args: args.map(v => (spec.argType === 'text' ? textValue(String(v)) : numberValue(Number(v)))),
+    args: args.map((v, i) => (spec.argTypes[i] === 'text' ? textValue(String(v)) : numberValue(Number(v)))),
     saved: numberValue(0),
   };
 }

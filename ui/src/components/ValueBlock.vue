@@ -25,8 +25,9 @@ import { computed, ref } from 'vue';
 import { editValueField } from '../tauri';
 import { getInvalidText, locationsEqual } from '../invalidField';
 import { beginValuePickup, dragReveal, evalPreview, isCapsuleLocation } from '../valueDrag';
-import { labelForOp } from '../valueOps';
+import { labelForOp, specForOp } from '../valueOps';
 import AutosizeInput from './AutosizeInput.vue';
+import AppDropdown from './AppDropdown.vue';
 import type { ValueDto, ValueLocationDto } from '../types';
 
 const props = defineProps<{
@@ -46,6 +47,15 @@ const displayValue = computed(() =>
 const buf = computed(() => (displayValue.value.kind === 'Number' ? getInvalidText(props.location) : null));
 
 const label = computed(() => (displayValue.value.kind === 'Op' ? labelForOp(displayValue.value.op) : undefined));
+
+// Set for operators with an `enumArg` (e.g. Case's upper/lowercase toggle)
+// — that arg renders as a dropdown bound via editValueField, not a nested
+// ValueBlock, since it's a fixed choice rather than a draggable value slot.
+const enumArg = computed(() => (displayValue.value.kind === 'Op' ? specForOp(displayValue.value.op)?.enumArg : undefined));
+
+function onEnumEdit(step: number, v: string) {
+  editValueField(childLocation(step), v);
+}
 
 // Set only for the exact operator node that was last clicked (not dragged)
 // — see valueDrag.ts's onPointerUp/previewClickedOperator. Auto-clears
@@ -67,7 +77,7 @@ function onEdit(text: string) {
 }
 
 function onPointerDown(e: PointerEvent) {
-  if ((e.target as Element | null)?.closest?.('input')) return;
+  if ((e.target as Element | null)?.closest?.('input, .dd')) return;
   // A bare leaf sitting in a field is just its input's padding — nothing to
   // grab, so don't let a click there start an extraction drag; only an
   // actual block (operator, floating root, or a dropped-in capsule leaf —
@@ -90,7 +100,14 @@ function onPointerDown(e: PointerEvent) {
       <span v-if="label?.prefix" class="value-op">{{ label.prefix }}</span>
       <template v-for="(arg, i) in displayValue.args" :key="i">
         <span v-if="i > 0 && label?.infix" class="value-op">{{ label.infix }}</span>
-        <ValueBlock :location="childLocation(i)" :value="arg" />
+        <AppDropdown
+          v-if="enumArg?.index === i"
+          :options="enumArg.options"
+          :model-value="arg.kind === 'Text' ? arg.value : ''"
+          class-name="dd-compact"
+          @update:model-value="v => onEnumEdit(i, v)"
+        />
+        <ValueBlock v-else :location="childLocation(i)" :value="arg" />
       </template>
     </template>
     <template v-else>

@@ -14,6 +14,7 @@ import { paletteNumber, paletteOperatorArgs, paletteText } from '../paletteState
 import { specForKind } from '../valueOps';
 import { beginValuePaletteDrag } from '../valueDrag';
 import AutosizeInput from './AutosizeInput.vue';
+import AppDropdown from './AppDropdown.vue';
 
 const props = defineProps<{ kind: ValueKind }>();
 
@@ -21,7 +22,7 @@ const spec = computed(() => specForKind(props.kind));
 const args = computed(() => (spec.value ? paletteOperatorArgs[spec.value.kind] : []));
 
 function onPointerDown(e: PointerEvent) {
-  if ((e.target as Element | null)?.closest?.('input')) return;
+  if ((e.target as Element | null)?.closest?.('input, .dd')) return;
   beginValuePaletteDrag(e, props.kind, e.currentTarget as HTMLElement);
 }
 
@@ -34,7 +35,7 @@ function onTextInput(v: string) {
 }
 function onArgInput(index: number, v: string) {
   if (!spec.value) return;
-  if (spec.value.argType === 'number') {
+  if (spec.value.argTypes[index] === 'number') {
     const n = Number(v);
     if (v.trim() !== '' && !isNaN(n)) args.value[index] = n;
   } else {
@@ -55,10 +56,18 @@ function onArgInput(index: number, v: string) {
       <span v-if="spec.prefix" class="value-op">{{ spec.prefix }}</span>
       <template v-for="(arg, i) in args" :key="i">
         <span v-if="i > 0 && spec.infix" class="value-op">{{ spec.infix }}</span>
-        <AutosizeInput
+        <AppDropdown
+          v-if="spec.enumArg?.index === i"
+          :options="spec.enumArg.options"
           :model-value="String(arg)"
-          :min-chars="spec.argType === 'text' ? 4 : 1"
-          :placeholder="spec.argType === 'text' ? 'text' : undefined"
+          class-name="dd-compact"
+          @update:model-value="v => onArgInput(i, v)"
+        />
+        <AutosizeInput
+          v-else
+          :model-value="String(arg)"
+          :min-chars="spec.argTypes[i] === 'text' ? 4 : 1"
+          :placeholder="spec.argTypes[i] === 'text' ? 'text' : undefined"
           @update:model-value="v => onArgInput(i, v)"
         />
       </template>

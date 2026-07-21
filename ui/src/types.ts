@@ -17,7 +17,10 @@ export type ValueOp =
 // 'Join'/'Join3' are two distinct palette entries (2 vs 3 args) that both
 // produce an `{ kind: 'Op', op: 'Join', ... }` ValueDto — there's no `Join3`
 // on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.
-export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3';
+// `Var:<name>` is a per-variable palette/kind identifier, not a fixed
+// operator — one exists per user-declared variable (see valueOps.ts's header
+// comment on why it's kept out of OPERATOR_KINDS).
+export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3' | `Var:${string}`;
 // `saved` is whatever value the operator displaced when it took over its
 // slot — not one of the operator's args, just carried along so the backend
 // can hand it straight back if this operator block is later dragged out of
@@ -25,7 +28,8 @@ export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3';
 export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
-  | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto };
+  | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto }
+  | { kind: 'Var'; name: string };
 
 export function numberValue(value: number): ValueDto {
   return { kind: 'Number', value };
@@ -42,6 +46,7 @@ export function textValue(value: string): ValueDto {
 export function defaultValueForKind(kind: ValueKind): ValueDto {
   if (kind === 'Number') return { kind: 'Number', value: 0 };
   if (kind === 'Text') return { kind: 'Text', value: '' };
+  if (kind.startsWith('Var:')) return { kind: 'Var', name: kind.slice('Var:'.length) };
   const spec = specForKind(kind);
   if (!spec) throw new Error(`Unknown value kind: ${kind}`);
   return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
@@ -76,7 +81,9 @@ export type InstructionDto =
   | { type: 'Scroll'; amount: ValueDto; axis: ScrollAxis }
   | { type: 'Command'; command: string }
   | { type: 'Comment'; comment: string }
-  | { type: 'WhenRan' };
+  | { type: 'WhenRan' }
+  | { type: 'SetVariable'; name: string; value: ValueDto }
+  | { type: 'ChangeVariable'; name: string; value: ValueDto };
 
 export type InstructionType = InstructionDto['type'];
 
@@ -95,6 +102,8 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'Scroll': return { type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
     case 'Command': return { type: 'Command', command: '' };
     case 'Comment': return { type: 'Comment', comment: '' };
+    case 'SetVariable': return { type: 'SetVariable', name: '', value: numberValue(0) };
+    case 'ChangeVariable': return { type: 'ChangeVariable', name: '', value: numberValue(0) };
     default: return { type: 'Comment', comment: '' };
   }
 }
@@ -120,6 +129,17 @@ export interface MacroDto {
   recording_target_strand_id: string | null;
   speed_multiplier: number;
   floating_values: FloatingValueDto[];
+  /** Declared variable names only — current values aren't surfaced to the
+   * frontend, there's no "watcher" UI. Insertion order; sort with
+   * `sortedVariableNames` for display. */
+  variables: string[];
+}
+
+/** Alphabetical variable names for a macro — used by the sidebar's reporter
+ * list and every Set/Change dropdown, so sort order never needs re-deriving
+ * ad hoc at each call site. */
+export function sortedVariableNames(macro: MacroDto | null | undefined): string[] {
+  return [...(macro?.variables ?? [])].sort((a, b) => a.localeCompare(b));
 }
 
 export interface KeyCaptureDto {

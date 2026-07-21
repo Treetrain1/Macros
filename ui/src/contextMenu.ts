@@ -6,7 +6,7 @@ import { reactive } from 'vue';
 import { registerOpen, unregisterOpen } from './dropdownRegistry';
 import { clientToCanvas } from './canvasDrag';
 
-export type ContextMenuType = 'block' | 'canvas';
+export type ContextMenuType = 'block' | 'canvas' | 'variable';
 
 interface ContextMenuState {
   open: boolean;
@@ -17,6 +17,7 @@ interface ContextMenuState {
   index: number;
   canvasX: number;
   canvasY: number;
+  variableName: string;
 }
 
 export const contextMenu = reactive<ContextMenuState>({
@@ -28,6 +29,7 @@ export const contextMenu = reactive<ContextMenuState>({
   index: 0,
   canvasX: 0,
   canvasY: 0,
+  variableName: '',
 });
 
 function openAt(e: MouseEvent) {
@@ -50,6 +52,12 @@ export function openCanvasMenu(e: MouseEvent): void {
   const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
   contextMenu.canvasX = cx;
   contextMenu.canvasY = cy;
+}
+
+export function openVariableMenu(e: MouseEvent, name: string): void {
+  openAt(e);
+  contextMenu.type = 'variable';
+  contextMenu.variableName = name;
 }
 
 export function closeContextMenu(): void {

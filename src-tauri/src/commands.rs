@@ -1,6 +1,7 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::{loop_control, thread, FloatingValue, Instruction, Macro, Strand, SPEED_MULTIPLIER_RANGE};
+use crate::macros::runner::VariableStore;
+use crate::macros::{loop_control, thread, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
 use crate::input::types::InputToken;
 use crate::input::value::{Evaluated, Value, OPERATOR_KINDS};
 use crate::recording;
@@ -12,7 +13,7 @@ use crate::state::{
 };
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{Runtime, State};
 use tracing::warn;
 
@@ -57,6 +58,20 @@ fn refresh_macro_list(s: &mut crate::state::AppState) {
     s.macros_list = macros;
 }
 
+/// Resyncs the live variable store (`AppState::variable_values`) to whatever
+/// `s.current_macro` currently declares — called right after `current_macro`
+/// is (re)assigned (select/new/import), so the store never carries stale
+/// entries from a previously-loaded macro.
+fn sync_variable_values(s: &mut crate::state::AppState) {
+    let values = match &s.current_macro {
+        Some(mac) => mac.variables.iter().map(|v| (v.name.clone(), v.value.clone())).collect(),
+        None => HashMap::new(),
+    };
+    if let Ok(mut store) = s.variable_values.lock() {
+        *store = values;
+    }
+}
+
 fn auto_save(s: &crate::state::AppState) {
     if let Some(mac) = &s.current_macro {
         if let Err(e) = mac.save() {
@@ -93,6 +108,7 @@ pub(crate) fn select_macro<R: Runtime>(state: State<SharedState>, app: tauri::Ap
     s.redo_stack.clear();
     s.invalid_field_buffers.clear();
     s.text_edit_session = None;
+    sync_variable_values(&mut s);
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -113,6 +129,7 @@ pub(crate) fn new_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
         config::set_selected_macro_id(Some(&new_id));
     }
     s.invalid_field_buffers.clear();
+    sync_variable_values(&mut s);
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -188,6 +205,104 @@ pub(crate) fn set_macro_speed_multiplier<R: Runtime>(state: State<SharedState>, 
     Ok(())
 }
 
+/// Validates and pushes a new `VariableDef` onto `mac`, returning the
+/// trimmed name on success — factored out of `create_variable` so the
+/// name/duplicate rules are testable without a real `tauri::State`.
+fn create_variable_in(mac: &mut Macro, name: &str) -> Result<String, String> {
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("Variable name can't be empty".to_string());
+    }
+    if mac.variables.iter().any(|v| v.name == trimmed) {
+        return Err(format!("A variable named \"{trimmed}\" already exists"));
+    }
+    mac.variables.push(VariableDef { name: trimmed.clone(), value: Evaluated::Number(0.0) });
+    Ok(trimmed)
+}
+
+/// Declares a new macro-wide variable, starting at `0`. Rejected if the
+/// (trimmed) name is empty or already used — no `push_undo`, same precedent
+/// as `set_title` (a naming/creation action, not an undoable structural
+/// edit).
+#[tauri::command]
+pub(crate) fn create_variable<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, name: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let trimmed = create_variable_in(mac, &name)?;
+    if let Ok(mut store) = s.variable_values.lock() {
+        store.insert(trimmed, Evaluated::Number(0.0));
+    }
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Validates the new name and renames `old_name` to it on `mac` (including
+/// every existing reference — see `Macro::rename_variable`), returning the
+/// trimmed name on success. Renaming to the same (trimmed) name is a no-op
+/// success, not a duplicate error.
+fn rename_variable_in(mac: &mut Macro, old_name: &str, new_name: &str) -> Result<String, String> {
+    let trimmed = new_name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("Variable name can't be empty".to_string());
+    }
+    if trimmed != old_name && mac.variables.iter().any(|v| v.name == trimmed) {
+        return Err(format!("A variable named \"{trimmed}\" already exists"));
+    }
+    mac.rename_variable(old_name, &trimmed);
+    Ok(trimmed)
+}
+
+/// Renames a declared variable and every existing reference to it (see
+/// `Macro::rename_variable`). No `push_undo` — same precedent as
+/// `create_variable`.
+#[tauri::command]
+pub(crate) fn rename_variable<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let trimmed = rename_variable_in(mac, &old_name, &new_name)?;
+    if trimmed != old_name {
+        if let Ok(mut store) = s.variable_values.lock() {
+            if let Some(v) = store.remove(&old_name) {
+                store.insert(trimmed, v);
+            }
+        }
+    }
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Removes `name` from `mac.variables` — factored out of `delete_variable`
+/// so it's testable without a real `tauri::State`. Existing `Value::Var`
+/// reads and `SetVariable`/`ChangeVariable` blocks targeting it are left in
+/// place rather than scrubbed — they just harmlessly read/write a name no
+/// longer backed by a declaration (`resolve_vars` defaults an unknown name
+/// to `0`, same as it always has for a stray reference).
+fn delete_variable_in(mac: &mut Macro, name: &str) {
+    mac.variables.retain(|v| v.name != name);
+}
+
+/// Deletes a declared variable. No `push_undo` — same precedent as
+/// `create_variable`.
+#[tauri::command]
+pub(crate) fn delete_variable<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, name: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    delete_variable_in(mac, &name);
+    if let Ok(mut store) = s.variable_values.lock() {
+        store.remove(&name);
+    }
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn save_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -256,6 +371,7 @@ pub(crate) async fn import_macro<R: Runtime>(state: State<'_, SharedState>, app:
         config::set_selected_macro_id(Some(&new_id));
     }
     s.invalid_field_buffers.clear();
+    sync_variable_values(&mut s);
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -349,6 +465,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
         (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
         (Instruction::Token(InputToken::Text(t)), FieldId::TextValue) => Some(t),
+        (Instruction::SetVariable(_, v), FieldId::SetVariableValue) => Some(v),
+        (Instruction::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
         _ => None,
     }
 }
@@ -391,21 +509,29 @@ fn prune_value_buffers(buffers: &mut HashMap<ValueLocation, String>, location: &
 /// `set_value_kind` for dropping a fresh block from the sidebar onto an
 /// occupied slot (best-effort keeps the old leaf rather than discarding it,
 /// see the match arms below).
-fn apply_value_kind(node: &mut Value, kind: &str) -> Result<(), String> {
+fn apply_value_kind(node: &mut Value, kind: &str, env: &HashMap<String, Evaluated>) -> Result<(), String> {
     match kind {
         "Number" => {
             // Best-effort: collapsing `(2)+(3)` gives `5` instead of
-            // discarding the user's work.
-            let n = node.eval().and_then(|e| e.as_number()).unwrap_or(0.0);
+            // discarding the user's work; a `Var` reporter best-effort
+            // carries over its current value the same way.
+            let n = node.resolve_vars(env).eval().and_then(|e| e.as_number()).unwrap_or(0.0);
             *node = Value::number(n);
         }
         "Text" => {
-            let text = match node.eval() {
+            let text = match node.resolve_vars(env).eval() {
                 Ok(Evaluated::Text(s)) => s,
                 Ok(Evaluated::Number(n)) => n.to_string(),
                 Err(_) => String::new(),
             };
             *node = Value::Text { value: text };
+        }
+        _ if kind.starts_with("Var:") => {
+            // A variable reporter is a plain leaf, like `Number`/`Text` —
+            // no arity, no `saved` slot to tuck the old content into (it
+            // restores to a plain `0` on take-out, same as any other leaf).
+            let name = kind["Var:".len()..].to_string();
+            *node = Value::Var { name };
         }
         _ => {
             // Any other kind is an operator — looked up in the shared
@@ -489,9 +615,10 @@ pub(crate) fn set_value_kind<R: Runtime>(
     let loc = location.to_location()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     push_undo(&mut s);
+    let env: HashMap<String, Evaluated> = s.variable_values.lock().map(|g| g.clone()).unwrap_or_default();
     let result = if let Some(mac) = &mut s.current_macro {
         match resolve_location_mut(mac, &loc) {
-            Some(node) => apply_value_kind(node, &kind),
+            Some(node) => apply_value_kind(node, &kind, &env),
             None => Ok(()),
         }
     } else {
@@ -582,8 +709,16 @@ pub(crate) fn put_value<R: Runtime>(
 /// still comes back stringified. `Op::Random` samples fresh every call, same
 /// as it would during an actual macro run.
 #[tauri::command]
-pub(crate) fn preview_value(value: ValueDto) -> Result<String, String> {
-    dto_to_value(&value).eval_text()
+pub(crate) fn preview_value(state: State<SharedState>, value: ValueDto) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let env: HashMap<String, Evaluated> = s.variable_values.lock().map(|g| g.clone()).unwrap_or_default();
+    preview_value_with_env(&value, &env)
+}
+
+/// The actual evaluation logic behind `preview_value`, factored out so it's
+/// testable without a real `tauri::State`.
+fn preview_value_with_env(value: &ValueDto, env: &HashMap<String, Evaluated>) -> Result<String, String> {
+    dto_to_value(value).resolve_vars(env).eval_text()
 }
 
 /// Creates a new value block parked on open canvas — used both for a fresh
@@ -1077,14 +1212,15 @@ pub(crate) fn key_capture_event<R: Runtime>(
 
 #[tauri::command]
 pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
-    let (mac, emulator, is_looping, loop_mode, speed_multiplier) = {
+    let (mac, emulator, is_looping, loop_mode, speed_multiplier, variables) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mac = s.current_macro.clone();
         let emulator = s.emulator.as_ref().map(Arc::clone);
         let is_looping = Arc::clone(&s.is_looping);
         let loop_mode = s.loop_mode_enabled;
         let speed_multiplier = mac.as_ref().map_or(1.0, |m| m.speed_multiplier) * s.global_speed_multiplier;
-        (mac, emulator, is_looping, loop_mode, speed_multiplier)
+        let variables = Arc::clone(&s.variable_values);
+        (mac, emulator, is_looping, loop_mode, speed_multiplier, variables)
     };
 
     if let (Some(mac), Some(emulator)) = (mac, emulator) {
@@ -1094,7 +1230,14 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
                 return Ok(());
             }
             let mac_name = mac.name.clone();
-            let loop_task = mac.into_loop_task(Arc::clone(&emulator), Arc::clone(&is_looping), speed_multiplier);
+            let loop_task = mac.into_loop_task(
+                Arc::clone(&emulator),
+                Arc::clone(&is_looping),
+                speed_multiplier,
+                variables,
+                Arc::clone(&*state),
+                app.clone(),
+            );
             let mut s = state.lock().map_err(|e| e.to_string())?;
             if let Err(e) = thread::spawn_macro_thread(
                 &mut s.thread_pool,
@@ -1107,7 +1250,14 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
         } else {
             let _ = loop_control::set_loop_state(&is_looping, true);
             let mac_name = mac.name.clone();
-            let single_run_task = mac.into_single_run_task(Arc::clone(&emulator), Arc::clone(&is_looping), speed_multiplier);
+            let single_run_task = mac.into_single_run_task(
+                Arc::clone(&emulator),
+                Arc::clone(&is_looping),
+                speed_multiplier,
+                variables,
+                Arc::clone(&*state),
+                app.clone(),
+            );
             let mut s = state.lock().map_err(|e| e.to_string())?;
             if let Err(e) = thread::spawn_macro_thread(
                 &mut s.thread_pool,
@@ -1522,6 +1672,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 let is_looping = Arc::clone(&s.is_looping);
                 let loop_mode = s.loop_mode_enabled;
                 let global_speed_multiplier = s.global_speed_multiplier;
+                let shared_state = Arc::clone(state);
                 let mac = match &action {
                     HotkeyAction::RunMacro => s.current_macro.clone(),
                     HotkeyAction::RunSpecificMacro(id) => {
@@ -1533,7 +1684,13 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 drop(s);
                 if let Some(mac) = mac {
                     let speed_multiplier = mac.speed_multiplier * global_speed_multiplier;
-                    run_macro_task(mac, emulator, is_looping, loop_mode, speed_multiplier);
+                    // A fresh store seeded from this macro's own persisted
+                    // values — not `AppState::variable_values`, which tracks
+                    // whichever macro is currently *selected* and may not be
+                    // the one a `RunSpecificMacro` hotkey is running.
+                    let variables: VariableStore =
+                        Arc::new(Mutex::new(mac.variables.iter().map(|v| (v.name.clone(), v.value.clone())).collect()));
+                    run_macro_task(mac, emulator, is_looping, loop_mode, speed_multiplier, variables, shared_state, app.clone());
                 }
             }
         }
@@ -1614,37 +1771,36 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
     }
 }
 
-fn run_macro_task(
+fn run_macro_task<R: Runtime>(
     mac: Macro,
     emulator: Arc<std::sync::Mutex<dyn crate::macros::backend::InputBackend>>,
     is_looping: Arc<std::sync::Mutex<bool>>,
     loop_mode: bool,
     speed_multiplier: f64,
+    variables: VariableStore,
+    state: SharedState,
+    app: tauri::AppHandle<R>,
 ) {
     if loop_mode {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
         let loop_flag = Arc::clone(&is_looping);
+        // `into_loop_task` already loops internally until `loop_flag` clears
+        // and persists the final variable values once it stops — no need to
+        // hand-roll the loop here too.
+        let task = mac.into_loop_task(emulator, loop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
             #[cfg(windows)]
             crate::macros::backend::windows::prepare_for_macro_execution();
-            loop {
-                if let Ok(should_continue) = loop_flag.lock() {
-                    if !*should_continue { break; }
-                } else {
-                    break;
-                }
-                mac.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)), speed_multiplier);
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
+            task();
         });
     } else {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
         let stop_flag = Arc::clone(&is_looping);
+        let task = mac.into_single_run_task(emulator, stop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
             #[cfg(windows)]
             crate::macros::backend::windows::prepare_for_macro_execution();
-            mac.run(emulator, Some(Arc::clone(&stop_flag)), speed_multiplier);
-            if let Ok(mut st) = stop_flag.lock() { *st = false; }
+            task();
         });
     }
 }
@@ -1672,6 +1828,7 @@ mod value_location_tests {
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![FloatingValue { id: "f1".into(), x: 10, y: 20, value: Value::number(5.0) }],
+            variables: vec![],
         }
     }
 
@@ -1701,7 +1858,7 @@ mod value_location_tests {
     #[test]
     fn apply_value_kind_tucks_leaf_away_as_saved() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Add").unwrap();
+        apply_value_kind(&mut node, "Add", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op { op: Op::Add, args: vec![Value::number(0.0), Value::number(0.0)], saved: Box::new(Value::number(5.0)) }
@@ -1712,14 +1869,14 @@ mod value_location_tests {
     fn apply_value_kind_collapses_operator_to_number_best_effort() {
         let mut node =
             Value::Op { op: Op::Add, args: vec![Value::number(2.0), Value::number(3.0)], saved: Box::new(Value::number(0.0)) };
-        apply_value_kind(&mut node, "Number").unwrap();
+        apply_value_kind(&mut node, "Number", &HashMap::new()).unwrap();
         assert_eq!(node, Value::number(5.0));
     }
 
     #[test]
     fn apply_value_kind_random_tucks_leaf_away_as_saved() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Random").unwrap();
+        apply_value_kind(&mut node, "Random", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op { op: Op::Random, args: vec![Value::number(0.0), Value::number(0.0)], saved: Box::new(Value::number(5.0)) }
@@ -1729,13 +1886,28 @@ mod value_location_tests {
     #[test]
     fn apply_value_kind_rejects_unknown_kind() {
         let mut node = Value::number(0.0);
-        assert!(apply_value_kind(&mut node, "Bogus").is_err());
+        assert!(apply_value_kind(&mut node, "Bogus", &HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn apply_value_kind_var_becomes_a_plain_leaf() {
+        let mut node = Value::number(5.0);
+        apply_value_kind(&mut node, "Var:x", &HashMap::new()).unwrap();
+        assert_eq!(node, Value::Var { name: "x".to_string() });
+    }
+
+    #[test]
+    fn apply_value_kind_number_best_effort_carries_over_variable_value() {
+        let mut node = Value::Var { name: "x".to_string() };
+        let env = HashMap::from([("x".to_string(), Evaluated::Number(7.0))]);
+        apply_value_kind(&mut node, "Number", &env).unwrap();
+        assert_eq!(node, Value::number(7.0));
     }
 
     #[test]
     fn apply_value_kind_join_tucks_leaf_away_as_saved() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Join").unwrap();
+        apply_value_kind(&mut node, "Join", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op {
@@ -1753,7 +1925,7 @@ mod value_location_tests {
             args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
             saved: Box::new(Value::number(9.0)),
         };
-        apply_value_kind(&mut node, "Join3").unwrap();
+        apply_value_kind(&mut node, "Join3", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op {
@@ -1775,7 +1947,7 @@ mod value_location_tests {
             args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }, Value::Text { value: "c".into() }],
             saved: Box::new(Value::number(0.0)),
         };
-        apply_value_kind(&mut node, "Join").unwrap();
+        apply_value_kind(&mut node, "Join", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op {
@@ -1789,14 +1961,14 @@ mod value_location_tests {
     #[test]
     fn apply_value_kind_new_line_tucks_leaf_away_as_saved_with_no_args() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "NewLine").unwrap();
+        apply_value_kind(&mut node, "NewLine", &HashMap::new()).unwrap();
         assert_eq!(node, Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(5.0)) });
     }
 
     #[test]
     fn apply_value_kind_tab_tucks_leaf_away_as_saved_with_no_args() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Tab").unwrap();
+        apply_value_kind(&mut node, "Tab", &HashMap::new()).unwrap();
         assert_eq!(node, Value::Op { op: Op::Tab, args: vec![], saved: Box::new(Value::number(5.0)) });
     }
 
@@ -1807,21 +1979,21 @@ mod value_location_tests {
             args: vec![Value::Text { value: "a".into() }, Value::Text { value: "b".into() }],
             saved: Box::new(Value::number(9.0)),
         };
-        apply_value_kind(&mut node, "NewLine").unwrap();
+        apply_value_kind(&mut node, "NewLine", &HashMap::new()).unwrap();
         assert_eq!(node, Value::Op { op: Op::NewLine, args: vec![], saved: Box::new(Value::number(9.0)) });
     }
 
     #[test]
     fn apply_value_kind_round_tucks_leaf_away_as_saved_with_one_arg() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Round").unwrap();
+        apply_value_kind(&mut node, "Round", &HashMap::new()).unwrap();
         assert_eq!(node, Value::Op { op: Op::Round, args: vec![Value::number(0.0)], saved: Box::new(Value::number(5.0)) });
     }
 
     #[test]
     fn apply_value_kind_case_defaults_second_arg_to_upper() {
         let mut node = Value::number(5.0);
-        apply_value_kind(&mut node, "Case").unwrap();
+        apply_value_kind(&mut node, "Case", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op {
@@ -1838,7 +2010,7 @@ mod value_location_tests {
         // keeps its value untouched, and the newly-added second slot gets
         // LetterOf's own default type (text), not Round's (number).
         let mut node = Value::Op { op: Op::Round, args: vec![Value::number(7.0)], saved: Box::new(Value::number(0.0)) };
-        apply_value_kind(&mut node, "LetterOf").unwrap();
+        apply_value_kind(&mut node, "LetterOf", &HashMap::new()).unwrap();
         assert_eq!(
             node,
             Value::Op {
@@ -1917,6 +2089,7 @@ mod value_location_tests {
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![],
+            variables: vec![],
         };
         let loc = ValueLocation::Field { strand_id: "s1".into(), index: 0, field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));
@@ -1929,7 +2102,7 @@ mod value_location_tests {
             args: vec![ValueDto::Number { value: 2.0 }, ValueDto::Number { value: 3.0 }],
             saved: Box::new(ValueDto::Number { value: 0.0 }),
         };
-        assert_eq!(preview_value(dto), Ok("5".to_string()));
+        assert_eq!(preview_value_with_env(&dto, &HashMap::new()), Ok("5".to_string()));
     }
 
     #[test]
@@ -1939,7 +2112,7 @@ mod value_location_tests {
             args: vec![ValueDto::Text { value: "foo".into() }, ValueDto::Text { value: "bar".into() }],
             saved: Box::new(ValueDto::Number { value: 0.0 }),
         };
-        assert_eq!(preview_value(dto), Ok("foobar".to_string()));
+        assert_eq!(preview_value_with_env(&dto, &HashMap::new()), Ok("foobar".to_string()));
     }
 
     #[test]
@@ -1949,6 +2122,85 @@ mod value_location_tests {
             args: vec![ValueDto::Number { value: 1.0 }, ValueDto::Number { value: 0.0 }],
             saved: Box::new(ValueDto::Number { value: 0.0 }),
         };
-        assert!(preview_value(dto).is_err());
+        assert!(preview_value_with_env(&dto, &HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn create_variable_in_adds_variable_starting_at_zero() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let name = create_variable_in(&mut mac, "score").unwrap();
+        assert_eq!(name, "score");
+        assert_eq!(mac.variables, vec![VariableDef { name: "score".into(), value: Evaluated::Number(0.0) }]);
+    }
+
+    #[test]
+    fn create_variable_in_trims_whitespace() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let name = create_variable_in(&mut mac, "  score  ").unwrap();
+        assert_eq!(name, "score");
+    }
+
+    #[test]
+    fn create_variable_in_rejects_empty_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        assert!(create_variable_in(&mut mac, "   ").is_err());
+    }
+
+    #[test]
+    fn create_variable_in_rejects_duplicate_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        create_variable_in(&mut mac, "score").unwrap();
+        assert!(create_variable_in(&mut mac, "score").is_err());
+        assert_eq!(mac.variables.len(), 1);
+    }
+
+    #[test]
+    fn rename_variable_in_renames_and_updates_references() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::SetVariable("score".to_string(), Value::number(1.0))]);
+        create_variable_in(&mut mac, "score").unwrap();
+        let name = rename_variable_in(&mut mac, "score", "points").unwrap();
+        assert_eq!(name, "points");
+        assert_eq!(mac.variables[0].name, "points");
+        assert_eq!(mac.strands[0].instructions[1], Instruction::SetVariable("points".to_string(), Value::number(1.0)));
+    }
+
+    #[test]
+    fn rename_variable_in_trims_whitespace() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        create_variable_in(&mut mac, "score").unwrap();
+        let name = rename_variable_in(&mut mac, "score", "  points  ").unwrap();
+        assert_eq!(name, "points");
+    }
+
+    #[test]
+    fn rename_variable_in_rejects_empty_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        create_variable_in(&mut mac, "score").unwrap();
+        assert!(rename_variable_in(&mut mac, "score", "   ").is_err());
+    }
+
+    #[test]
+    fn rename_variable_in_rejects_duplicate_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        create_variable_in(&mut mac, "score").unwrap();
+        create_variable_in(&mut mac, "points").unwrap();
+        assert!(rename_variable_in(&mut mac, "score", "points").is_err());
+    }
+
+    #[test]
+    fn rename_variable_in_allows_renaming_to_its_own_current_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        create_variable_in(&mut mac, "score").unwrap();
+        assert_eq!(rename_variable_in(&mut mac, "score", "score").unwrap(), "score");
+        assert_eq!(mac.variables.len(), 1);
+    }
+
+    #[test]
+    fn delete_variable_in_removes_declaration_but_leaves_references() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::Token(InputToken::Text(Value::Var { name: "score".to_string() }))]);
+        create_variable_in(&mut mac, "score").unwrap();
+        delete_variable_in(&mut mac, "score");
+        assert!(mac.variables.is_empty());
+        assert_eq!(mac.strands[0].instructions[1], Instruction::Token(InputToken::Text(Value::Var { name: "score".to_string() })));
     }
 }

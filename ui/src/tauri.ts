@@ -25,6 +25,10 @@ export const setMacroSpeedMultiplier = (multiplier: number) =>
 export const saveMacro = () => invoke<void>('save_macro');
 export const exportMacro = (macroId: string) => invoke<void>('export_macro', { macroId });
 export const importMacro = () => invoke<void>('import_macro');
+export const createVariable = (name: string) => invoke<void>('create_variable', { name });
+export const renameVariable = (oldName: string, newName: string) =>
+  invoke<void>('rename_variable', { oldName, newName });
+export const deleteVariable = (name: string) => invoke<void>('delete_variable', { name });
 
 // ─── Instructions ───────────────────────────────────────────────────────────
 export const addInstruction = (strandId: string, index: number, instruction: InstructionDto) =>

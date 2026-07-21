@@ -95,6 +95,45 @@ async function previewClickedOperator(location: ValueLocationDto, value: ValueDt
   }
 }
 
+// Same idea as `evalPreview` above, but for a sidebar palette prefab —
+// which has no `ValueLocationDto` (it isn't a real block anywhere yet), so
+// it's keyed by `kind` instead. PaletteValueBlock.vue renders the tooltip.
+export const paletteEvalPreview = ref<{ kind: ValueKind; text: string; error: boolean } | null>(null);
+let paletteEvalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showPaletteEvalPreview(kind: ValueKind, text: string, error: boolean) {
+  if (paletteEvalPreviewTimer) clearTimeout(paletteEvalPreviewTimer);
+  paletteEvalPreview.value = { kind, text, error };
+  paletteEvalPreviewTimer = setTimeout(() => {
+    paletteEvalPreview.value = null;
+    paletteEvalPreviewTimer = null;
+  }, EVAL_PREVIEW_TIMEOUT_MS);
+}
+
+function clearPaletteEvalPreview() {
+  if (paletteEvalPreviewTimer) {
+    clearTimeout(paletteEvalPreviewTimer);
+    paletteEvalPreviewTimer = null;
+  }
+  paletteEvalPreview.value = null;
+}
+
+// Number/Text prefabs are plain literals — previewing "5" as "5" isn't
+// useful, and matches ValueBlock.vue's own rule that a bare leaf (not boxed)
+// never previews on click, only an operator or variable reporter does.
+function isPreviewableKind(kind: ValueKind): boolean {
+  return kind !== 'Number' && kind !== 'Text';
+}
+
+async function previewClickedPaletteValue(kind: ValueKind) {
+  try {
+    const text = await previewValue(paletteValueFor(kind));
+    showPaletteEvalPreview(kind, text, false);
+  } catch (err) {
+    showPaletteEvalPreview(kind, String(err), true);
+  }
+}
+
 type ValueDragSource =
   | { kind: 'existing'; location: ValueLocationDto; value: ValueDto }
   | { kind: 'fresh'; valueKind: ValueKind };
@@ -135,6 +174,7 @@ export function beginValuePickup(e: PointerEvent, location: ValueLocationDto, va
   e.preventDefault();
   capturePointer(e);
   clearEvalPreview();
+  clearPaletteEvalPreview();
   valueDragCandidate = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, anchorEl, source: { kind: 'existing', location, value } };
 }
 
@@ -147,6 +187,7 @@ export function beginValuePaletteDrag(e: PointerEvent, valueKind: ValueKind, anc
   e.preventDefault();
   capturePointer(e);
   clearEvalPreview();
+  clearPaletteEvalPreview();
   valueDragCandidate = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, anchorEl, source: { kind: 'fresh', valueKind } };
 }
 
@@ -296,11 +337,15 @@ function onPointerUp(e: PointerEvent) {
     const candidate = valueDragCandidate;
     valueDragCandidate = null;
     // Never crossed the drag threshold — a plain click. A real pointerup
-    // (not a cancel) on an existing operator block samples-evaluates it; a
-    // leaf, a palette prefab, or a cancelled gesture does nothing, same as
-    // today.
-    if (e.type === 'pointerup' && candidate.source.kind === 'existing' && candidate.source.value.kind === 'Op') {
-      void previewClickedOperator(candidate.source.location, candidate.source.value);
+    // (not a cancel) on an existing operator/variable block, or a
+    // sidebar operator/variable prefab, samples-evaluates it; a leaf or a
+    // cancelled gesture does nothing, same as today.
+    if (e.type === 'pointerup') {
+      if (candidate.source.kind === 'existing' && (candidate.source.value.kind === 'Op' || candidate.source.value.kind === 'Var')) {
+        void previewClickedOperator(candidate.source.location, candidate.source.value);
+      } else if (candidate.source.kind === 'fresh' && isPreviewableKind(candidate.source.valueKind)) {
+        void previewClickedPaletteValue(candidate.source.valueKind);
+      }
     }
   }
   if (!valueDrag || valueDrag.pointerId !== e.pointerId) return;

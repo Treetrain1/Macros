@@ -1,5 +1,6 @@
 use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 
 /// Operator for a [`Value::Op`] block — arithmetic, [`Op::Random`],
 /// [`Op::Join`] (text concatenation), a zero-arity text constant
@@ -68,14 +69,39 @@ pub(crate) enum Value {
     Number { value: f64 },
     Text { value: String },
     Op { op: Op, args: Vec<Value>, saved: Box<Value> },
+    /// A read of a macro-wide variable by name — a leaf like `Number`/`Text`
+    /// (no args, no `saved` slot), resolved against the running macro's
+    /// variable store by [`Value::resolve_vars`] before `eval` ever sees it.
+    Var { name: String },
 }
 
 /// The result of evaluating a [`Value`] tree — still either a number or
 /// text, since a leaf can be either; only an arithmetic/`Random` [`Op`]
-/// forces its args down to a number (via [`Evaluated::as_number`]).
+/// forces its args down to a number (via [`Evaluated::as_number`]). Also
+/// doubles as the persisted representation of a variable's current value
+/// (see `macros::VariableDef`), so it derives the traits that needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value")]
 pub(crate) enum Evaluated {
     Number(f64),
     Text(String),
+}
+
+/// Manual impl mirroring `Value`'s own — `f64` isn't `Hash`, so its bit
+/// pattern stands in.
+impl std::hash::Hash for Evaluated {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Evaluated::Number(n) => {
+                0u8.hash(state);
+                n.to_bits().hash(state);
+            }
+            Evaluated::Text(s) => {
+                1u8.hash(state);
+                s.hash(state);
+            }
+        }
+    }
 }
 
 impl Evaluated {
@@ -171,6 +197,10 @@ impl Value {
         match self {
             Value::Number { value } => Ok(Evaluated::Number(*value)),
             Value::Text { value } => Ok(Evaluated::Text(value.clone())),
+            // Every real call site resolves vars via `resolve_vars` first —
+            // this only fires if that step was skipped, so it reads as a
+            // bug rather than something a user's macro can trigger.
+            Value::Var { .. } => Err("unresolved variable reference".to_string()),
             Value::Op { op: Op::Join, args, .. } => {
                 let mut s = String::new();
                 for a in args {
@@ -270,6 +300,51 @@ impl Value {
             },
         }
     }
+
+    /// Renames every [`Value::Var`] leaf reading `old` (anywhere in this
+    /// tree, including `saved`) to `new` — used by `Macro::rename_variable`
+    /// so an in-progress macro's existing reporter/setter/getter blocks keep
+    /// working after a variable is renamed, rather than being silently
+    /// orphaned.
+    pub(crate) fn rename_var(&mut self, old: &str, new: &str) {
+        match self {
+            Value::Var { name } => {
+                if name == old {
+                    *name = new.to_string();
+                }
+            }
+            Value::Op { args, saved, .. } => {
+                for arg in args.iter_mut() {
+                    arg.rename_var(old, new);
+                }
+                saved.rename_var(old, new);
+            }
+            Value::Number { .. } | Value::Text { .. } => {}
+        }
+    }
+
+    /// Rebuilds this tree with every [`Value::Var`] leaf replaced by a
+    /// `Number`/`Text` leaf holding its current value from `env` (or `0` if
+    /// the name isn't in `env` — shouldn't happen in practice, but a stray
+    /// reference must still evaluate to something rather than erroring the
+    /// whole tree). Must be called before `eval`/`eval_number`/`eval_text`
+    /// on any tree that might contain a variable read.
+    pub(crate) fn resolve_vars(&self, env: &HashMap<String, Evaluated>) -> Value {
+        match self {
+            Value::Number { value } => Value::Number { value: *value },
+            Value::Text { value } => Value::Text { value: value.clone() },
+            Value::Op { op, args, saved } => Value::Op {
+                op: *op,
+                args: args.iter().map(|a| a.resolve_vars(env)).collect(),
+                saved: Box::new(saved.resolve_vars(env)),
+            },
+            Value::Var { name } => match env.get(name) {
+                Some(Evaluated::Number(n)) => Value::Number { value: *n },
+                Some(Evaluated::Text(s)) => Value::Text { value: s.clone() },
+                None => Value::number(0.0),
+            },
+        }
+    }
 }
 
 /// Manual impl mirroring `Instruction`'s own manual `Hash` impl
@@ -290,6 +365,10 @@ impl std::hash::Hash for Value {
                 op.hash(state);
                 args.hash(state);
                 saved.hash(state);
+            }
+            Value::Var { name } => {
+                3u8.hash(state);
+                name.hash(state);
             }
         }
     }
@@ -322,6 +401,7 @@ impl<'de> Deserialize<'de> for Value {
                 #[serde(default = "default_saved")]
                 saved: Box<Value>,
             },
+            Var { name: String },
             // Legacy tags predating the `BinaryOp`/`Join` → `Op` unification
             // — kept only so old save files keep loading; migrated into
             // `Value::Op` below, never produced by `Serialize`.
@@ -356,6 +436,7 @@ impl<'de> Deserialize<'de> for Value {
             ValueDe::Current(Tagged::Number { value }) => Value::Number { value },
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
             ValueDe::Current(Tagged::Op { op, args, saved }) => Value::Op { op, args, saved },
+            ValueDe::Current(Tagged::Var { name }) => Value::Var { name },
             ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs, saved }) => Value::Op { op, args: vec![*lhs, *rhs], saved },
             ValueDe::Current(Tagged::Join { args, saved }) => Value::Op { op: Op::Join, args, saved },
         })
@@ -640,5 +721,78 @@ mod tests {
     fn eval_text_case_lowercases_when_flagged() {
         let v = Value::Op { op: Op::Case, args: vec![text("Hello"), text("Lower")], saved: Box::new(Value::number(0.0)) };
         assert_eq!(v.eval_text(), Ok("hello".to_string()));
+    }
+
+    #[test]
+    fn resolve_vars_replaces_leaf_with_current_number_value() {
+        let env = HashMap::from([("x".to_string(), Evaluated::Number(5.0))]);
+        let v = Value::Var { name: "x".to_string() };
+        assert_eq!(v.resolve_vars(&env), Value::number(5.0));
+    }
+
+    #[test]
+    fn resolve_vars_replaces_leaf_with_current_text_value() {
+        let env = HashMap::from([("s".to_string(), Evaluated::Text("hi".to_string()))]);
+        let v = Value::Var { name: "s".to_string() };
+        assert_eq!(v.resolve_vars(&env), text("hi"));
+    }
+
+    #[test]
+    fn resolve_vars_defaults_missing_name_to_zero() {
+        let v = Value::Var { name: "missing".to_string() };
+        assert_eq!(v.resolve_vars(&HashMap::new()), Value::number(0.0));
+    }
+
+    #[test]
+    fn resolve_vars_recurses_into_op_args_and_saved() {
+        let env = HashMap::from([("x".to_string(), Evaluated::Number(2.0))]);
+        let v = Value::Op {
+            op: Op::Add,
+            args: vec![Value::Var { name: "x".to_string() }, Value::number(3.0)],
+            saved: Box::new(Value::Var { name: "x".to_string() }),
+        };
+        let resolved = v.resolve_vars(&env);
+        assert_eq!(resolved.eval_number(), Ok(5.0));
+        match resolved {
+            Value::Op { saved, .. } => assert_eq!(*saved, Value::number(2.0)),
+            _ => panic!("expected Op"),
+        }
+    }
+
+    #[test]
+    fn eval_errs_on_unresolved_var() {
+        let v = Value::Var { name: "x".to_string() };
+        assert!(v.eval().is_err());
+    }
+
+    #[test]
+    fn rename_var_renames_matching_leaf() {
+        let mut v = Value::Var { name: "x".to_string() };
+        v.rename_var("x", "y");
+        assert_eq!(v, Value::Var { name: "y".to_string() });
+    }
+
+    #[test]
+    fn rename_var_ignores_non_matching_leaf() {
+        let mut v = Value::Var { name: "x".to_string() };
+        v.rename_var("z", "y");
+        assert_eq!(v, Value::Var { name: "x".to_string() });
+    }
+
+    #[test]
+    fn rename_var_recurses_into_op_args_and_saved() {
+        let mut v = Value::Op {
+            op: Op::Add,
+            args: vec![Value::Var { name: "x".to_string() }, Value::number(3.0)],
+            saved: Box::new(Value::Var { name: "x".to_string() }),
+        };
+        v.rename_var("x", "y");
+        match v {
+            Value::Op { args, saved, .. } => {
+                assert_eq!(args[0], Value::Var { name: "y".to_string() });
+                assert_eq!(*saved, Value::Var { name: "y".to_string() });
+            }
+            _ => panic!("expected Op"),
+        }
     }
 }

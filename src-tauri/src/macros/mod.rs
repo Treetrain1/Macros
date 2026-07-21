@@ -1,6 +1,7 @@
 use crate::input::types::InputToken;
-use crate::input::value::{Op, Value};
+use crate::input::value::{Evaluated, Op, Value};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub(crate) mod backend;
@@ -66,12 +67,45 @@ fn default_floating_value_id() -> String {
     Uuid::new_v4().simple().to_string()
 }
 
+fn default_variable_value() -> Evaluated {
+    Evaluated::Number(0.0)
+}
+
+/// A user-declared macro-wide variable and its current value. The name is
+/// fixed at creation (no rename/delete UI yet); the value is mutated by
+/// `Instruction::SetVariable`/`ChangeVariable` at runtime and persisted with
+/// the macro so it survives an app restart — see `AppState::variable_values`
+/// for the live store this is synced from/to.
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+pub(crate) struct VariableDef {
+    pub(crate) name: String,
+    #[serde(default = "default_variable_value")]
+    pub(crate) value: Evaluated,
+}
+
 impl Instruction {
     /// Returns `true` for "header" blocks — blocks that must be first in their
     /// strand, cannot have anything stacked above them, and render with a flat
     /// top edge (no connector notch). Currently only `WhenRan`.
     pub(crate) fn is_header(&self) -> bool {
         matches!(self, Instruction::WhenRan)
+    }
+
+    /// See `Value::rename_var` — also renames a `SetVariable`/`ChangeVariable`
+    /// instruction's own target name, not just `Value::Var` reads nested
+    /// inside its value.
+    pub(crate) fn rename_var(&mut self, old: &str, new: &str) {
+        match self {
+            Instruction::Wait(value) => value.rename_var(old, new),
+            Instruction::Token(token) => token.rename_var(old, new),
+            Instruction::SetVariable(name, value) | Instruction::ChangeVariable(name, value) => {
+                if name == old {
+                    *name = new.to_string();
+                }
+                value.rename_var(old, new);
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan => {}
+        }
     }
 }
 
@@ -107,6 +141,9 @@ pub(crate) struct Macro {
     /// Value blocks parked on open canvas — see `FloatingValue`.
     #[serde(default)]
     pub(crate) floating_values: Vec<FloatingValue>,
+    /// User-declared macro-wide variables — see `VariableDef`.
+    #[serde(default)]
+    pub(crate) variables: Vec<VariableDef>,
 }
 
 /// Valid range for both the per-macro and global speed multipliers, enforced
@@ -132,6 +169,8 @@ enum MacroDe {
         speed_multiplier: f64,
         #[serde(default)]
         floating_values: Vec<FloatingValue>,
+        #[serde(default)]
+        variables: Vec<VariableDef>,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -145,7 +184,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
-            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables } => {
                 // Pre-"When Ran" saves have a strand literally id=="root" that
                 // was the sole implicit entry point; give it a real WhenRan
                 // block so it keeps running after upgrade.
@@ -154,12 +193,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values }
+                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values, variables }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new() }
+                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new() }
             }
         }
     }
@@ -177,6 +216,7 @@ impl Macro {
             recording_target: None,
             speed_multiplier: default_speed_multiplier(),
             floating_values: Vec::new(),
+            variables: Vec::new(),
         }
     }
 
@@ -196,6 +236,39 @@ impl Macro {
 
     pub(crate) fn floating_value_mut(&mut self, id: &str) -> Option<&mut FloatingValue> {
         self.floating_values.iter_mut().find(|f| f.id == id)
+    }
+
+    /// Writes the live runtime values (`AppState::variable_values`, keyed by
+    /// name) back into this macro's `variables` before it's saved to disk —
+    /// used once a run finishes/a loop stops, not per-instruction (see
+    /// `macros::thread`).
+    pub(crate) fn sync_variables_from(&mut self, values: &HashMap<String, Evaluated>) {
+        for var in &mut self.variables {
+            if let Some(v) = values.get(&var.name) {
+                var.value = v.clone();
+            }
+        }
+    }
+
+    /// Renames a declared variable and every existing reference to it —
+    /// `Value::Var` reads and `SetVariable`/`ChangeVariable` targets, in
+    /// every strand and floating value — so in-progress blocks keep working
+    /// under the new name instead of being silently orphaned. A no-op if
+    /// `old` isn't a declared variable.
+    pub(crate) fn rename_variable(&mut self, old: &str, new: &str) {
+        if let Some(var) = self.variables.iter_mut().find(|v| v.name == old) {
+            var.name = new.to_string();
+        } else {
+            return;
+        }
+        for strand in &mut self.strands {
+            for ins in &mut strand.instructions {
+                ins.rename_var(old, new);
+            }
+        }
+        for fv in &mut self.floating_values {
+            fv.value.rename_var(old, new);
+        }
     }
 
     /// Strand that freshly-recorded input gets appended to: the explicitly
@@ -247,6 +320,15 @@ pub(crate) enum Instruction {
     /// as its own concurrent thread when the macro is run. A macro can have
     /// any number of these.
     WhenRan,
+    /// `set <name> to <value>` — overwrites the named variable with whatever
+    /// `value` evaluates to (number, text, or anything else the tree
+    /// resolves down to).
+    SetVariable(String, Value),
+    /// `change <name> by <value>` — adds `value` to the named variable.
+    /// `value` must evaluate to a number (a no-op otherwise); the variable's
+    /// own current value is coerced to `0` first if it isn't already
+    /// numeric. See `macros::runner::run_instructions`.
+    ChangeVariable(String, Value),
 }
 
 impl std::hash::Hash for Macro {
@@ -258,6 +340,7 @@ impl std::hash::Hash for Macro {
         self.recording_target.hash(state);
         self.speed_multiplier.to_bits().hash(state);
         self.floating_values.hash(state);
+        self.variables.hash(state);
     }
 }
 
@@ -269,6 +352,8 @@ impl std::hash::Hash for Instruction {
             Self::Command(s) => { 2u8.hash(state); s.hash(state); }
             Self::Comment(s) => { 3u8.hash(state); s.hash(state); }
             Self::WhenRan    => { 4u8.hash(state); }
+            Self::SetVariable(n, v)    => { 5u8.hash(state); n.hash(state); v.hash(state); }
+            Self::ChangeVariable(n, v) => { 6u8.hash(state); n.hash(state); v.hash(state); }
         }
     }
 }
@@ -280,6 +365,8 @@ enum InstructionDe {
     Command(String),
     Comment(String),
     WhenRan,
+    SetVariable(String, Value),
+    ChangeVariable(String, Value),
 }
 
 #[derive(Deserialize)]
@@ -329,6 +416,8 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Command(s) => Instruction::Command(s),
             InstructionDe::Comment(s) => Instruction::Comment(s),
             InstructionDe::WhenRan => Instruction::WhenRan,
+            InstructionDe::SetVariable(n, v) => Instruction::SetVariable(n, v),
+            InstructionDe::ChangeVariable(n, v) => Instruction::ChangeVariable(n, v),
         }
     }
 }
@@ -423,5 +512,32 @@ mod tests {
             ins,
             Instruction::Token(InputToken::MoveMouse(Value::number(5.0), Value::number(10.0), Coordinate::Rel)),
         );
+    }
+
+    #[test]
+    fn rename_variable_renames_declaration_and_every_reference() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![
+            Instruction::SetVariable("x".to_string(), Value::number(1.0)),
+            Instruction::ChangeVariable("x".to_string(), Value::Var { name: "x".to_string() }),
+            Instruction::Token(InputToken::Text(Value::Var { name: "x".to_string() })),
+        ]);
+        mac.variables.push(VariableDef { name: "x".to_string(), value: Evaluated::Number(0.0) });
+        mac.floating_values.push(FloatingValue { id: "f1".into(), x: 0, y: 0, value: Value::Var { name: "x".to_string() } });
+
+        mac.rename_variable("x", "y");
+
+        assert_eq!(mac.variables[0].name, "y");
+        let strand = &mac.strands[0];
+        assert_eq!(strand.instructions[1], Instruction::SetVariable("y".to_string(), Value::number(1.0)));
+        assert_eq!(strand.instructions[2], Instruction::ChangeVariable("y".to_string(), Value::Var { name: "y".to_string() }));
+        assert_eq!(strand.instructions[3], Instruction::Token(InputToken::Text(Value::Var { name: "y".to_string() })));
+        assert_eq!(mac.floating_values[0].value, Value::Var { name: "y".to_string() });
+    }
+
+    #[test]
+    fn rename_variable_is_a_no_op_for_undeclared_name() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::Token(InputToken::Text(Value::Var { name: "x".to_string() }))]);
+        mac.rename_variable("x", "y");
+        assert_eq!(mac.strands[0].instructions[1], Instruction::Token(InputToken::Text(Value::Var { name: "x".to_string() })));
     }
 }

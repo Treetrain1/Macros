@@ -518,6 +518,25 @@ body.sidebar-resizing {
   flex-shrink: 0;
 }
 
+/* The "Variables" section label also hosts the "Make a Variable" button —
+   same border-top/padding as a plain .sidebar-section-label, just laid out
+   as a row instead of a single line of text. */
+.sidebar-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-sm) 0;
+  border-top: 1px solid var(--glass-border);
+}
+.sidebar-section-label-row .sidebar-section-label { border-top: none; padding: 0; }
+.btn-make-variable {
+  min-height: unset;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 /* ── Canvas (Scratch-like strand layout) ─────────────────────────────────── */
 .canvas-scroll {
   position: absolute;
@@ -1129,6 +1148,44 @@ body.sidebar-resizing {
 @keyframes overlayFadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
+}
+
+/* ── Modal dialogs (e.g. "Make a Variable") ─────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: overlayFadeIn var(--dur-fast) var(--ease-standard);
+}
+.modal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 280px;
+  padding: var(--spacing);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.modal-input {
+  width: 100%;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
 }
 
 /* Disable interactive elements while recording */

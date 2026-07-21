@@ -22,6 +22,8 @@ import PaletteMoveMouseFields from './fields/palette/PaletteMoveMouseFields.vue'
 import PaletteScrollFields from './fields/palette/PaletteScrollFields.vue';
 import PaletteCommandFields from './fields/palette/PaletteCommandFields.vue';
 import PaletteCommentFields from './fields/palette/PaletteCommentFields.vue';
+import PaletteSetVariableFields from './fields/palette/PaletteSetVariableFields.vue';
+import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableFields.vue';
 
 const props = defineProps<{ type: InstructionType }>();
 
@@ -35,6 +37,8 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   Scroll: PaletteScrollFields,
   Command: PaletteCommandFields,
   Comment: PaletteCommentFields,
+  SetVariable: PaletteSetVariableFields,
+  ChangeVariable: PaletteChangeVariableFields,
 };
 
 const instruction = computed(() => paletteInstructions[props.type]);

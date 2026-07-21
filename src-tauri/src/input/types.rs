@@ -196,3 +196,18 @@ pub enum InputToken {
     Text(Value),
     Raw(u16, Direction),
 }
+
+impl InputToken {
+    /// See `Value::rename_var` — walks every embedded `Value` tree.
+    pub(crate) fn rename_var(&mut self, old: &str, new: &str) {
+        match self {
+            InputToken::MoveMouse(x, y, _) => {
+                x.rename_var(old, new);
+                y.rename_var(old, new);
+            }
+            InputToken::Scroll(amount, _) => amount.rename_var(old, new),
+            InputToken::Text(value) => value.rename_var(old, new),
+            InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
+        }
+    }
+}

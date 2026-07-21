@@ -3,9 +3,10 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { state } from '../store';
 import { contextMenu, closeContextMenu } from '../contextMenu';
 import { copyAll, copyBlock, clipboardContents, hasClipboard } from '../clipboard';
-import { addInstruction, clearInstructions, deleteInstruction, pasteInstructions, setRecordingTarget } from '../tauri';
+import { addInstruction, clearInstructions, deleteInstruction, deleteVariable, pasteInstructions, setRecordingTarget } from '../tauri';
 import { clientToCanvas } from '../canvasDrag';
 import { ICONS } from '../icons';
+import { openRenameVariableDialog } from '../variableDialogs';
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' });
@@ -111,6 +112,14 @@ function onPaste() {
   if (contents) pasteInstructions(contextMenu.canvasX, contextMenu.canvasY, contents);
   closeContextMenu();
 }
+function onRenameVariable() {
+  openRenameVariableDialog(contextMenu.variableName);
+  closeContextMenu();
+}
+function onDeleteVariable() {
+  deleteVariable(contextMenu.variableName);
+  closeContextMenu();
+}
 </script>
 
 <template>
@@ -142,7 +151,7 @@ function onPaste() {
           <span>Delete block</span>
         </button>
       </template>
-      <template v-else>
+      <template v-else-if="contextMenu.type === 'canvas'">
         <button
           type="button"
           class="context-menu-item context-menu-item-danger"
@@ -156,6 +165,16 @@ function onPaste() {
         <button type="button" class="context-menu-item" role="menuitem" :disabled="!hasClipboard()" @click="onPaste">
           <span class="context-menu-item-icon"><component :is="ICONS['clipboard-paste']" /></span>
           <span>Paste</span>
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" class="context-menu-item" role="menuitem" @click="onRenameVariable">
+          <span class="context-menu-item-icon"><component :is="ICONS.equal" /></span>
+          <span>Rename variable</span>
+        </button>
+        <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteVariable">
+          <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
+          <span>Delete variable</span>
         </button>
       </template>
     </div>

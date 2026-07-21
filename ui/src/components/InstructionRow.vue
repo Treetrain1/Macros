@@ -15,6 +15,8 @@ import ScrollFields from './fields/ScrollFields.vue';
 import CommandFields from './fields/CommandFields.vue';
 import CommentFields from './fields/CommentFields.vue';
 import WhenRanFields from './fields/WhenRanFields.vue';
+import SetVariableFields from './fields/SetVariableFields.vue';
+import ChangeVariableFields from './fields/ChangeVariableFields.vue';
 
 const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
@@ -28,6 +30,8 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   Scroll: ScrollFields,
   Command: CommandFields,
   Comment: CommentFields,
+  SetVariable: SetVariableFields,
+  ChangeVariable: ChangeVariableFields,
 };
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);

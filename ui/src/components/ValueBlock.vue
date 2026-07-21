@@ -65,6 +65,7 @@ const preview = computed(() =>
 
 const boxed = computed(() =>
   displayValue.value.kind === 'Op' ||
+  displayValue.value.kind === 'Var' ||
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
@@ -109,6 +110,9 @@ function onPointerDown(e: PointerEvent) {
         />
         <ValueBlock v-else :location="childLocation(i)" :value="arg" />
       </template>
+    </template>
+    <template v-else-if="displayValue.kind === 'Var'">
+      <span class="value-op">{{ displayValue.name }}</span>
     </template>
     <template v-else>
       <AutosizeInput

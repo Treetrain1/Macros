@@ -1,14 +1,32 @@
 use crate::input::types::{Coordinate, Direction, InputToken, MacroKey};
-use crate::input::value::Value;
+use crate::input::value::{Evaluated, Value};
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
 use crate::macros::{Instruction, Macro, Strand};
 use spin_sleep::{SpinSleeper, SpinStrategy};
+use std::collections::HashMap;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
+
+/// Shared, macro-wide variable store — `AppState::variable_values` is the
+/// UI/persistence side of this same map; execution threads share it via this
+/// `Arc` so a `Set`/`Change` in one strand is visible to another running
+/// concurrently. See `Macro::run`.
+pub(crate) type VariableStore = Arc<Mutex<HashMap<String, Evaluated>>>;
+
+/// Resolves `value`'s variable reads against the current contents of
+/// `variables`, tolerating a poisoned lock by falling back to an empty
+/// environment (missing names just resolve to `0`, same as `resolve_vars`'s
+/// own default) rather than propagating a panic into macro execution.
+fn resolve_with_vars(value: &Value, variables: &VariableStore) -> Value {
+    match variables.lock() {
+        Ok(guard) => value.resolve_vars(&guard),
+        Err(_) => value.resolve_vars(&HashMap::new()),
+    }
+}
 
 static EMULATOR_FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -33,7 +51,13 @@ impl Macro {
     /// once. Strands that aren't entry points are preserved on the macro but
     /// stay inert. Blocks until every entry strand has finished (or been
     /// stopped), matching the old single-root behavior for callers.
-    pub(crate) fn run(self, emulator: Arc<Mutex<dyn InputBackend>>, stop_flag: Option<Arc<Mutex<bool>>>, speed_multiplier: f64) {
+    pub(crate) fn run(
+        self,
+        emulator: Arc<Mutex<dyn InputBackend>>,
+        stop_flag: Option<Arc<Mutex<bool>>>,
+        speed_multiplier: f64,
+        variables: VariableStore,
+    ) {
         let entry_strands: Vec<Vec<Instruction>> = self.strands.into_iter()
             .filter(Strand::starts_with_when_ran)
             .map(|s| s.instructions)
@@ -44,7 +68,7 @@ impl Macro {
         let rest: Vec<_> = iter.collect();
 
         if rest.is_empty() {
-            run_instructions(first, emulator, stop_flag, speed_multiplier);
+            run_instructions(first, emulator, stop_flag, speed_multiplier, variables);
             return;
         }
 
@@ -52,9 +76,10 @@ impl Macro {
             for instructions in rest {
                 let emulator = Arc::clone(&emulator);
                 let stop_flag = stop_flag.clone();
-                scope.spawn(move || run_instructions(instructions, emulator, stop_flag, speed_multiplier));
+                let variables = Arc::clone(&variables);
+                scope.spawn(move || run_instructions(instructions, emulator, stop_flag, speed_multiplier, variables));
             }
-            run_instructions(first, emulator, stop_flag, speed_multiplier);
+            run_instructions(first, emulator, stop_flag, speed_multiplier, variables);
         });
     }
 }
@@ -76,6 +101,7 @@ pub(crate) fn run_instructions(
     emulator: Arc<Mutex<dyn InputBackend>>,
     stop_flag: Option<Arc<Mutex<bool>>>,
     speed_multiplier: f64,
+    variables: VariableStore,
 ) {
     raise_current_thread_priority();
     let mut deadline = Instant::now();
@@ -109,7 +135,7 @@ pub(crate) fn run_instructions(
             Instruction::Comment(_) => {}
             Instruction::WhenRan => {}
             Instruction::Wait(duration) => {
-                let duration = match duration.eval_number() {
+                let duration = match resolve_with_vars(&duration, &variables).eval_number() {
                     Ok(v) => v,
                     Err(e) => {
                         warn!("Skipping Wait: duration {}", e);
@@ -170,7 +196,7 @@ pub(crate) fn run_instructions(
                 };
 
                 match token {
-                    InputToken::Text(value) => match value.eval_text() {
+                    InputToken::Text(value) => match resolve_with_vars(&value, &variables).eval_text() {
                         Ok(text) => {
                             if let Err(err) = em.text(&text) {
                                 warn!("Failed to type text '{}': {}", text, err);
@@ -226,11 +252,11 @@ pub(crate) fn run_instructions(
                         }
                     }
                     InputToken::MoveMouse(x, y, Coordinate::Rel) => {
-                        let x = match x.eval_number() {
+                        let x = match resolve_with_vars(&x, &variables).eval_number() {
                             Ok(v) => v.round() as i32,
                             Err(e) => { warn!("Skipping relative mouse move: x {}", e); continue; }
                         };
-                        let y = match y.eval_number() {
+                        let y = match resolve_with_vars(&y, &variables).eval_number() {
                             Ok(v) => v.round() as i32,
                             Err(e) => { warn!("Skipping relative mouse move: y {}", e); continue; }
                         };
@@ -239,11 +265,11 @@ pub(crate) fn run_instructions(
                         }
                     }
                     InputToken::MoveMouse(x, y, Coordinate::Abs) => {
-                        let x = match x.eval_number() {
+                        let x = match resolve_with_vars(&x, &variables).eval_number() {
                             Ok(v) => v.round() as i32,
                             Err(e) => { warn!("Skipping absolute mouse move: x {}", e); continue; }
                         };
-                        let y = match y.eval_number() {
+                        let y = match resolve_with_vars(&y, &variables).eval_number() {
                             Ok(v) => v.round() as i32,
                             Err(e) => { warn!("Skipping absolute mouse move: y {}", e); continue; }
                         };
@@ -252,7 +278,7 @@ pub(crate) fn run_instructions(
                         }
                     }
                     InputToken::Scroll(amount, axis) => {
-                        let amount = match amount.eval_number() {
+                        let amount = match resolve_with_vars(&amount, &variables).eval_number() {
                             Ok(v) => v.round() as i32,
                             Err(e) => { warn!("Skipping scroll: {}", e); continue; }
                         };
@@ -260,6 +286,31 @@ pub(crate) fn run_instructions(
                             warn!("Failed to scroll by {}: {}", amount, err);
                         }
                     }
+                }
+            }
+            Instruction::SetVariable(name, value) => {
+                match resolve_with_vars(&value, &variables).eval() {
+                    Ok(result) => {
+                        if let Ok(mut vars) = variables.lock() {
+                            vars.insert(name, result);
+                        }
+                    }
+                    Err(e) => warn!("Skipping Set Variable: {}", e),
+                }
+            }
+            Instruction::ChangeVariable(name, value) => {
+                match resolve_with_vars(&value, &variables).eval() {
+                    // The delta must be numeric — text is a deliberate no-op.
+                    Ok(Evaluated::Text(_)) => {}
+                    Ok(Evaluated::Number(delta)) => {
+                        if let Ok(mut vars) = variables.lock() {
+                            // Non-numeric (or missing) current value coerces
+                            // to 0 before adding, same leniency Scratch uses.
+                            let current = vars.get(&name).and_then(|e| e.as_number().ok()).unwrap_or(0.0);
+                            vars.insert(name, Evaluated::Number(current + delta));
+                        }
+                    }
+                    Err(e) => warn!("Skipping Change Variable: {}", e),
                 }
             }
             _ => {
@@ -318,6 +369,10 @@ mod tests {
         }
     }
 
+    fn empty_vars() -> VariableStore {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
     /// Three entry strands each waiting 150ms should finish in well under
     /// 3×150ms if they're actually running concurrently rather than one
     /// after another.
@@ -336,10 +391,11 @@ mod tests {
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![],
+            variables: vec![],
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let start = Instant::now();
-        mac.run(emulator, None, 1.0);
+        mac.run(emulator, None, 1.0, empty_vars());
         assert!(start.elapsed() < Duration::from_millis(400), "entry strands ran sequentially instead of concurrently");
     }
 
@@ -356,6 +412,7 @@ mod tests {
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![],
+            variables: vec![],
         };
         let emulator: Arc<Mutex<dyn InputBackend>> = Arc::new(Mutex::new(NoopBackend));
         let stop_flag = Arc::new(Mutex::new(true));
@@ -365,7 +422,76 @@ mod tests {
             *flag_clone.lock().unwrap() = false;
         });
         let start = Instant::now();
-        mac.run(emulator, Some(stop_flag), 1.0);
+        mac.run(emulator, Some(stop_flag), 1.0, empty_vars());
         assert!(start.elapsed() < Duration::from_millis(1000), "stop flag didn't stop both concurrent strands promptly");
+    }
+
+    #[test]
+    fn set_variable_writes_evaluated_value() {
+        let vars = empty_vars();
+        run_instructions(
+            vec![Instruction::SetVariable("x".to_string(), Value::number(5.0))],
+            Arc::new(Mutex::new(NoopBackend)),
+            None,
+            1.0,
+            Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(5.0)));
+    }
+
+    #[test]
+    fn change_variable_adds_to_existing_numeric_value() {
+        let vars = empty_vars();
+        vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(10.0));
+        run_instructions(
+            vec![Instruction::ChangeVariable("x".to_string(), Value::number(5.0))],
+            Arc::new(Mutex::new(NoopBackend)),
+            None,
+            1.0,
+            Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(15.0)));
+    }
+
+    #[test]
+    fn change_variable_coerces_non_numeric_current_value_to_zero() {
+        let vars = empty_vars();
+        vars.lock().unwrap().insert("x".to_string(), Evaluated::Text("hello".to_string()));
+        run_instructions(
+            vec![Instruction::ChangeVariable("x".to_string(), Value::number(5.0))],
+            Arc::new(Mutex::new(NoopBackend)),
+            None,
+            1.0,
+            Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(5.0)));
+    }
+
+    #[test]
+    fn change_variable_with_text_delta_is_a_no_op() {
+        let vars = empty_vars();
+        vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(10.0));
+        run_instructions(
+            vec![Instruction::ChangeVariable("x".to_string(), Value::Text { value: "abc".to_string() })],
+            Arc::new(Mutex::new(NoopBackend)),
+            None,
+            1.0,
+            Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(10.0)));
+    }
+
+    #[test]
+    fn set_variable_value_can_read_other_variables() {
+        let vars = empty_vars();
+        vars.lock().unwrap().insert("y".to_string(), Evaluated::Number(7.0));
+        run_instructions(
+            vec![Instruction::SetVariable("x".to_string(), Value::Var { name: "y".to_string() })],
+            Arc::new(Mutex::new(NoopBackend)),
+            None,
+            1.0,
+            Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(7.0)));
     }
 }

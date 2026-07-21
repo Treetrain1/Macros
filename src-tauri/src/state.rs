@@ -1,6 +1,6 @@
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
-use crate::input::value::{Op, Value};
+use crate::input::value::{Evaluated, Op, Value};
 use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use crate::macros::backend::InputBackend;
 use crate::macros::thread_pool::ThreadPool;
@@ -18,6 +18,8 @@ pub(crate) enum FieldId {
     MoveMouseY,
     ScrollAmount,
     TextValue,
+    SetVariableValue,
+    ChangeVariableValue,
 }
 
 impl std::fmt::Display for FieldId {
@@ -28,6 +30,8 @@ impl std::fmt::Display for FieldId {
             FieldId::MoveMouseY => write!(f, "MoveMouseY"),
             FieldId::ScrollAmount => write!(f, "ScrollAmount"),
             FieldId::TextValue => write!(f, "TextValue"),
+            FieldId::SetVariableValue => write!(f, "SetVariableValue"),
+            FieldId::ChangeVariableValue => write!(f, "ChangeVariableValue"),
         }
     }
 }
@@ -41,6 +45,8 @@ impl std::str::FromStr for FieldId {
             "MoveMouseY" => Ok(FieldId::MoveMouseY),
             "ScrollAmount" => Ok(FieldId::ScrollAmount),
             "TextValue" => Ok(FieldId::TextValue),
+            "SetVariableValue" => Ok(FieldId::SetVariableValue),
+            "ChangeVariableValue" => Ok(FieldId::ChangeVariableValue),
             _ => Err(format!("Unknown FieldId: {s}")),
         }
     }
@@ -89,6 +95,12 @@ pub(crate) struct AppState {
     pub(crate) macros_list: Vec<Macro>,
     pub(crate) macro_strs: Vec<String>,
     pub(crate) emulator: Option<Arc<Mutex<dyn InputBackend>>>,
+    /// Live macro-wide variable store, shared with background execution
+    /// threads exactly like `emulator` — kept out of the main state lock so
+    /// a long-running macro never blocks other commands. Synced from the
+    /// selected macro's `Macro::variables` on load, written back to disk
+    /// once a run finishes (see `macros::thread`).
+    pub(crate) variable_values: Arc<Mutex<HashMap<String, Evaluated>>>,
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
     pub(crate) loop_mode_enabled: bool,
@@ -164,6 +176,9 @@ pub(crate) struct MacroDto {
     pub(crate) recording_target_strand_id: Option<String>,
     pub(crate) speed_multiplier: f64,
     pub(crate) floating_values: Vec<FloatingValueDto>,
+    /// Declared variable names only — current values aren't surfaced to the
+    /// frontend (no "watcher" UI), just used by the sidebar/dropdowns.
+    pub(crate) variables: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -186,6 +201,7 @@ pub(crate) enum ValueDto {
     Number { value: f64 },
     Text { value: String },
     Op { op: Op, args: Vec<ValueDto>, saved: Box<ValueDto> },
+    Var { name: String },
 }
 
 #[derive(Serialize, Clone)]
@@ -300,6 +316,8 @@ pub(crate) enum InstructionDto {
     Command { command: String },
     Comment { comment: String },
     WhenRan,
+    SetVariable { name: String, value: ValueDto },
+    ChangeVariable { name: String, value: ValueDto },
 }
 
 #[derive(Serialize, Clone)]
@@ -415,6 +433,7 @@ pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
         Value::Op { op, args, saved } => {
             ValueDto::Op { op: *op, args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
         }
+        Value::Var { name } => ValueDto::Var { name: name.clone() },
     }
 }
 
@@ -425,6 +444,7 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
         ValueDto::Op { op, args, saved } => {
             Value::Op { op: *op, args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
         }
+        ValueDto::Var { name } => Value::Var { name: name.clone() },
     }
 }
 
@@ -434,6 +454,8 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
         Instruction::WhenRan => InstructionDto::WhenRan,
+        Instruction::SetVariable(name, value) => InstructionDto::SetVariable { name: name.clone(), value: value_to_dto(value) },
+        Instruction::ChangeVariable(name, value) => InstructionDto::ChangeVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::Token(token) => match token {
             InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
@@ -481,6 +503,8 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
         InstructionDto::Command { command } => Instruction::Command(command.clone()),
         InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
         InstructionDto::WhenRan => Instruction::WhenRan,
+        InstructionDto::SetVariable { name, value } => Instruction::SetVariable(name.clone(), dto_to_value(value)),
+        InstructionDto::ChangeVariable { name, value } => Instruction::ChangeVariable(name.clone(), dto_to_value(value)),
     })
 }
 
@@ -506,6 +530,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         recording_target_strand_id: mac.recording_target_id(),
         speed_multiplier: mac.speed_multiplier,
         floating_values: mac.floating_values.iter().map(floating_value_to_dto).collect(),
+        variables: mac.variables.iter().map(|v| v.name.clone()).collect(),
     }
 }
 

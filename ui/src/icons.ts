@@ -39,6 +39,8 @@ import {
   Layers,
   Upload,
   Download,
+  Equal,
+  TrendingUp,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -80,6 +82,8 @@ export const ICONS = {
   layers: Layers,
   upload: Upload,
   download: Download,
+  equal: Equal,
+  'trending-up': TrendingUp,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -95,6 +99,8 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   Scroll: 'mouse',
   Command: 'terminal',
   Comment: 'message-square',
+  SetVariable: 'equal',
+  ChangeVariable: 'trending-up',
 };
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
@@ -107,4 +113,6 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   Scroll: 'Scroll',
   Command: 'Command',
   Comment: 'Comment',
+  SetVariable: 'Set Variable',
+  ChangeVariable: 'Change Variable',
 };

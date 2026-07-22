@@ -210,4 +210,43 @@ impl InputToken {
             InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
         }
     }
+
+    /// See `Value::rename_param` — walks every embedded `Value` tree.
+    pub(crate) fn rename_param(&mut self, old: &str, new: &str) {
+        match self {
+            InputToken::MoveMouse(x, y, _) => {
+                x.rename_param(old, new);
+                y.rename_param(old, new);
+            }
+            InputToken::Scroll(amount, _) => amount.rename_param(old, new),
+            InputToken::Text(value) => value.rename_param(old, new),
+            InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
+        }
+    }
+
+    /// See `Value::for_each_call_args_mut` — walks every embedded `Value` tree.
+    pub(crate) fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
+        match self {
+            InputToken::MoveMouse(x, y, _) => {
+                x.for_each_call_args_mut(block_id, f);
+                y.for_each_call_args_mut(block_id, f);
+            }
+            InputToken::Scroll(amount, _) => amount.for_each_call_args_mut(block_id, f),
+            InputToken::Text(value) => value.for_each_call_args_mut(block_id, f),
+            InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
+        }
+    }
+
+    /// See `Value::scrub_block_calls` — walks every embedded `Value` tree.
+    pub(crate) fn scrub_block_calls(&mut self, block_id: &str) {
+        match self {
+            InputToken::MoveMouse(x, y, _) => {
+                x.scrub_block_calls(block_id);
+                y.scrub_block_calls(block_id);
+            }
+            InputToken::Scroll(amount, _) => amount.scrub_block_calls(block_id),
+            InputToken::Text(value) => value.scrub_block_calls(block_id),
+            InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
+        }
+    }
 }

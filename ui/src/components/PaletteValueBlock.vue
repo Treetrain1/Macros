@@ -30,6 +30,12 @@ const preview = computed(() => (paletteEvalPreview.value?.kind === props.kind ? 
 
 function onPointerDown(e: PointerEvent) {
   if ((e.target as Element | null)?.closest?.('input, .dd')) return;
+  // Stop the pointerdown from also reaching an ancestor InstructionRow
+  // (e.g. BlockHeaderFields' param ovals) — otherwise its onRowPointerDown
+  // arms a whole-block pickup drag (canvasDrag.ts) at the same time this
+  // arms the value-drag machinery, and both fire together. Mirrors
+  // ValueBlock.vue's onPointerDown, which does the same for the same reason.
+  e.stopPropagation();
   beginValuePaletteDrag(e, props.kind, e.currentTarget as HTMLElement);
 }
 
@@ -67,6 +73,9 @@ function onArgInput(index: number, v: string) {
     </template>
     <template v-else-if="kind.startsWith('Var:')">
       <span class="value-op">{{ kind.slice(4) }}</span>
+    </template>
+    <template v-else-if="kind.startsWith('Param:')">
+      <span class="value-op">{{ kind.slice(6) }}</span>
     </template>
     <template v-else-if="spec">
       <span v-if="spec.prefix" class="value-op">{{ spec.prefix }}</span>

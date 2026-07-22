@@ -3,16 +3,19 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { state } from '../store';
 import { contextMenu, closeContextMenu } from '../contextMenu';
 import { copyAll, copyBlock, clipboardContents, hasClipboard } from '../clipboard';
-import { addInstruction, clearInstructions, deleteInstruction, deleteVariable, pasteInstructions, setRecordingTarget } from '../tauri';
+import { addInstruction, clearInstructions, deleteBlock, deleteInstruction, deleteVariable, pasteInstructions, setRecordingTarget } from '../tauri';
 import { clientToCanvas } from '../canvasDrag';
 import { ICONS } from '../icons';
 import { openRenameVariableDialog } from '../variableDialogs';
+import { openEditBlockDialog } from '../blockDialogs';
+import { findBlockDef } from '../types';
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' });
 
 const strand = computed(() => state.current_macro?.strands.find(s => s.id === contextMenu.strandId) ?? null);
 const instruction = computed(() => strand.value?.instructions[contextMenu.index] ?? null);
+const headerBlockId = computed(() => (instruction.value?.type === 'BlockHeader' ? instruction.value.block_id : null));
 const isRecordingTarget = computed(
   () => contextMenu.strandId !== '' && contextMenu.strandId === state.current_macro?.recording_target_strand_id,
 );
@@ -120,12 +123,30 @@ function onDeleteVariable() {
   deleteVariable(contextMenu.variableName);
   closeContextMenu();
 }
+function onEditBlock() {
+  const def = findBlockDef(state.current_macro, contextMenu.blockId);
+  if (def) openEditBlockDialog(def);
+  closeContextMenu();
+}
+function onEditBlockHeader() {
+  const def = headerBlockId.value ? findBlockDef(state.current_macro, headerBlockId.value) : undefined;
+  if (def) openEditBlockDialog(def);
+  closeContextMenu();
+}
+function onDeleteBlockDef() {
+  deleteBlock(contextMenu.blockId);
+  closeContextMenu();
+}
 </script>
 
 <template>
   <Teleport to="#dd-portal">
     <div v-if="contextMenu.open" ref="panelRef" class="context-menu" role="menu" :style="panelStyle">
       <template v-if="contextMenu.type === 'block'">
+        <button v-if="headerBlockId" type="button" class="context-menu-item" role="menuitem" @click="onEditBlockHeader">
+          <span class="context-menu-item-icon"><component :is="ICONS.blocks" /></span>
+          <span>Edit block</span>
+        </button>
         <button type="button" class="context-menu-item" :class="{ 'context-menu-item-active': isRecordingTarget }" role="menuitem" @click="onSetRecordingTarget">
           <span class="context-menu-item-icon"><component :is="ICONS.target" /></span>
           <span>{{ isRecordingTarget ? 'Recording Target (current)' : 'Set Recording Target' }}</span>
@@ -167,7 +188,7 @@ function onDeleteVariable() {
           <span>Paste</span>
         </button>
       </template>
-      <template v-else>
+      <template v-else-if="contextMenu.type === 'variable'">
         <button type="button" class="context-menu-item" role="menuitem" @click="onRenameVariable">
           <span class="context-menu-item-icon"><component :is="ICONS.equal" /></span>
           <span>Rename variable</span>
@@ -175,6 +196,16 @@ function onDeleteVariable() {
         <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteVariable">
           <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
           <span>Delete variable</span>
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" class="context-menu-item" role="menuitem" @click="onEditBlock">
+          <span class="context-menu-item-icon"><component :is="ICONS.blocks" /></span>
+          <span>Edit block</span>
+        </button>
+        <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteBlockDef">
+          <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
+          <span>Delete block</span>
         </button>
       </template>
     </div>

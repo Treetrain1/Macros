@@ -8,7 +8,7 @@ import type { InstructionDto, KeyDirection } from '../../types';
 const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'Key' }> }>();
 
 const isCapturing = computed(() =>
-  state.key_capture?.strand_id === props.strandId && state.key_capture?.index === props.index,
+  state.key_capture?.kind === 'Strand' && state.key_capture.strand_id === props.strandId && state.key_capture.index === props.index,
 );
 
 function onDirectionChange(dir: string) {

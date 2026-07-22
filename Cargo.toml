@@ -36,3 +36,5 @@ core-graphics = "0.25.0"
 core-foundation = "0.10.1"
 foreign-types = "0.5"
 tauri-build = { git = "https://github.com/tauri-apps/tauri", tag = "tauri-cef-v3.0.0-alpha.19", features = [] }
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }

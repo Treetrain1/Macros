@@ -26,6 +26,8 @@ import { editValueField } from '../tauri';
 import { getInvalidText, locationsEqual } from '../invalidField';
 import { beginValuePickup, dragReveal, evalPreview, isCapsuleLocation } from '../valueDrag';
 import { labelForOp, specForOp } from '../valueOps';
+import { state } from '../store';
+import { findBlockDef } from '../types';
 import AutosizeInput from './AutosizeInput.vue';
 import AppDropdown from './AppDropdown.vue';
 import type { ValueDto, ValueLocationDto } from '../types';
@@ -53,6 +55,20 @@ const label = computed(() => (displayValue.value.kind === 'Op' ? labelForOp(disp
 // ValueBlock, since it's a fixed choice rather than a draggable value slot.
 const enumArg = computed(() => (displayValue.value.kind === 'Op' ? specForOp(displayValue.value.op)?.enumArg : undefined));
 
+// For a `Call` node, pairs each of the block's prototype pieces with the
+// arg index it addresses (labels get `null` — nothing to render but text).
+// Mirrors labelForOp's role for `Op`, just driven by the block's own
+// dynamic `pieces` (from `state.current_macro.block_defs`) instead of a
+// fixed prefix/infix spec.
+const callPieces = computed(() => {
+  const v = displayValue.value;
+  if (v.kind !== 'Call') return [];
+  const def = findBlockDef(state.current_macro, v.block_id);
+  if (!def) return [];
+  let argIndex = 0;
+  return def.pieces.map(piece => (piece.kind === 'Input' ? { piece, argIndex: argIndex++ } : { piece, argIndex: -1 }));
+});
+
 function onEnumEdit(step: number, v: string) {
   editValueField(childLocation(step), v);
 }
@@ -66,6 +82,8 @@ const preview = computed(() =>
 const boxed = computed(() =>
   displayValue.value.kind === 'Op' ||
   displayValue.value.kind === 'Var' ||
+  displayValue.value.kind === 'Param' ||
+  displayValue.value.kind === 'Call' ||
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
@@ -111,8 +129,14 @@ function onPointerDown(e: PointerEvent) {
         <ValueBlock v-else :location="childLocation(i)" :value="arg" />
       </template>
     </template>
-    <template v-else-if="displayValue.kind === 'Var'">
+    <template v-else-if="displayValue.kind === 'Var' || displayValue.kind === 'Param'">
       <span class="value-op">{{ displayValue.name }}</span>
+    </template>
+    <template v-else-if="displayValue.kind === 'Call'">
+      <template v-for="(item, i) in callPieces" :key="i">
+        <span v-if="item.piece.kind === 'Label'" class="value-op">{{ item.piece.text }}</span>
+        <ValueBlock v-else :location="childLocation(item.argIndex)" :value="displayValue.args[item.argIndex]" />
+      </template>
     </template>
     <template v-else>
       <AutosizeInput

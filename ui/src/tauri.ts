@@ -1,7 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { getVersion } from '@tauri-apps/api/app';
-import type { HotkeyActionDto, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
+import { invoke, listen, getVersion } from './bridge';
+import type { BlockPieceDto, HotkeyActionDto, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
 
 export function getState(): Promise<StateDto> {
   return invoke('get_state');
@@ -29,6 +27,11 @@ export const createVariable = (name: string) => invoke<void>('create_variable', 
 export const renameVariable = (oldName: string, newName: string) =>
   invoke<void>('rename_variable', { oldName, newName });
 export const deleteVariable = (name: string) => invoke<void>('delete_variable', { name });
+export const createBlock = (pieces: BlockPieceDto[], returnsValue: boolean) =>
+  invoke<string>('create_block', { pieces, returnsValue });
+export const editBlock = (blockId: string, pieces: BlockPieceDto[], returnsValue: boolean) =>
+  invoke<void>('edit_block', { blockId, pieces, returnsValue });
+export const deleteBlock = (blockId: string) => invoke<void>('delete_block', { blockId });
 
 // ─── Instructions ───────────────────────────────────────────────────────────
 export const addInstruction = (strandId: string, index: number, instruction: InstructionDto) =>
@@ -80,8 +83,10 @@ export const setRecordingTarget = (strandId: string) =>
 // ─── Key capture ────────────────────────────────────────────────────────────
 export const startKeyCapture = (strandId: string, index: number) =>
   invoke<void>('start_key_capture', { strandId, index });
+export const startStandaloneKeyCapture = () => invoke<void>('start_standalone_key_capture');
 export const keyCaptureEvent = (code: string, key: string) =>
   invoke<void>('key_capture_event', { code, key });
+export const clearStandaloneKeyCapture = () => invoke<void>('clear_standalone_key_capture');
 
 // ─── Run / record / loop ────────────────────────────────────────────────────
 export const runMacro = () => invoke<void>('run_macro');

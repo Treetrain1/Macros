@@ -73,6 +73,21 @@ pub(crate) enum Value {
     /// (no args, no `saved` slot), resolved against the running macro's
     /// variable store by [`Value::resolve_vars`] before `eval` ever sees it.
     Var { name: String },
+    /// A read of the current custom-block invocation's bound parameter by
+    /// name — a leaf like `Var`, but resolved against that invocation's
+    /// local parameter scope (`macros::runner::ExecCtx::param_env`) rather
+    /// than the macro-wide variable store, since two concurrent/nested
+    /// invocations of the same block must not share one slot. Only ever
+    /// produced by dragging one of a block's own declared inputs (rendered
+    /// on its header strand) — see `BlockDef`.
+    Param { name: String },
+    /// Value-position invocation of a `returns_value == true` custom block
+    /// — mirrors `Op`'s shape (including `saved`, so swapping it in/out of a
+    /// slot round-trips like any other operator) but names a custom block
+    /// instead of a fixed [`Op`]. Resolved by
+    /// `macros::runner::resolve_calls_and_params` before `eval` ever sees
+    /// it, exactly like `Var`/`Param`.
+    Call { block_id: String, args: Vec<Value>, saved: Box<Value> },
 }
 
 /// The result of evaluating a [`Value`] tree — still either a number or
@@ -201,6 +216,17 @@ impl Value {
             // this only fires if that step was skipped, so it reads as a
             // bug rather than something a user's macro can trigger.
             Value::Var { .. } => Err("unresolved variable reference".to_string()),
+            // Same invariant as `Var` above, just for the two node kinds
+            // only `macros::runner::resolve_calls_and_params` can resolve
+            // (it needs to actually run instructions to resolve a `Call`,
+            // which this module deliberately has no access to) — this is
+            // also what keeps `preview_value`/`apply_value_kind`'s
+            // best-effort collapse automatically safe: they only ever call
+            // `resolve_vars(...).eval()`, never the runner's resolution
+            // pass, so a value containing a block call just surfaces as an
+            // ordinary eval error there instead of running anything.
+            Value::Param { .. } => Err("unresolved parameter reference".to_string()),
+            Value::Call { .. } => Err("custom block calls can't be evaluated directly".to_string()),
             Value::Op { op: Op::Join, args, .. } => {
                 let mut s = String::new();
                 for a in args {
@@ -295,7 +321,7 @@ impl Value {
         match path.split_first() {
             None => Some(self),
             Some((&step, rest)) => match self {
-                Value::Op { args, .. } => args.get_mut(step as usize)?.get_mut(rest),
+                Value::Op { args, .. } | Value::Call { args, .. } => args.get_mut(step as usize)?.get_mut(rest),
                 _ => None,
             },
         }
@@ -313,13 +339,86 @@ impl Value {
                     *name = new.to_string();
                 }
             }
-            Value::Op { args, saved, .. } => {
+            Value::Op { args, saved, .. } | Value::Call { args, saved, .. } => {
                 for arg in args.iter_mut() {
                     arg.rename_var(old, new);
                 }
                 saved.rename_var(old, new);
             }
-            Value::Number { .. } | Value::Text { .. } => {}
+            Value::Number { .. } | Value::Text { .. } | Value::Param { .. } => {}
+        }
+    }
+
+    /// Renames every [`Value::Param`] leaf reading `old` (anywhere in this
+    /// tree, including `saved`) to `new` — counterpart to `rename_var`, used
+    /// by `macros::Macro::rename_block_input` so a custom block's own body
+    /// keeps working after one of its inputs is renamed.
+    pub(crate) fn rename_param(&mut self, old: &str, new: &str) {
+        match self {
+            Value::Param { name } => {
+                if name == old {
+                    *name = new.to_string();
+                }
+            }
+            Value::Op { args, saved, .. } | Value::Call { args, saved, .. } => {
+                for arg in args.iter_mut() {
+                    arg.rename_param(old, new);
+                }
+                saved.rename_param(old, new);
+            }
+            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } => {}
+        }
+    }
+
+    /// Applies `f` to the `args` of every [`Value::Call`] node (anywhere in
+    /// this tree, including nested inside another call's own `args`) that
+    /// references `block_id` — used by `macros::Macro::insert_block_input`/
+    /// `remove_block_input` to keep every call site's argument list
+    /// positionally aligned with the block's current `pieces`.
+    pub(crate) fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
+        match self {
+            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
+            Value::Op { args, saved, .. } => {
+                for a in args.iter_mut() {
+                    a.for_each_call_args_mut(block_id, f);
+                }
+                saved.for_each_call_args_mut(block_id, f);
+            }
+            Value::Call { block_id: id, args, saved } => {
+                if id == block_id {
+                    f(args);
+                }
+                for a in args.iter_mut() {
+                    a.for_each_call_args_mut(block_id, f);
+                }
+                saved.for_each_call_args_mut(block_id, f);
+            }
+        }
+    }
+
+    /// Replaces every [`Value::Call`] node (anywhere in this tree)
+    /// referencing `block_id` with a plain `0` leaf — used by
+    /// `macros::Macro::remove_block` so deleting a custom block scrubs every
+    /// value-position reference instead of leaving a dangling one.
+    pub(crate) fn scrub_block_calls(&mut self, block_id: &str) {
+        match self {
+            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
+            Value::Op { args, saved, .. } => {
+                for a in args.iter_mut() {
+                    a.scrub_block_calls(block_id);
+                }
+                saved.scrub_block_calls(block_id);
+            }
+            Value::Call { block_id: id, args, saved } => {
+                if id == block_id {
+                    *self = Value::number(0.0);
+                } else {
+                    for a in args.iter_mut() {
+                        a.scrub_block_calls(block_id);
+                    }
+                    saved.scrub_block_calls(block_id);
+                }
+            }
         }
     }
 
@@ -342,6 +441,19 @@ impl Value {
                 Some(Evaluated::Number(n)) => Value::Number { value: *n },
                 Some(Evaluated::Text(s)) => Value::Text { value: s.clone() },
                 None => Value::number(0.0),
+            },
+            // Left untouched here — `Param` is resolved against the current
+            // invocation's parameter scope, and `Call` needs to actually run
+            // the callee's body; both require execution capability this
+            // module deliberately doesn't have. Only their nested `args`
+            // (which may themselves contain `Var` reads) are recursed into.
+            // See `macros::runner::resolve_calls_and_params`, which always
+            // runs on the output of this method.
+            Value::Param { name } => Value::Param { name: name.clone() },
+            Value::Call { block_id, args, saved } => Value::Call {
+                block_id: block_id.clone(),
+                args: args.iter().map(|a| a.resolve_vars(env)).collect(),
+                saved: Box::new(saved.resolve_vars(env)),
             },
         }
     }
@@ -369,6 +481,16 @@ impl std::hash::Hash for Value {
             Value::Var { name } => {
                 3u8.hash(state);
                 name.hash(state);
+            }
+            Value::Param { name } => {
+                4u8.hash(state);
+                name.hash(state);
+            }
+            Value::Call { block_id, args, saved } => {
+                5u8.hash(state);
+                block_id.hash(state);
+                args.hash(state);
+                saved.hash(state);
             }
         }
     }
@@ -402,6 +524,13 @@ impl<'de> Deserialize<'de> for Value {
                 saved: Box<Value>,
             },
             Var { name: String },
+            Param { name: String },
+            Call {
+                block_id: String,
+                args: Vec<Value>,
+                #[serde(default = "default_saved")]
+                saved: Box<Value>,
+            },
             // Legacy tags predating the `BinaryOp`/`Join` → `Op` unification
             // — kept only so old save files keep loading; migrated into
             // `Value::Op` below, never produced by `Serialize`.
@@ -437,6 +566,8 @@ impl<'de> Deserialize<'de> for Value {
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
             ValueDe::Current(Tagged::Op { op, args, saved }) => Value::Op { op, args, saved },
             ValueDe::Current(Tagged::Var { name }) => Value::Var { name },
+            ValueDe::Current(Tagged::Param { name }) => Value::Param { name },
+            ValueDe::Current(Tagged::Call { block_id, args, saved }) => Value::Call { block_id, args, saved },
             ValueDe::Current(Tagged::BinaryOp { op, lhs, rhs, saved }) => Value::Op { op, args: vec![*lhs, *rhs], saved },
             ValueDe::Current(Tagged::Join { args, saved }) => Value::Op { op: Op::Join, args, saved },
         })

@@ -1,15 +1,14 @@
 use crate::config;
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use crate::macros::runner::VariableStore;
-use crate::macros::{loop_control, thread, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
+use crate::macros::{loop_control, thread, BlockPiece, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
 use crate::input::types::InputToken;
 use crate::input::value::{Evaluated, Value, OPERATOR_KINDS};
 use crate::recording;
 use crate::state::{
-    build_state_dto, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
-    value_to_dto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, MacroSnapshot, Page,
-    RecordingPhase, SharedState, StateDto, TextEditSession, UpdateCheckState, ValueDto, ValueLocation,
-    ValueLocationDto,
+    build_state_dto, dto_to_block_piece, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
+    value_to_dto, BlockPieceDto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, KeyCaptureTarget, MacroSnapshot,
+    Page, RecordingPhase, SharedState, StateDto, TextEditSession, UpdateCheckState, ValueDto, ValueLocation, ValueLocationDto,
 };
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -29,7 +28,11 @@ fn push_undo(s: &mut crate::state::AppState) {
         if s.undo_stack.len() >= UNDO_STACK_LIMIT {
             s.undo_stack.remove(0);
         }
-        s.undo_stack.push(MacroSnapshot { strands: mac.strands.clone(), floating_values: mac.floating_values.clone() });
+        s.undo_stack.push(MacroSnapshot {
+            strands: mac.strands.clone(),
+            floating_values: mac.floating_values.clone(),
+            block_defs: mac.block_defs.clone(),
+        });
         s.redo_stack.clear();
     }
 }
@@ -303,6 +306,130 @@ pub(crate) fn delete_variable<R: Runtime>(state: State<SharedState>, app: tauri:
     Ok(())
 }
 
+// ─── Custom blocks ("My Blocks") ────────────────────────────────────────────
+
+/// Validates a candidate `pieces` list: the labels, flattened and trimmed,
+/// must be non-empty (mirrors `create_variable_in`'s non-empty-name rule —
+/// this is effectively the block's "name"), and every input needs a
+/// non-empty, unique (within this block) trimmed name. Factored out of
+/// `create_block`/`edit_block` so the rule is testable without a real
+/// `tauri::State`.
+fn validate_block_pieces(pieces: &[BlockPiece]) -> Result<(), String> {
+    let flat_label: String = pieces
+        .iter()
+        .filter_map(|p| match p {
+            BlockPiece::Label { text, .. } => Some(text.trim()),
+            BlockPiece::Input { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if flat_label.trim().is_empty() {
+        return Err("Give the block a name".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for p in pieces {
+        if let BlockPiece::Input { name, .. } = p {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err("Every input needs a name".to_string());
+            }
+            if !seen.insert(trimmed) {
+                return Err(format!("Input name \"{trimmed}\" is used more than once"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Defines a new custom block, creating its (initially empty) header strand
+/// next to the macro's other strands (same spawn-position rule as
+/// `add_strand`). Pushes undo — unlike `create_variable`, this has real
+/// canvas footprint (a new strand) the user must be able to undo placing.
+#[tauri::command]
+pub(crate) fn create_block<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    pieces: Vec<BlockPieceDto>,
+    returns_value: bool,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let pieces: Vec<BlockPiece> = pieces.iter().map(dto_to_block_piece).collect();
+    validate_block_pieces(&pieces)?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let (x, y) = next_strand_position(mac);
+    let id = mac.create_block(pieces, returns_value, x, y);
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(id)
+}
+
+/// Updates an existing block's prototype and return-type, reconciling every
+/// existing call site's `args` to the new input list (see
+/// `Macro::reconcile_block_call_args`) and renaming any `Value::Param` leaf
+/// in the block's own body whose input kept its identity but changed name
+/// (see `Macro::rename_block_input_body`) — both computed by diffing the
+/// def's *current* pieces against the caller's new list before it's written.
+/// Pushes undo, same reasoning as `create_block`.
+#[tauri::command]
+pub(crate) fn edit_block<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    block_id: String,
+    pieces: Vec<BlockPieceDto>,
+    returns_value: bool,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let new_pieces: Vec<BlockPiece> = pieces.iter().map(dto_to_block_piece).collect();
+    validate_block_pieces(&new_pieces)?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let old_pieces = mac
+        .block_defs
+        .iter()
+        .find(|b| b.id == block_id)
+        .map(|b| b.pieces.clone())
+        .ok_or("Unknown block")?;
+
+    let renames: Vec<(String, String)> = new_pieces
+        .iter()
+        .filter_map(|new_piece| {
+            let BlockPiece::Input { id, name: new_name } = new_piece else { return None };
+            let old_piece = old_pieces.iter().find(|p| matches!(p, BlockPiece::Input { id: old_id, .. } if old_id == id))?;
+            let BlockPiece::Input { name: old_name, .. } = old_piece else { return None };
+            (old_name != new_name).then(|| (old_name.clone(), new_name.clone()))
+        })
+        .collect();
+    for (old_name, new_name) in &renames {
+        mac.rename_block_input_body(&block_id, old_name, new_name);
+    }
+    mac.reconcile_block_call_args(&block_id, &old_pieces, &new_pieces);
+
+    let def = mac.block_defs.iter_mut().find(|b| b.id == block_id).ok_or("Unknown block")?;
+    def.pieces = new_pieces;
+    def.returns_value = returns_value;
+
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Deletes a custom block entirely (see `Macro::remove_block`). Pushes
+/// undo, same reasoning as `create_block`.
+#[tauri::command]
+pub(crate) fn delete_block<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, block_id: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        mac.remove_block(&block_id);
+        let surviving: std::collections::HashSet<String> = mac.strands.iter().map(|st| st.id.clone()).collect();
+        s.invalid_field_buffers.retain(|loc, _| loc.strand_id().is_none_or(|id| surviving.contains(id)));
+        auto_save(&s);
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn save_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -392,6 +519,7 @@ pub(crate) fn add_instruction<R: Runtime>(
         if let Some(strand) = mac.strand(&strand_id) {
             let idx = index.min(strand.instructions.len());
             check_when_ran_attachment(strand, idx, &ins)?;
+            check_return_placement(mac, strand, &ins)?;
         }
     }
     push_undo(&mut s);
@@ -407,20 +535,43 @@ pub(crate) fn add_instruction<R: Runtime>(
     Ok(())
 }
 
-/// Enforces the one rule governing "When Ran" blocks: nothing may ever end
-/// up attached underneath one. That means inserting at index 0 of a strand
-/// that already starts with `WhenRan` is forbidden (it would push the
-/// existing one down to index 1), and inserting a `WhenRan` anywhere but
-/// index 0 is forbidden (it would itself land underneath whatever's above
-/// it).
+/// Enforces the one rule governing header blocks ("When Ran"/`BlockHeader`):
+/// nothing may ever end up attached underneath one. That means inserting at
+/// index 0 of a strand that already starts with a header is forbidden (it
+/// would push the existing one down to index 1), and inserting a header
+/// anywhere but index 0 is forbidden (it would itself land underneath
+/// whatever's above it) — `BlockHeader` specifically can never be inserted
+/// by this path at all (it's only ever created by `create_block`, never
+/// dragged from a prefab), but the general rule still covers it correctly.
 fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -> Result<(), String> {
     if index == 0 && strand.starts_with_when_ran() {
-        return Err("Can't attach a block above a When Ran block".to_string());
+        return Err("Can't attach a block above a When Ran/Block Definition block".to_string());
     }
     if ins.is_header() && index != 0 {
-        return Err("A When Ran block can only be the first block in a strand".to_string());
+        return Err("A When Ran/Block Definition block can only be the first block in a strand".to_string());
     }
     Ok(())
+}
+
+/// A `Return` block only makes sense inside a `returns_value: true` custom
+/// block's own body — anywhere else, there's nothing for it to hand its
+/// value back to (a `WhenRan` strand's "caller" is just the OS/hotkey that
+/// triggered it; a `returns_value: false` block's callers only ever discard
+/// what `run_block` returns). Not a hard runtime requirement — the
+/// interpreter tolerates a stray `Return` gracefully (see `run_block`) — but
+/// enforced here so it can't be dropped somewhere confusing in the first
+/// place.
+fn check_return_placement(mac: &Macro, strand: &Strand, ins: &Instruction) -> Result<(), String> {
+    if !matches!(ins, Instruction::Return(_)) {
+        return Ok(());
+    }
+    let valid = matches!(strand.instructions.first(), Some(Instruction::BlockHeader(id))
+        if mac.block_defs.iter().any(|b| &b.id == id && b.returns_value));
+    if valid {
+        Ok(())
+    } else {
+        Err("A Return block can only be used inside a custom block that returns a value".to_string())
+    }
 }
 
 #[tauri::command]
@@ -466,6 +617,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
         (Instruction::Token(InputToken::Text(t)), FieldId::TextValue) => Some(t),
         (Instruction::SetVariable(_, v), FieldId::SetVariableValue) => Some(v),
+        (Instruction::Return(v), FieldId::ReturnValue) => Some(v),
+        (Instruction::CallBlock { args, .. }, FieldId::CallArg(i)) => args.get_mut(i),
         (Instruction::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
         _ => None,
     }
@@ -931,13 +1084,18 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
 fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(prev) = s.undo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| MacroSnapshot { strands: m.strands.clone(), floating_values: m.floating_values.clone() });
+        let current = s.current_macro.as_ref().map(|m| MacroSnapshot {
+            strands: m.strands.clone(),
+            floating_values: m.floating_values.clone(),
+            block_defs: m.block_defs.clone(),
+        });
         if let Some(cur) = current {
             s.redo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
             mac.strands = prev.strands;
             mac.floating_values = prev.floating_values;
+            mac.block_defs = prev.block_defs;
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
@@ -955,13 +1113,18 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
 fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(next) = s.redo_stack.pop() {
-        let current = s.current_macro.as_ref().map(|m| MacroSnapshot { strands: m.strands.clone(), floating_values: m.floating_values.clone() });
+        let current = s.current_macro.as_ref().map(|m| MacroSnapshot {
+            strands: m.strands.clone(),
+            floating_values: m.floating_values.clone(),
+            block_defs: m.block_defs.clone(),
+        });
         if let Some(cur) = current {
             s.undo_stack.push(cur);
         }
         if let Some(mac) = &mut s.current_macro {
             mac.strands = next.strands;
             mac.floating_values = next.floating_values;
+            mac.block_defs = next.block_defs;
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
@@ -1175,7 +1338,18 @@ pub(crate) fn set_recording_target<R: Runtime>(state: State<SharedState>, app: t
 #[tauri::command]
 pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.key_capture = Some((strand_id, index));
+    s.key_capture = Some(KeyCaptureTarget::Strand(strand_id, index));
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Same capture flow, but for a key field with no backing strand/instruction
+/// (the sidebar's Key prefab) — the result lands in `pending_standalone_key`
+/// instead of being written into a strand.
+#[tauri::command]
+pub(crate) fn start_standalone_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.key_capture = Some(KeyCaptureTarget::Standalone);
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -1188,22 +1362,39 @@ pub(crate) fn key_capture_event<R: Runtime>(
     key: String,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let Some((strand_id, index)) = s.key_capture.clone() else { return Ok(()); };
+    let Some(target) = s.key_capture.take() else { return Ok(()); };
 
     let captured_key = crate::key_mapping::web_code_to_macro_key(&code)
         .or_else(|| crate::key_mapping::web_key_to_macro_key(&key));
 
     if let Some(mk) = captured_key {
-        if let Some(mac) = &mut s.current_macro {
-            if let Some(strand) = mac.strand_mut(&strand_id) {
-                if let Some(Instruction::Token(InputToken::Key(_, dir))) = strand.instructions.get(index).cloned() {
-                    strand.instructions[index] = Instruction::Token(InputToken::Key(mk, dir));
-                    auto_save(&s);
+        match target {
+            KeyCaptureTarget::Strand(strand_id, index) => {
+                if let Some(mac) = &mut s.current_macro {
+                    if let Some(strand) = mac.strand_mut(&strand_id) {
+                        if let Some(Instruction::Token(InputToken::Key(_, dir))) = strand.instructions.get(index).cloned() {
+                            strand.instructions[index] = Instruction::Token(InputToken::Key(mk, dir));
+                            auto_save(&s);
+                        }
+                    }
                 }
+            }
+            KeyCaptureTarget::Standalone => {
+                s.pending_standalone_key = Some(crate::input::key_to_string(&mk).unwrap_or("Unknown").to_string());
             }
         }
     }
-    s.key_capture = None;
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Consumes `pending_standalone_key` — called by the frontend once it has
+/// copied the captured key into its local (strand-less) instruction, so a
+/// stale value can't leak into the next standalone capture.
+#[tauri::command]
+pub(crate) fn clear_standalone_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.pending_standalone_key = None;
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -1829,6 +2020,7 @@ mod value_location_tests {
             speed_multiplier: 1.0,
             floating_values: vec![FloatingValue { id: "f1".into(), x: 10, y: 20, value: Value::number(5.0) }],
             variables: vec![],
+            block_defs: vec![],
         }
     }
 
@@ -2090,6 +2282,7 @@ mod value_location_tests {
             speed_multiplier: 1.0,
             floating_values: vec![],
             variables: vec![],
+            block_defs: vec![],
         };
         let loc = ValueLocation::Field { strand_id: "s1".into(), index: 0, field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));
@@ -2202,5 +2395,137 @@ mod value_location_tests {
         delete_variable_in(&mut mac, "score");
         assert!(mac.variables.is_empty());
         assert_eq!(mac.strands[0].instructions[1], Instruction::Token(InputToken::Text(Value::Var { name: "score".to_string() })));
+    }
+
+    // ─── Custom blocks ("My Blocks") ────────────────────────────────────────
+
+    fn label(text: &str) -> BlockPiece {
+        BlockPiece::Label { id: format!("id-{text}"), text: text.to_string() }
+    }
+    fn input(id: &str, name: &str) -> BlockPiece {
+        BlockPiece::Input { id: id.to_string(), name: name.to_string() }
+    }
+
+    #[test]
+    fn validate_block_pieces_accepts_a_well_formed_prototype() {
+        assert!(validate_block_pieces(&[label("double"), input("i1", "n")]).is_ok());
+    }
+
+    #[test]
+    fn validate_block_pieces_rejects_all_blank_labels() {
+        assert!(validate_block_pieces(&[label("  "), input("i1", "n")]).is_err());
+    }
+
+    #[test]
+    fn validate_block_pieces_rejects_blank_input_name() {
+        assert!(validate_block_pieces(&[label("double"), input("i1", "  ")]).is_err());
+    }
+
+    #[test]
+    fn validate_block_pieces_rejects_duplicate_input_names() {
+        assert!(validate_block_pieces(&[label("add"), input("i1", "n"), input("i2", "n")]).is_err());
+    }
+
+    #[test]
+    fn create_block_appends_def_and_empty_header_strand() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let id = mac.create_block(vec![label("double"), input("i1", "n")], true, 100, 0);
+        assert_eq!(mac.block_defs.len(), 1);
+        assert_eq!(mac.block_defs[0].id, id);
+        assert!(mac.block_defs[0].returns_value);
+        let header_strand = mac.strands.iter().find(|s| s.instructions == vec![Instruction::BlockHeader(id.clone())]);
+        assert!(header_strand.is_some());
+    }
+
+    #[test]
+    fn reconcile_block_call_args_preserves_value_across_rename_by_id() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let id = mac.create_block(vec![input("i1", "a")], false, 0, 0);
+        // A CallBlock call site with one arg bound to the "a" slot.
+        mac.strands.push(Strand {
+            id: "caller".into(),
+            x: 0,
+            y: 0,
+            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] }],
+        });
+        let old_pieces = mac.block_defs[0].pieces.clone();
+        let new_pieces = vec![input("i1", "b")]; // same id, renamed
+        mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
+        let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
+        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        assert_eq!(args, &vec![Value::number(5.0)]);
+    }
+
+    #[test]
+    fn reconcile_block_call_args_drops_removed_input_and_keeps_survivor() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let id = mac.create_block(vec![input("i1", "a"), input("i2", "b")], false, 0, 0);
+        mac.strands.push(Strand {
+            id: "caller".into(),
+            x: 0,
+            y: 0,
+            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(1.0), Value::number(2.0)] }],
+        });
+        let old_pieces = mac.block_defs[0].pieces.clone();
+        let new_pieces = vec![input("i2", "b")]; // "a" (i1) removed
+        mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
+        let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
+        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        assert_eq!(args, &vec![Value::number(2.0)]);
+    }
+
+    #[test]
+    fn reconcile_block_call_args_defaults_a_newly_added_input_to_zero() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let id = mac.create_block(vec![input("i1", "a")], false, 0, 0);
+        mac.strands.push(Strand {
+            id: "caller".into(),
+            x: 0,
+            y: 0,
+            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] }],
+        });
+        let old_pieces = mac.block_defs[0].pieces.clone();
+        let new_pieces = vec![input("i1", "a"), input("i2", "b")]; // "b" newly added
+        mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
+        let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
+        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        assert_eq!(args, &vec![Value::number(5.0), Value::number(0.0)]);
+    }
+
+    #[test]
+    fn remove_block_scrubs_call_block_and_call_references() {
+        let mut mac = Macro::new("Test".into(), "".into(), vec![]);
+        let id = mac.create_block(vec![input("i1", "n")], true, 0, 0);
+        mac.strands.push(Strand {
+            id: "caller".into(),
+            x: 0,
+            y: 0,
+            instructions: vec![Instruction::SetVariable(
+                "x".to_string(),
+                Value::Call { block_id: id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
+            )],
+        });
+        mac.remove_block(&id);
+        assert!(mac.block_defs.is_empty());
+        assert!(!mac.strands.iter().any(|s| matches!(s.instructions.first(), Some(Instruction::BlockHeader(_)))));
+        let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
+        assert_eq!(caller.instructions[0], Instruction::SetVariable("x".to_string(), Value::number(0.0)));
+    }
+
+    /// A value tree with an unresolved `Call` node must degrade gracefully
+    /// (an ordinary `Err`, same as any other eval failure) through both
+    /// headless/UI-thread paths that never get to run real instructions —
+    /// never panic, never silently execute anything.
+    #[test]
+    fn preview_value_with_env_errors_on_unresolved_call() {
+        let dto = ValueDto::Call { block_id: "missing".into(), args: vec![], saved: Box::new(ValueDto::Number { value: 0.0 }) };
+        assert!(preview_value_with_env(&dto, &HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn apply_value_kind_number_best_effort_defaults_to_zero_for_unresolved_call() {
+        let mut node = Value::Call { block_id: "missing".into(), args: vec![], saved: Box::new(Value::number(0.0)) };
+        apply_value_kind(&mut node, "Number", &HashMap::new()).unwrap();
+        assert_eq!(node, Value::number(0.0));
     }
 }

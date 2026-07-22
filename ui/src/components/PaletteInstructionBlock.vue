@@ -24,10 +24,16 @@ import PaletteCommandFields from './fields/palette/PaletteCommandFields.vue';
 import PaletteCommentFields from './fields/palette/PaletteCommentFields.vue';
 import PaletteSetVariableFields from './fields/palette/PaletteSetVariableFields.vue';
 import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableFields.vue';
+import PaletteReturnFields from './fields/palette/PaletteReturnFields.vue';
 
-const props = defineProps<{ type: InstructionType }>();
+// `BlockHeader`/`CallBlock` are excluded — a header is never dragged from
+// the sidebar at all (only ever created via the "Make a Block" dialog), and
+// a call's prototype is per-block-id/dynamic (see PaletteCallBlock.vue in
+// the "My Blocks" section) rather than one fixed shape this generic prefab
+// could render.
+const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'CallBlock'> }>();
 
-const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
+const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | 'CallBlock'>, Component> = {
   WhenRan: PaletteWhenRanFields,
   Wait: PaletteWaitFields,
   Text: PaletteTextFields,
@@ -39,6 +45,7 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   Comment: PaletteCommentFields,
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
+  Return: PaletteReturnFields,
 };
 
 const instruction = computed(() => paletteInstructions[props.type]);

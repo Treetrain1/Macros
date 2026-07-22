@@ -41,6 +41,7 @@ import {
   Download,
   Equal,
   TrendingUp,
+  Blocks,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -84,6 +85,7 @@ export const ICONS = {
   download: Download,
   equal: Equal,
   'trending-up': TrendingUp,
+  blocks: Blocks,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -101,6 +103,11 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   Comment: 'message-square',
   SetVariable: 'equal',
   ChangeVariable: 'trending-up',
+  BlockHeader: 'blocks',
+  // Same icon as BlockHeader — a call site is the same custom block, just
+  // invoked rather than defined.
+  CallBlock: 'blocks',
+  Return: 'corner-up-left',
 };
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
@@ -115,4 +122,7 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   Comment: 'Comment',
   SetVariable: 'Set Variable',
   ChangeVariable: 'Change Variable',
+  BlockHeader: 'Block Definition',
+  CallBlock: 'Call Block',
+  Return: 'Return',
 };

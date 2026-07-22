@@ -19,8 +19,15 @@ export type ValueOp =
 // on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.
 // `Var:<name>` is a per-variable palette/kind identifier, not a fixed
 // operator — one exists per user-declared variable (see valueOps.ts's header
-// comment on why it's kept out of OPERATOR_KINDS).
-export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3' | `Var:${string}`;
+// comment on why it's kept out of OPERATOR_KINDS). `Param:<name>` is the same
+// idea for a custom block's own declared input, scoped to that block's body
+// — see blockDefs.ts. `Call:<blockId>` is a "My Blocks" reporter (a
+// `returns_value: true` custom block used in value position) — one exists
+// per such block, args built dynamically from its declared inputs rather
+// than a fixed arity, so (unlike every other kind here) it isn't handled by
+// `defaultValueForKind`/`paletteValueFor`; see blockDefs.ts's own
+// `paletteCallValueFor`.
+export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3' | `Var:${string}` | `Param:${string}` | `Call:${string}`;
 // `saved` is whatever value the operator displaced when it took over its
 // slot — not one of the operator's args, just carried along so the backend
 // can hand it straight back if this operator block is later dragged out of
@@ -29,7 +36,9 @@ export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
   | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto }
-  | { kind: 'Var'; name: string };
+  | { kind: 'Var'; name: string }
+  | { kind: 'Param'; name: string }
+  | { kind: 'Call'; block_id: string; args: ValueDto[]; saved: ValueDto };
 
 export function numberValue(value: number): ValueDto {
   return { kind: 'Number', value };
@@ -47,6 +56,13 @@ export function defaultValueForKind(kind: ValueKind): ValueDto {
   if (kind === 'Number') return { kind: 'Number', value: 0 };
   if (kind === 'Text') return { kind: 'Text', value: '' };
   if (kind.startsWith('Var:')) return { kind: 'Var', name: kind.slice('Var:'.length) };
+  if (kind.startsWith('Param:')) return { kind: 'Param', name: kind.slice('Param:'.length) };
+  // `Call:` normally goes through blockDefs.ts's `paletteCallValueFor`
+  // instead (it needs the block's current input count, which isn't
+  // recoverable from the kind string alone) — this is just a safe fallback
+  // so an unexpected caller gets a well-formed zero-arg call instead of the
+  // `Unknown value kind` throw below.
+  if (kind.startsWith('Call:')) return { kind: 'Call', block_id: kind.slice('Call:'.length), args: [], saved: numberValue(0) };
   const spec = specForKind(kind);
   if (!spec) throw new Error(`Unknown value kind: ${kind}`);
   return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
@@ -83,7 +99,10 @@ export type InstructionDto =
   | { type: 'Comment'; comment: string }
   | { type: 'WhenRan' }
   | { type: 'SetVariable'; name: string; value: ValueDto }
-  | { type: 'ChangeVariable'; name: string; value: ValueDto };
+  | { type: 'ChangeVariable'; name: string; value: ValueDto }
+  | { type: 'BlockHeader'; block_id: string }
+  | { type: 'CallBlock'; block_id: string; args: ValueDto[] }
+  | { type: 'Return'; value: ValueDto };
 
 export type InstructionType = InstructionDto['type'];
 
@@ -104,14 +123,27 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'Comment': return { type: 'Comment', comment: '' };
     case 'SetVariable': return { type: 'SetVariable', name: '', value: numberValue(0) };
     case 'ChangeVariable': return { type: 'ChangeVariable', name: '', value: numberValue(0) };
+    case 'BlockHeader': return { type: 'BlockHeader', block_id: '' };
+    case 'CallBlock': return { type: 'CallBlock', block_id: '', args: [] };
+    case 'Return': return { type: 'Return', value: numberValue(0) };
     default: return { type: 'Comment', comment: '' };
   }
 }
 
-export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan']);
+export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader']);
 
 export function isHeaderType(type: InstructionDto['type']): boolean {
   return HEADER_TYPES.has(type);
+}
+
+// "Cap" blocks are the mirror of header blocks: nothing may ever be stacked
+// *below* them, so they render with a flat bottom edge (no connector tab)
+// instead of a header's flat top edge. `Return` ends its strand's control
+// flow, so nothing after it would ever run.
+export const CAP_TYPES = new Set<InstructionDto['type']>(['Return']);
+
+export function isCapType(type: InstructionDto['type']): boolean {
+  return CAP_TYPES.has(type);
 }
 
 export interface StrandDto {
@@ -133,6 +165,8 @@ export interface MacroDto {
    * frontend, there's no "watcher" UI. Insertion order; sort with
    * `sortedVariableNames` for display. */
   variables: string[];
+  /** User-defined custom blocks ("My Blocks") — see `BlockDefDto`. */
+  block_defs: BlockDefDto[];
 }
 
 /** Alphabetical variable names for a macro — used by the sidebar's reporter
@@ -142,9 +176,40 @@ export function sortedVariableNames(macro: MacroDto | null | undefined): string[
   return [...(macro?.variables ?? [])].sort((a, b) => a.localeCompare(b));
 }
 
+// One piece of a custom block's prototype, in declaration order — mirrors
+// src-tauri/src/macros/mod.rs's BlockPiece (via state.rs's BlockPieceDto).
+// `id` is a stable, opaque identifier generated once when a piece is first
+// added (see MakeBlockDialog.vue's `newPieceId`) and preserved verbatim
+// across edits — it's what lets the backend tell "this input was renamed"
+// apart from "removed and an unrelated one added" when reconciling existing
+// call sites' args on edit_block (see macros/mod.rs's
+// `reconcile_block_call_args`); a plain name can't serve as that identity
+// since renaming *is* the edit being made.
+export type BlockPieceDto = { kind: 'Label'; id: string; text: string } | { kind: 'Input'; id: string; name: string };
+
+export interface BlockDefDto {
+  id: string;
+  pieces: BlockPieceDto[];
+  returns_value: boolean;
+}
+
+/** A block's declared input names, in prototype order — the positional key
+ * `CallBlock`/`Value.Call`'s `args` line up against. */
+export function blockInputNames(def: BlockDefDto): string[] {
+  return def.pieces.filter((p): p is Extract<BlockPieceDto, { kind: 'Input' }> => p.kind === 'Input').map(p => p.name);
+}
+
+/** Looks up a custom block by id in the current macro's `block_defs` — used
+ * wherever a `CallBlock`/`Value.Call`/`BlockHeader` needs its prototype
+ * (rendering labels/inputs) rather than just its id. */
+export function findBlockDef(macro: MacroDto | null | undefined, blockId: string): BlockDefDto | undefined {
+  return macro?.block_defs.find(b => b.id === blockId);
+}
+
 export interface KeyCaptureDto {
-  strand_id: string;
-  index: number;
+  kind: 'Strand' | 'Standalone';
+  strand_id: string | null;
+  index: number | null;
 }
 
 export type HotkeyActionDto =
@@ -218,6 +283,7 @@ export interface StateDto {
   confirm_clear_instructions: boolean;
   confirm_clear_instructions_remaining_secs: number;
   key_capture: KeyCaptureDto | null;
+  standalone_key: string | null;
   can_undo: boolean;
   can_redo: boolean;
   recording_phase: RecordingPhaseDto;
@@ -251,6 +317,7 @@ export function emptyState(): StateDto {
     confirm_clear_instructions: false,
     confirm_clear_instructions_remaining_secs: 0,
     key_capture: null,
+    standalone_key: null,
     can_undo: false,
     can_redo: false,
     recording_phase: { phase: 'Idle', countdown: null },

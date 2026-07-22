@@ -21,6 +21,13 @@ slotmap.workspace = true
 tokio.workspace = true
 spin_sleep.workspace = true
 rfd.workspace = true
+axum = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+
+[features]
+# Debug-only HTTP+WebSocket bridge that lets a plain browser tab (no Tauri
+# webview) drive the real running backend — see src/dev_bridge.rs.
+dev-bridge = ["dep:axum", "dep:tower-http"]
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

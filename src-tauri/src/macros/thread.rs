@@ -52,7 +52,7 @@ impl Macro {
 
                 self.clone().run(Arc::clone(&emulator), Some(Arc::clone(&loop_flag)), speed_multiplier, Arc::clone(&variables));
 
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                //todo better solution std::thread::sleep(std::time::Duration::from_millis(1));
             }
             persist_variables(&shared_state, &app, &macro_id, &variables);
             println!("Macro loop stopped.");

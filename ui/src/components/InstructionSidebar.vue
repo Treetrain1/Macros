@@ -4,18 +4,28 @@ import { Trash2 } from 'lucide-vue-next';
 import { INSTRUCTION_TYPE_LABELS } from '../icons';
 import PaletteInstructionBlock from './PaletteInstructionBlock.vue';
 import PaletteValueBlock from './PaletteValueBlock.vue';
+import PaletteCallBlock from './PaletteCallBlock.vue';
+import PaletteCallValueBlock from './PaletteCallValueBlock.vue';
 import MakeVariableDialog from './MakeVariableDialog.vue';
+import MakeBlockDialog from './MakeBlockDialog.vue';
 import { beginSidebarResize, sidebarWidth } from '../composables/useSidebarWidth';
 import { OPERATOR_KINDS } from '../valueOps';
 import { state } from '../store';
 import { sortedVariableNames } from '../types';
 import type { InstructionDto, ValueKind } from '../types';
 import { closeVariableDialog, openCreateVariableDialog, variableDialog } from '../variableDialogs';
+import { blockDialog, closeBlockDialog, openCreateBlockDialog } from '../blockDialogs';
 
-// SetVariable/ChangeVariable render in the Variables section below, not
-// here, so they're filtered out of the generic "Instruction" group.
+// SetVariable/ChangeVariable render in the Variables section below and
+// Return in the "My Blocks" section, not here; BlockHeader/CallBlock are
+// never dragged from a fixed prefab at all (see PaletteInstructionBlock.vue)
+// — all filtered out of the generic "Instruction" group.
 const instructionTypes = (Object.keys(INSTRUCTION_TYPE_LABELS) as InstructionDto['type'][])
-  .filter(t => t !== 'SetVariable' && t !== 'ChangeVariable');
+  .filter((t): t is Exclude<InstructionDto['type'], 'SetVariable' | 'ChangeVariable' | 'BlockHeader' | 'CallBlock' | 'Return'> =>
+    t !== 'SetVariable' && t !== 'ChangeVariable' && t !== 'BlockHeader' && t !== 'CallBlock' && t !== 'Return');
+
+const commandBlocks = computed(() => (state.current_macro?.block_defs ?? []).filter(b => !b.returns_value));
+const reporterBlocks = computed(() => (state.current_macro?.block_defs ?? []).filter(b => b.returns_value));
 
 // Number/Text literals, plus every operator registered in valueOps.ts's
 // OPERATOR_KINDS — adding an operator there is enough to get it a palette
@@ -53,6 +63,18 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
         <PaletteInstructionBlock type="SetVariable" />
         <PaletteInstructionBlock type="ChangeVariable" />
       </div>
+
+      <div class="sidebar-section-label-row">
+        <span class="sidebar-section-label">My Blocks</span>
+        <button type="button" class="btn-make-variable" @click="openCreateBlockDialog">Make a Block</button>
+      </div>
+      <div class="sidebar-palette sidebar-palette-values" v-if="reporterBlocks.length">
+        <PaletteCallValueBlock v-for="def in reporterBlocks" :key="def.id" :def="def" />
+      </div>
+      <div class="sidebar-palette">
+        <PaletteInstructionBlock type="Return" />
+        <PaletteCallBlock v-for="def in commandBlocks" :key="def.id" :def="def" />
+      </div>
     </div>
     <div class="sidebar-resize-handle" @pointerdown="beginSidebarResize" />
   </div>
@@ -60,5 +82,10 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
     v-if="variableDialog.mode"
     :rename-target="variableDialog.mode === 'rename' ? variableDialog.renameTarget : null"
     @close="closeVariableDialog"
+  />
+  <MakeBlockDialog
+    v-if="blockDialog.mode"
+    :edit-target="blockDialog.mode === 'edit' ? blockDialog.editTarget : null"
+    @close="closeBlockDialog"
   />
 </template>

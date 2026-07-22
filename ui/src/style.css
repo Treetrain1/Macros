@@ -641,6 +641,52 @@ body.sidebar-resizing {
   );
 }
 
+/* Cap blocks (Return, and any future bottom-only-blocked blocks) are the
+   mirror of header blocks above: no bottom tab — a flat bottom edge — since
+   nothing can ever attach below them. They keep a normal top notch, since
+   something can still attach above. Because there's no tab to reserve space
+   for, the row also skips the notch-depth bottom padding and the matching
+   negative margin-bottom that lets a real tab overlap the next row. */
+/* Compound `.instruction-row.instruction-row-cap` (not just
+   `.instruction-row-cap`) deliberately, not just for style — the base
+   `.instruction-row`/`.instruction-row::before` rules below are also
+   single-class selectors of equal specificity, and appear later in this
+   file, so a same-specificity `.instruction-row-cap` override here would
+   quietly lose the cascade tie to them (verified: without the compound
+   selector, the ::before pseudo-element keeps painting the *old* tab-shaped
+   notch — just squished into the shorter cap height, which is exactly the
+   stray "shadow" artifact this class exists to remove). */
+.instruction-row.instruction-row-cap { margin-bottom: 0; }
+.instruction-row.instruction-row-cap::before {
+  clip-path: polygon(
+    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - 4px),
+    calc(100% - 4px) 100%,
+    4px 100%,
+    0 calc(100% - 4px), 0 4px
+  );
+}
+.instruction-row-cap .instruction-shape {
+  /* The base rule's `min-height: 60px` already bakes in the 8px tab
+     reservation (padding-bottom's `+ var(--connector-notch-depth)`) — just
+     shrinking padding-bottom leaves min-height clamping the box to the same
+     60px anyway, so the row never actually gets shorter, it just gains a
+     dead strip of background below the content where the tab used to be
+     (and the row's outline/drop-shadow traces that now-pointless strip).
+     Shrinking min-height to match is what actually cuts the row down. */
+  min-height: calc(60px - var(--connector-notch-depth));
+  padding-bottom: 6px;
+  clip-path: polygon(
+    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - 4px),
+    calc(100% - 4px) 100%,
+    4px 100%,
+    0 calc(100% - 4px), 0 4px
+  );
+}
+
 .strand-empty-hint {
   padding: var(--spacing-sm) var(--spacing);
   font-size: 12px;
@@ -812,6 +858,10 @@ body.sidebar-resizing {
   color: var(--text-dim);
   pointer-events: none;
 }
+/* Cap rows (Return) have symmetric top/bottom padding on .instruction-shape
+   (no tab to reserve room for), so the notch-depth/2 upward compensation
+   above is wrong here — it just shifts the icon above true center. */
+.instruction-row-cap .instruction-type-icon { top: 50%; }
 .instruction-label {
   color: var(--text-dim);
   white-space: nowrap;
@@ -1187,6 +1237,187 @@ body.sidebar-resizing {
   gap: var(--spacing-sm);
   margin-top: var(--spacing-sm);
 }
+
+/* ── "Make a Block"/"Edit Block" dialog ─────────────────────────────────── */
+.make-block-panel { width: 680px; max-width: calc(100vw - 32px); }
+.make-block-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 140px;
+  padding: var(--spacing);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Same two-layer composite the main canvas uses (see .canvas-inner /
+     #macro-editor): a translucent glass wash over the flat `--bg`, with the
+     dot pattern painted on top — not a flat `--bg` fill, which reads
+     noticeably darker than the glass-tinted canvas everywhere else. Listed
+     background-images paint top-first, and the shorthand's plain color
+     always paints last regardless of position, so this stacks as: dots,
+     then glass wash, then base color. */
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle, var(--glass-border) 1.2px, transparent 1.2px),
+    linear-gradient(var(--glass-bg), var(--glass-bg));
+  background-size: 22px 22px, 100% 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.make-block-preview {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+}
+.make-block-piece {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: text;
+}
+.make-block-piece:hover { background: var(--hover-overlay); }
+.make-block-piece-selected { background: var(--hover-overlay); box-shadow: 0 0 0 1.5px var(--accent); }
+/* The text span is always rendered — even while editing (just hidden) — so
+   its box is always what reserves the piece's width. That box reflects the
+   last-committed value, not whatever's being typed, so renaming never grows
+   or shrinks the piece out from under the click that started it; the input
+   (below) is absolutely positioned to exactly fill that same reserved box
+   instead of sizing itself. */
+.make-block-piece-field { position: relative; display: inline-flex; align-items: center; }
+.make-block-piece-text {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.make-block-piece-text-hidden { visibility: hidden; }
+.make-block-piece-input {
+  border: 1px solid var(--glass-border);
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top);
+}
+.make-block-piece-input .make-block-piece-text { font-weight: 600; color: var(--accent); }
+.make-block-piece-input-el {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+}
+
+/* Remove/move toolbar — floats above whichever piece is currently
+   selected, instead of a per-piece always-there remove button. */
+.make-block-piece-toolbar {
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+.make-block-piece-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.make-block-piece-toolbar button:hover:not(:disabled) { background: var(--hover-overlay); color: var(--text); }
+.make-block-piece-toolbar button:disabled { opacity: 0.3; cursor: default; }
+.make-block-piece-toolbar svg { width: 13px; height: 13px; }
+.make-block-piece-remove:hover:not(:disabled) { color: var(--red); }
+
+/* ── "Add an input"/"Add a label" buttons ───────────────────────────────── */
+.make-block-add-row {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+.make-block-add-btn {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.make-block-add-btn:hover { background: var(--hover-overlay); border-color: var(--accent); }
+.make-block-add-preview {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.make-block-add-preview-input {
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--glass-border);
+  border-radius: 5px;
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top);
+}
+.make-block-add-preview-label { color: var(--text); }
+.make-block-add-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+}
+.make-block-add-title { font-size: 13px; font-weight: 600; }
+.make-block-add-sub { font-size: 11px; color: var(--text-dim); }
+.make-block-return-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+.make-block-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.block-header-label { font-weight: 600; }
 
 /* Disable interactive elements while recording */
 #macro-editor.recording .strand-empty-hint,

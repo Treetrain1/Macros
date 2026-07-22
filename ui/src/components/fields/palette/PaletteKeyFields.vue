@@ -1,16 +1,28 @@
 <script setup lang="ts">
-import AutosizeInput from '../../AutosizeInput.vue';
+import { computed, watch } from 'vue';
+import { state } from '../../../store';
+import { clearStandaloneKeyCapture, startStandaloneKeyCapture } from '../../../tauri';
 import AppDropdown from '../../AppDropdown.vue';
 import type { InstructionDto, KeyDirection } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Key' }> }>();
 
-// The real block captures the next keypress via the backend (startKeyCapture)
-// — meaningless for a prefab with no real strand/index, so this is a plain
-// text field instead of a capture button.
-function onKeyChange(v: string) {
-  props.instruction.key = v;
-}
+// This prefab has no real strand/index for the backend's normal capture flow
+// to write into, so it uses the "standalone" capture variant instead: the
+// backend parks the captured key in state.standalone_key rather than writing
+// it into a strand, and we copy it into the local instruction ourselves.
+const isCapturing = computed(() => state.key_capture?.kind === 'Standalone');
+
+// By the time this fires, the backend has already cleared key_capture back
+// to null in the same state snapshot — isCapturing is stale by then, so this
+// can't gate on it. Standalone capture only ever has one consumer (this
+// prefab), so applying unconditionally is safe.
+watch(() => state.standalone_key, key => {
+  if (key == null) return;
+  props.instruction.key = key;
+  clearStandaloneKeyCapture();
+});
+
 function onDirectionChange(dir: string) {
   props.instruction.direction = dir as KeyDirection;
 }
@@ -18,7 +30,11 @@ function onDirectionChange(dir: string) {
 
 <template>
   <span class="instruction-label">Key:</span>
-  <AutosizeInput :model-value="instruction.key" :min-chars="2" @update:model-value="onKeyChange" />
+  <button
+    class="btn-chip key-capture-btn"
+    :class="{ capturing: isCapturing }"
+    @click="startStandaloneKeyCapture()"
+  >{{ isCapturing ? 'Press any key…' : instruction.key }}</button>
   <AppDropdown
     :options="['Click', 'Press', 'Release']"
     :model-value="instruction.direction"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
 import type { InstructionDto } from '../types';
-import { isHeaderType } from '../types';
+import { isCapType, isHeaderType } from '../types';
 import { beginPickup } from '../canvasDrag';
 import { state } from '../store';
 import { openBlockMenu } from '../contextMenu';
@@ -17,6 +17,9 @@ import CommentFields from './fields/CommentFields.vue';
 import WhenRanFields from './fields/WhenRanFields.vue';
 import SetVariableFields from './fields/SetVariableFields.vue';
 import ChangeVariableFields from './fields/ChangeVariableFields.vue';
+import BlockHeaderFields from './fields/BlockHeaderFields.vue';
+import CallBlockFields from './fields/CallBlockFields.vue';
+import ReturnFields from './fields/ReturnFields.vue';
 
 const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
@@ -32,10 +35,14 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   Comment: CommentFields,
   SetVariable: SetVariableFields,
   ChangeVariable: ChangeVariableFields,
+  BlockHeader: BlockHeaderFields,
+  CallBlock: CallBlockFields,
+  Return: ReturnFields,
 };
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);
 const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.instruction.type]]);
+const showIcon = computed(() => !isHeaderType(props.instruction.type));
 
 const isRecordingTarget = computed(
   () => props.isFirst && props.strandId === state.current_macro?.recording_target_strand_id,
@@ -56,14 +63,14 @@ function onRowContextMenu(e: MouseEvent) {
 <template>
   <div
     class="instruction-row"
-    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type) }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"
   >
     <div class="instruction-shape">
       <span v-if="isRecordingTarget" class="recording-target-dot" title="Recording target" />
-      <component :is="typeIcon" v-if="!isHeaderType(instruction.type)" class="instruction-type-icon" />
+      <component :is="typeIcon" v-if="showIcon" class="instruction-type-icon" />
       <div class="instruction-content">
         <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
       </div>

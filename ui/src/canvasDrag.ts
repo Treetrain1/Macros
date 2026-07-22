@@ -7,10 +7,11 @@
 // real regression risk. See the per-function comments (carried over from the
 // original) for the specific bugs this exact structure avoids.
 import { state } from './store';
-import { addInstruction, addStrand, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
+import { addInstruction, addStrand, deleteBlock, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import { clonePaletteInstruction } from './paletteState';
+import { paletteCallInstructionFor } from './blockDefs';
 import type { InstructionDto, MacroDto } from './types';
-import { isHeaderType } from './types';
+import { isCapType, isHeaderType } from './types';
 
 // Strand x/y from the backend are canvas-space coordinates that can go
 // negative; canvas-inner is sized to the strands' bounding box each render,
@@ -277,6 +278,14 @@ interface DragState {
   resolvingPromise: Promise<string | void> | null;
   snap: { targetId: string; index: number } | null;
   overTrash?: boolean;
+  // Set for a whole-strand grab of a strand headed by a `BlockHeader` — its
+  // custom block's id, so dropping this on the trash deletes the block
+  // definition (and every call site referencing it, see
+  // `Macro::remove_block`) via `deleteBlock` instead of just detaching the
+  // now-orphaned body strand via `removeStrand`, which would leave the
+  // block's prefab still sitting in the "My Blocks" sidebar section with no
+  // body behind it.
+  blockId: string | null;
   // Whole-strand grab of a strand headed by a "When Ran" block: it can be
   // moved around freely but never snapped/merged into another strand (that
   // would attach it underneath something), so snap detection is skipped
@@ -315,6 +324,11 @@ let drag: DragState | null = null;
 interface PaletteDragState {
   pointerId: number;
   insType: InstructionDto['type'];
+  // Set only for a `CallBlock` drag from the "My Blocks" section — which
+  // specific custom block, since (unlike every other instruction type)
+  // there's no single fixed prefab: `clonePaletteInstruction` can't resolve
+  // it from `insType` alone. See `beginPaletteDrag`'s `blockId` param.
+  blockId?: string;
   offsetX: number;
   offsetY: number;
   ghostEl: HTMLElement;
@@ -333,7 +347,7 @@ export function beginPickup(e: PointerEvent, strandId: string, index: number) {
 // Dragging a palette entry previews the actual instruction block it'll
 // create (not the sidebar chip) — dropped on empty canvas it becomes exactly
 // that: a single ordinary-looking block, nothing else.
-export function beginPaletteDrag(e: PointerEvent, insType: InstructionDto['type'], ghostRowEl: HTMLElement) {
+export function beginPaletteDrag(e: PointerEvent, insType: InstructionDto['type'], ghostRowEl: HTMLElement, blockId?: string) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
   e.preventDefault();
@@ -353,6 +367,7 @@ export function beginPaletteDrag(e: PointerEvent, insType: InstructionDto['type'
   paletteDrag = {
     pointerId: e.pointerId,
     insType,
+    blockId,
     offsetX: 14,
     offsetY: 14,
     ghostEl: ghost,
@@ -411,9 +426,14 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     // Index 0 (the very top boundary) would attach something above the
     // strand's first block — never allowed when that first block is a
     // "When Ran", since nothing may ever end up underneath it.
-    const headIsWhenRan = findStrand(id)?.instructions[0] && isHeaderType(findStrand(id)!.instructions[0].type);
+    const strandInstructions = findStrand(id)?.instructions ?? [];
+    const headIsWhenRan = strandInstructions[0] && isHeaderType(strandInstructions[0].type);
     for (let idx = 0; idx < boundaries.length; idx++) {
       if (idx === 0 && headIsWhenRan) continue;
+      // A boundary directly below a cap block (Return) would attach
+      // something underneath it — never allowed, since a cap block always
+      // ends its strand's control flow.
+      if (idx > 0 && isCapType(strandInstructions[idx - 1].type)) continue;
       const y = boundaries[idx];
       const refY = ghostRect ? ghostRect.top : e.clientY;
       const dist = Math.abs(refY - y);
@@ -546,6 +566,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     restoreCard,
     hiddenRowEls,
     hiddenNewCardEl: null,
+    blockId: wholeStrandGrab && strand.instructions[0]?.type === 'BlockHeader' ? strand.instructions[0].block_id : null,
     noSnap: wholeStrandGrab && strand.instructions[0] != null && isHeaderType(strand.instructions[0].type),
     preExistingStrandIds: new Set(state.current_macro?.strands?.map(s => s.id) ?? []),
   };
@@ -652,7 +673,9 @@ function onPointerUp(e: PointerEvent) {
     finished.ghostEl.remove();
 
     if (!isOverSidebar(e)) {
-      const ins = clonePaletteInstruction(finished.insType);
+      const ins = finished.insType === 'CallBlock' && finished.blockId
+        ? paletteCallInstructionFor(finished.blockId)
+        : clonePaletteInstruction(finished.insType);
       void (async () => {
         try {
           if (finished.snap) {
@@ -703,7 +726,15 @@ function onPointerUp(e: PointerEvent) {
     const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
     if (!id) return;
     if (finished.overTrash) {
-      await removeStrand(id);
+      // A custom block's header strand: delete the block definition (which
+      // also removes this body strand and every call site referencing it)
+      // rather than just detaching the strand and leaving an orphaned
+      // "My Blocks" prefab behind.
+      if (finished.blockId) {
+        await deleteBlock(finished.blockId);
+      } else {
+        await removeStrand(id);
+      }
     } else if (finished.snap) {
       await mergeStrand(id, finished.snap.targetId, finished.snap.index);
     } else {

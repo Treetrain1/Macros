@@ -1,5 +1,7 @@
 pub(crate) mod commands;
 pub(crate) mod config;
+#[cfg(feature = "dev-bridge")]
+pub(crate) mod dev_bridge;
 pub(crate) mod hotkey_types;
 pub(crate) mod input;
 pub(crate) mod ipc;
@@ -48,6 +50,7 @@ pub fn run() {
                 clear_confirm_remaining_secs: 0,
                 clear_confirm_generation: 0,
                 key_capture: None,
+                pending_standalone_key: None,
                 undo_stack: vec![],
                 redo_stack: vec![],
                 text_edit_session: None,
@@ -114,6 +117,13 @@ pub fn run() {
                 }
             }
 
+            // ── Dev-only browser bridge (see src/dev_bridge.rs) ────────────
+            #[cfg(feature = "dev-bridge")]
+            {
+                let bridge_handle = app.handle().clone();
+                tauri::async_runtime::spawn(crate::dev_bridge::run(bridge_handle));
+            }
+
             // ── QueueSignal consumer (replaces iced hotkey subscription) ──
             let app_handle = app.handle().clone();
             let state_for_task = Arc::clone(&shared);
@@ -159,6 +169,9 @@ pub fn run() {
             commands::create_variable,
             commands::rename_variable,
             commands::delete_variable,
+            commands::create_block,
+            commands::edit_block,
+            commands::delete_block,
             commands::edit_value_field,
             commands::set_value_kind,
             commands::take_value,
@@ -181,7 +194,9 @@ pub fn run() {
             commands::undo,
             commands::redo,
             commands::start_key_capture,
+            commands::start_standalone_key_capture,
             commands::key_capture_event,
+            commands::clear_standalone_key_capture,
             commands::run_macro,
             commands::toggle_loop_mode,
             commands::set_global_speed_multiplier,

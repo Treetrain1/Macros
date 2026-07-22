@@ -15,7 +15,7 @@ import type { OperatorKindSpec, OperatorValueKind } from './valueOps';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
   'WhenRan', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'Comment',
-  'SetVariable', 'ChangeVariable',
+  'SetVariable', 'ChangeVariable', 'Return',
 ];
 
 export const paletteInstructions: Record<InstructionType, InstructionDto> = reactive(
@@ -56,7 +56,7 @@ export const paletteText = reactive({ value: textSeed.kind === 'Text' ? textSeed
 export function paletteValueFor(kind: ValueKind): ValueDto {
   if (kind === 'Number') return numberValue(paletteNumber.value);
   if (kind === 'Text') return textValue(paletteText.value);
-  if (kind.startsWith('Var:')) return defaultValueForKind(kind);
+  if (kind.startsWith('Var:') || kind.startsWith('Param:')) return defaultValueForKind(kind);
   const spec = specForKind(kind);
   if (!spec) throw new Error(`Unknown value kind: ${kind}`);
   const args = paletteOperatorArgs[kind as OperatorValueKind];

@@ -4,7 +4,7 @@ use crate::input::value::{Evaluated, Op, Value};
 use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use crate::macros::backend::InputBackend;
 use crate::macros::thread_pool::ThreadPool;
-use crate::macros::{FloatingValue, Instruction, Macro, Strand};
+use crate::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,11 @@ pub(crate) enum FieldId {
     TextValue,
     SetVariableValue,
     ChangeVariableValue,
+    ReturnValue,
+    /// One of `CallBlock`'s N argument slots, indexed positionally against
+    /// the block's declared inputs — the one `FieldId` variant that isn't
+    /// one-per-instruction-type, since a call's arity is dynamic.
+    CallArg(usize),
 }
 
 impl std::fmt::Display for FieldId {
@@ -32,6 +37,8 @@ impl std::fmt::Display for FieldId {
             FieldId::TextValue => write!(f, "TextValue"),
             FieldId::SetVariableValue => write!(f, "SetVariableValue"),
             FieldId::ChangeVariableValue => write!(f, "ChangeVariableValue"),
+            FieldId::ReturnValue => write!(f, "ReturnValue"),
+            FieldId::CallArg(i) => write!(f, "CallArg:{i}"),
         }
     }
 }
@@ -47,6 +54,11 @@ impl std::str::FromStr for FieldId {
             "TextValue" => Ok(FieldId::TextValue),
             "SetVariableValue" => Ok(FieldId::SetVariableValue),
             "ChangeVariableValue" => Ok(FieldId::ChangeVariableValue),
+            "ReturnValue" => Ok(FieldId::ReturnValue),
+            _ if s.starts_with("CallArg:") => s["CallArg:".len()..]
+                .parse::<usize>()
+                .map(FieldId::CallArg)
+                .map_err(|_| format!("Unknown FieldId: {s}")),
             _ => Err(format!("Unknown FieldId: {s}")),
         }
     }
@@ -81,12 +93,24 @@ pub(crate) enum ComboCapture {
     Pending,
 }
 
+/// Where a captured keypress should be written once it arrives.
+/// `Strand` is the real editor flow (writes straight into an instruction).
+/// `Standalone` has no instruction to write into — e.g. the sidebar's Key
+/// prefab, which isn't part of any strand — so the captured key is parked in
+/// `AppState::pending_standalone_key` for the frontend to read and clear.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum KeyCaptureTarget {
+    Strand(String, usize),
+    Standalone,
+}
+
 /// One undo/redo checkpoint — everything a "structural" edit command can
 /// change: the strand list and the floating value blocks parked on canvas.
 #[derive(Debug, Clone)]
 pub(crate) struct MacroSnapshot {
     pub(crate) strands: Vec<Strand>,
     pub(crate) floating_values: Vec<FloatingValue>,
+    pub(crate) block_defs: Vec<BlockDef>,
 }
 
 pub(crate) struct AppState {
@@ -115,7 +139,8 @@ pub(crate) struct AppState {
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,
-    pub(crate) key_capture: Option<(String, usize)>,
+    pub(crate) key_capture: Option<KeyCaptureTarget>,
+    pub(crate) pending_standalone_key: Option<String>,
     pub(crate) undo_stack: Vec<MacroSnapshot>,
     pub(crate) redo_stack: Vec<MacroSnapshot>,
     pub(crate) text_edit_session: Option<TextEditSession>,
@@ -150,6 +175,7 @@ pub(crate) struct StateDto {
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) confirm_clear_instructions_remaining_secs: u8,
     pub(crate) key_capture: Option<KeyCaptureDto>,
+    pub(crate) standalone_key: Option<String>,
     pub(crate) can_undo: bool,
     pub(crate) can_redo: bool,
     pub(crate) recording_phase: RecordingPhaseDto,
@@ -179,6 +205,40 @@ pub(crate) struct MacroDto {
     /// Declared variable names only — current values aren't surfaced to the
     /// frontend (no "watcher" UI), just used by the sidebar/dropdowns.
     pub(crate) variables: Vec<String>,
+    /// User-defined custom blocks ("My Blocks") — see `BlockDefDto`.
+    pub(crate) block_defs: Vec<BlockDefDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "kind")]
+pub(crate) enum BlockPieceDto {
+    Label { id: String, text: String },
+    Input { id: String, name: String },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub(crate) struct BlockDefDto {
+    pub(crate) id: String,
+    pub(crate) pieces: Vec<BlockPieceDto>,
+    pub(crate) returns_value: bool,
+}
+
+pub(crate) fn block_piece_to_dto(piece: &BlockPiece) -> BlockPieceDto {
+    match piece {
+        BlockPiece::Label { id, text } => BlockPieceDto::Label { id: id.clone(), text: text.clone() },
+        BlockPiece::Input { id, name } => BlockPieceDto::Input { id: id.clone(), name: name.clone() },
+    }
+}
+
+pub(crate) fn dto_to_block_piece(dto: &BlockPieceDto) -> BlockPiece {
+    match dto {
+        BlockPieceDto::Label { id, text } => BlockPiece::Label { id: id.clone(), text: text.clone() },
+        BlockPieceDto::Input { id, name } => BlockPiece::Input { id: id.clone(), name: name.clone() },
+    }
+}
+
+pub(crate) fn block_def_to_dto(def: &BlockDef) -> BlockDefDto {
+    BlockDefDto { id: def.id.clone(), pieces: def.pieces.iter().map(block_piece_to_dto).collect(), returns_value: def.returns_value }
 }
 
 #[derive(Serialize, Clone)]
@@ -191,8 +251,9 @@ pub(crate) struct StrandDto {
 
 #[derive(Serialize, Clone)]
 pub(crate) struct KeyCaptureDto {
-    pub(crate) strand_id: String,
-    pub(crate) index: usize,
+    pub(crate) kind: String,
+    pub(crate) strand_id: Option<String>,
+    pub(crate) index: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -202,6 +263,8 @@ pub(crate) enum ValueDto {
     Text { value: String },
     Op { op: Op, args: Vec<ValueDto>, saved: Box<ValueDto> },
     Var { name: String },
+    Param { name: String },
+    Call { block_id: String, args: Vec<ValueDto>, saved: Box<ValueDto> },
 }
 
 #[derive(Serialize, Clone)]
@@ -318,6 +381,9 @@ pub(crate) enum InstructionDto {
     WhenRan,
     SetVariable { name: String, value: ValueDto },
     ChangeVariable { name: String, value: ValueDto },
+    BlockHeader { block_id: String },
+    CallBlock { block_id: String, args: Vec<ValueDto> },
+    Return { value: ValueDto },
 }
 
 #[derive(Serialize, Clone)]
@@ -434,6 +500,10 @@ pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
             ValueDto::Op { op: *op, args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
         }
         Value::Var { name } => ValueDto::Var { name: name.clone() },
+        Value::Param { name } => ValueDto::Param { name: name.clone() },
+        Value::Call { block_id, args, saved } => {
+            ValueDto::Call { block_id: block_id.clone(), args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
+        }
     }
 }
 
@@ -445,6 +515,10 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
             Value::Op { op: *op, args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
         }
         ValueDto::Var { name } => Value::Var { name: name.clone() },
+        ValueDto::Param { name } => Value::Param { name: name.clone() },
+        ValueDto::Call { block_id, args, saved } => {
+            Value::Call { block_id: block_id.clone(), args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
+        }
     }
 }
 
@@ -456,6 +530,11 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::WhenRan => InstructionDto::WhenRan,
         Instruction::SetVariable(name, value) => InstructionDto::SetVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::ChangeVariable(name, value) => InstructionDto::ChangeVariable { name: name.clone(), value: value_to_dto(value) },
+        Instruction::BlockHeader(block_id) => InstructionDto::BlockHeader { block_id: block_id.clone() },
+        Instruction::CallBlock { block_id, args } => {
+            InstructionDto::CallBlock { block_id: block_id.clone(), args: args.iter().map(value_to_dto).collect() }
+        }
+        Instruction::Return(value) => InstructionDto::Return { value: value_to_dto(value) },
         Instruction::Token(token) => match token {
             InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
@@ -505,6 +584,11 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
         InstructionDto::WhenRan => Instruction::WhenRan,
         InstructionDto::SetVariable { name, value } => Instruction::SetVariable(name.clone(), dto_to_value(value)),
         InstructionDto::ChangeVariable { name, value } => Instruction::ChangeVariable(name.clone(), dto_to_value(value)),
+        InstructionDto::BlockHeader { block_id } => Instruction::BlockHeader(block_id.clone()),
+        InstructionDto::CallBlock { block_id, args } => {
+            Instruction::CallBlock { block_id: block_id.clone(), args: args.iter().map(dto_to_value).collect() }
+        }
+        InstructionDto::Return { value } => Instruction::Return(dto_to_value(value)),
     })
 }
 
@@ -531,6 +615,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         speed_multiplier: mac.speed_multiplier,
         floating_values: mac.floating_values.iter().map(floating_value_to_dto).collect(),
         variables: mac.variables.iter().map(|v| v.name.clone()).collect(),
+        block_defs: mac.block_defs.iter().map(block_def_to_dto).collect(),
     }
 }
 
@@ -629,9 +714,17 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         InvalidFieldDto { location: location_to_dto(location), text: text.clone() }
     }).collect();
 
-    let key_capture = s.key_capture.as_ref().map(|(strand_id, index)| KeyCaptureDto {
-        strand_id: strand_id.clone(),
-        index: *index,
+    let key_capture = s.key_capture.as_ref().map(|target| match target {
+        KeyCaptureTarget::Strand(strand_id, index) => KeyCaptureDto {
+            kind: "Strand".to_string(),
+            strand_id: Some(strand_id.clone()),
+            index: Some(*index),
+        },
+        KeyCaptureTarget::Standalone => KeyCaptureDto {
+            kind: "Standalone".to_string(),
+            strand_id: None,
+            index: None,
+        },
     });
 
     let is_looping = s.is_looping.lock().map(|g| *g).unwrap_or(false);
@@ -660,6 +753,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         confirm_clear_instructions: s.confirm_clear_instructions,
         confirm_clear_instructions_remaining_secs: s.clear_confirm_remaining_secs,
         key_capture,
+        standalone_key: s.pending_standalone_key.clone(),
         can_undo: !s.undo_stack.is_empty(),
         can_redo: !s.redo_stack.is_empty(),
         recording_phase,

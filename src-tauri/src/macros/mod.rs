@@ -83,12 +83,66 @@ pub(crate) struct VariableDef {
     pub(crate) value: Evaluated,
 }
 
+/// One piece of a custom block's prototype, in declaration order — either
+/// static label text or a named input slot. `Input`'s `name` is the
+/// parameter name, read inside the block's own body via `Value::Param`, and
+/// unique within that block (enforced at creation/edit time in
+/// `commands.rs`, not here). Both variants' `id` is a stable, opaque
+/// identifier generated once when the piece is first added (client-side,
+/// see `MakeBlockDialog.vue`) and never regenerated — the only way
+/// `edit_block` can tell "this input was renamed" apart from "this input
+/// was removed and an unrelated one added" when reconciling existing call
+/// sites' `args` (see `Macro::reconcile_block_call_args`), since a plain
+/// name (which *does* change on rename) can't serve as that identity.
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub(crate) enum BlockPiece {
+    Label { id: String, text: String },
+    Input { id: String, name: String },
+}
+
+impl BlockPiece {
+    fn id(&self) -> &str {
+        match self {
+            BlockPiece::Label { id, .. } | BlockPiece::Input { id, .. } => id,
+        }
+    }
+}
+
+/// A user-defined custom block ("My Blocks") — just the prototype/signature;
+/// the actual instructions it runs live in a `Strand` elsewhere in the same
+/// macro whose `instructions[0]` is `Instruction::BlockHeader(id)`, exactly
+/// the way `WhenRan` marks an entry strand (see `Macro::run`, which builds
+/// its `block_table` by scanning for these header strands directly).
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
+pub(crate) struct BlockDef {
+    pub(crate) id: String,
+    pub(crate) pieces: Vec<BlockPiece>,
+    pub(crate) returns_value: bool,
+}
+
+impl BlockDef {
+    /// Declared input names, in prototype order — the positional key `Call`/
+    /// `CallBlock`'s `args` line up against.
+    pub(crate) fn input_names(&self) -> impl Iterator<Item = &str> {
+        self.pieces.iter().filter_map(|p| match p {
+            BlockPiece::Input { name, .. } => Some(name.as_str()),
+            BlockPiece::Label { .. } => None,
+        })
+    }
+}
+
+fn default_block_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
 impl Instruction {
     /// Returns `true` for "header" blocks — blocks that must be first in their
     /// strand, cannot have anything stacked above them, and render with a flat
-    /// top edge (no connector notch). Currently only `WhenRan`.
+    /// top edge (no connector notch). `WhenRan` marks a macro entry point;
+    /// `BlockHeader` marks a custom block's body.
     pub(crate) fn is_header(&self) -> bool {
-        matches!(self, Instruction::WhenRan)
+        matches!(self, Instruction::WhenRan | Instruction::BlockHeader(_))
     }
 
     /// See `Value::rename_var` — also renames a `SetVariable`/`ChangeVariable`
@@ -96,7 +150,7 @@ impl Instruction {
     /// inside its value.
     pub(crate) fn rename_var(&mut self, old: &str, new: &str) {
         match self {
-            Instruction::Wait(value) => value.rename_var(old, new),
+            Instruction::Wait(value) | Instruction::Return(value) => value.rename_var(old, new),
             Instruction::Token(token) => token.rename_var(old, new),
             Instruction::SetVariable(name, value) | Instruction::ChangeVariable(name, value) => {
                 if name == old {
@@ -104,7 +158,75 @@ impl Instruction {
                 }
                 value.rename_var(old, new);
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan => {}
+            Instruction::CallBlock { args, .. } => {
+                for a in args.iter_mut() {
+                    a.rename_var(old, new);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+        }
+    }
+
+    /// Renames every `Value::Param` leaf reading `old` (anywhere this
+    /// instruction embeds a `Value` tree) to `new` — used by
+    /// `Macro::rename_block_input` to keep a block's own body working after
+    /// one of its inputs is renamed.
+    pub(crate) fn rename_param(&mut self, old: &str, new: &str) {
+        match self {
+            Instruction::Wait(value) | Instruction::Return(value) => value.rename_param(old, new),
+            Instruction::Token(token) => token.rename_param(old, new),
+            Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.rename_param(old, new),
+            Instruction::CallBlock { args, .. } => {
+                for a in args.iter_mut() {
+                    a.rename_param(old, new);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+        }
+    }
+
+    /// Applies `f` to the `args` of every `CallBlock`/`Value::Call` node
+    /// (anywhere this instruction embeds one, including nested inside a
+    /// `Value` tree) that references `block_id` — used by
+    /// `Macro::insert_block_input`/`remove_block_input` to keep every call
+    /// site's argument list positionally aligned with the block's current
+    /// `pieces` after an input is added/removed.
+    pub(crate) fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
+        match self {
+            Instruction::Wait(value) | Instruction::Return(value) => value.for_each_call_args_mut(block_id, f),
+            Instruction::Token(token) => token.for_each_call_args_mut(block_id, f),
+            Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => {
+                value.for_each_call_args_mut(block_id, f)
+            }
+            Instruction::CallBlock { block_id: id, args } => {
+                if id == block_id {
+                    f(args);
+                }
+                for a in args.iter_mut() {
+                    a.for_each_call_args_mut(block_id, f);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+        }
+    }
+
+    /// Replaces every `Value::Call` node (anywhere this instruction embeds
+    /// one) referencing `block_id` with a plain `0` leaf, and drops this
+    /// instruction entirely if it's a `CallBlock` referencing `block_id` —
+    /// used by `Macro::remove_block` so deleting a custom block scrubs every
+    /// reference instead of leaving a dangling one with nothing sensible to
+    /// fall back to.
+    pub(crate) fn scrub_block_calls(&mut self, block_id: &str) {
+        match self {
+            Instruction::Wait(value) | Instruction::Return(value) => value.scrub_block_calls(block_id),
+            Instruction::Token(token) => token.scrub_block_calls(block_id),
+            Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.scrub_block_calls(block_id),
+            Instruction::CallBlock { args, .. } => {
+                for a in args.iter_mut() {
+                    a.scrub_block_calls(block_id);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
         }
     }
 }
@@ -144,6 +266,10 @@ pub(crate) struct Macro {
     /// User-declared macro-wide variables — see `VariableDef`.
     #[serde(default)]
     pub(crate) variables: Vec<VariableDef>,
+    /// User-defined custom blocks ("My Blocks") — see `BlockDef`. Each
+    /// def's body lives in its own header strand within `strands`.
+    #[serde(default)]
+    pub(crate) block_defs: Vec<BlockDef>,
 }
 
 /// Valid range for both the per-macro and global speed multipliers, enforced
@@ -171,6 +297,8 @@ enum MacroDe {
         floating_values: Vec<FloatingValue>,
         #[serde(default)]
         variables: Vec<VariableDef>,
+        #[serde(default)]
+        block_defs: Vec<BlockDef>,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -184,7 +312,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
-            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables, block_defs } => {
                 // Pre-"When Ran" saves have a strand literally id=="root" that
                 // was the sole implicit entry point; give it a real WhenRan
                 // block so it keeps running after upgrade.
@@ -193,12 +321,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values, variables }
+                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values, variables, block_defs }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new() }
+                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new(), block_defs: Vec::new() }
             }
         }
     }
@@ -217,6 +345,7 @@ impl Macro {
             speed_multiplier: default_speed_multiplier(),
             floating_values: Vec::new(),
             variables: Vec::new(),
+            block_defs: Vec::new(),
         }
     }
 
@@ -268,6 +397,83 @@ impl Macro {
         }
         for fv in &mut self.floating_values {
             fv.value.rename_var(old, new);
+        }
+    }
+
+    /// Defines a new custom block: appends the `BlockDef` and creates its
+    /// (initially empty) header strand at `(x, y)`, returning the new
+    /// block's id. Caller validates `pieces` (non-empty label text, unique
+    /// input names) beforehand.
+    pub(crate) fn create_block(&mut self, pieces: Vec<BlockPiece>, returns_value: bool, x: i32, y: i32) -> String {
+        let id = default_block_id();
+        self.block_defs.push(BlockDef { id: id.clone(), pieces, returns_value });
+        self.strands.push(Strand { id: default_strand_id(), x, y, instructions: vec![Instruction::BlockHeader(id.clone())] });
+        id
+    }
+
+    /// Renames every `Value::Param` leaf reading `old` to `new`, but *only*
+    /// within `block_id`'s own body (params are scoped per-block, so no
+    /// other block's body is touched) — the body-side half of reconciling a
+    /// renamed input; `edit_block` calls this once per renamed piece before
+    /// overwriting `BlockDef::pieces` wholesale with the caller's new list
+    /// (which is why this doesn't touch `pieces` itself, unlike
+    /// `rename_variable`, whose declaration and references live in the same
+    /// place). A no-op if `block_id` has no header strand.
+    pub(crate) fn rename_block_input_body(&mut self, block_id: &str, old: &str, new: &str) {
+        for strand in &mut self.strands {
+            if matches!(strand.instructions.first(), Some(Instruction::BlockHeader(id)) if id == block_id) {
+                for ins in &mut strand.instructions {
+                    ins.rename_param(old, new);
+                }
+            }
+        }
+    }
+
+    /// Rebuilds every existing call site's `args` (every `CallBlock`/
+    /// `Value::Call` referencing `block_id`, wherever it appears) to line up
+    /// with `new_pieces`' input order, carrying over each surviving input's
+    /// old value by matching `BlockPiece::id` between `old_pieces` and
+    /// `new_pieces` (identity survives a rename; a removed input's old value
+    /// is simply dropped, an added one gets a fresh `0`) — called by
+    /// `edit_block` before it overwrites `BlockDef::pieces`, so `old_pieces`
+    /// should be the def's pieces *before* that happens.
+    pub(crate) fn reconcile_block_call_args(&mut self, block_id: &str, old_pieces: &[BlockPiece], new_pieces: &[BlockPiece]) {
+        let old_input_ids: Vec<&str> = old_pieces.iter().filter(|p| matches!(p, BlockPiece::Input { .. })).map(BlockPiece::id).collect();
+        let new_input_ids: Vec<&str> = new_pieces.iter().filter(|p| matches!(p, BlockPiece::Input { .. })).map(BlockPiece::id).collect();
+        // For each new input slot, which old slot (if any) it carries over from.
+        let mapping: Vec<Option<usize>> = new_input_ids.iter().map(|id| old_input_ids.iter().position(|old| old == id)).collect();
+
+        let mut rebuild = |args: &mut Vec<Value>| {
+            *args = mapping.iter().map(|old_idx| old_idx.and_then(|i| args.get(i).cloned()).unwrap_or_else(|| Value::number(0.0))).collect();
+        };
+        for strand in &mut self.strands {
+            for ins in &mut strand.instructions {
+                ins.for_each_call_args_mut(block_id, &mut rebuild);
+            }
+        }
+        for fv in &mut self.floating_values {
+            fv.value.for_each_call_args_mut(block_id, &mut rebuild);
+        }
+    }
+
+    /// Deletes a custom block entirely: its `BlockDef`, its header strand,
+    /// every `CallBlock` instruction that calls it (anywhere), and every
+    /// `Value::Call` node that calls it (collapsed to a plain `0` leaf,
+    /// same "takes over the slot" spirit as `commands::apply_value_kind`) —
+    /// unlike a deleted variable, a dangling block reference has nothing
+    /// sensible to fall back to at resolve time, so it's scrubbed rather
+    /// than left dangling.
+    pub(crate) fn remove_block(&mut self, block_id: &str) {
+        self.block_defs.retain(|b| b.id != block_id);
+        self.strands.retain(|s| !matches!(s.instructions.first(), Some(Instruction::BlockHeader(id)) if id == block_id));
+        for strand in &mut self.strands {
+            strand.instructions.retain(|ins| !matches!(ins, Instruction::CallBlock { block_id: id, .. } if id == block_id));
+            for ins in &mut strand.instructions {
+                ins.scrub_block_calls(block_id);
+            }
+        }
+        for fv in &mut self.floating_values {
+            fv.value.scrub_block_calls(block_id);
         }
     }
 
@@ -329,6 +535,19 @@ pub(crate) enum Instruction {
     /// own current value is coerced to `0` first if it isn't already
     /// numeric. See `macros::runner::run_instructions`.
     ChangeVariable(String, Value),
+    /// Marks a strand as a custom block's body (see `BlockDef`) — the
+    /// `String` is the `BlockDef::id` it belongs to. Header-only, like
+    /// `WhenRan`; excluded from `Macro::run`'s entry-strand filter so it
+    /// never auto-runs, only via `CallBlock`/`Value::Call`.
+    BlockHeader(String),
+    /// Command-position invocation of a `returns_value == false` custom
+    /// block — runs its body inline with `args` bound to its declared
+    /// inputs. See `macros::runner`.
+    CallBlock { block_id: String, args: Vec<Value> },
+    /// Only meaningful inside a `returns_value == true` block's body:
+    /// evaluates `Value` and halts that block's execution, handing the
+    /// result back to whatever called it (`CallBlock` or `Value::Call`).
+    Return(Value),
 }
 
 impl std::hash::Hash for Macro {
@@ -341,6 +560,7 @@ impl std::hash::Hash for Macro {
         self.speed_multiplier.to_bits().hash(state);
         self.floating_values.hash(state);
         self.variables.hash(state);
+        self.block_defs.hash(state);
     }
 }
 
@@ -354,6 +574,9 @@ impl std::hash::Hash for Instruction {
             Self::WhenRan    => { 4u8.hash(state); }
             Self::SetVariable(n, v)    => { 5u8.hash(state); n.hash(state); v.hash(state); }
             Self::ChangeVariable(n, v) => { 6u8.hash(state); n.hash(state); v.hash(state); }
+            Self::BlockHeader(id) => { 7u8.hash(state); id.hash(state); }
+            Self::CallBlock { block_id, args } => { 8u8.hash(state); block_id.hash(state); args.hash(state); }
+            Self::Return(v) => { 9u8.hash(state); v.hash(state); }
         }
     }
 }
@@ -367,6 +590,9 @@ enum InstructionDe {
     WhenRan,
     SetVariable(String, Value),
     ChangeVariable(String, Value),
+    BlockHeader(String),
+    CallBlock { block_id: String, args: Vec<Value> },
+    Return(Value),
 }
 
 #[derive(Deserialize)]
@@ -418,6 +644,9 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::WhenRan => Instruction::WhenRan,
             InstructionDe::SetVariable(n, v) => Instruction::SetVariable(n, v),
             InstructionDe::ChangeVariable(n, v) => Instruction::ChangeVariable(n, v),
+            InstructionDe::BlockHeader(id) => Instruction::BlockHeader(id),
+            InstructionDe::CallBlock { block_id, args } => Instruction::CallBlock { block_id, args },
+            InstructionDe::Return(v) => Instruction::Return(v),
         }
     }
 }

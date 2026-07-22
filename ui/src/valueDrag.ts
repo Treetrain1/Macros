@@ -17,9 +17,20 @@ import { state } from './store';
 import { capturePointer, clientToCanvas, getCanvasZoom, isOverSidebar, setSidebarArmed } from './canvasDrag';
 import { createFloatingValue, moveFloatingValue, previewValue, putValue, removeFloatingValue, takeValue } from './tauri';
 import { paletteValueFor } from './paletteState';
+import { paletteCallValueFor } from './blockDefs';
 import { numberValue } from './types';
 import { locationsEqual } from './invalidField';
 import type { ValueDto, ValueKind, ValueLocationDto } from './types';
+
+/** The full `ValueDto` a fresh (never-yet-real) sidebar prefab currently
+ * represents, dispatched by kind — `Call:<blockId>` (a "My Blocks" reporter,
+ * dynamic arity per block) goes to blockDefs.ts; everything else (Number/
+ * Text/operators/Var/Param, all fixed-shape per kind) goes to
+ * paletteState.ts's registry-driven `paletteValueFor`. The one place that
+ * needs to know both exist. */
+function resolveFreshValue(kind: ValueKind): ValueDto {
+  return kind.startsWith('Call:') ? paletteCallValueFor(kind.slice('Call:'.length)) : paletteValueFor(kind);
+}
 
 // Field/subfield locations whose current leaf (Number/Text) got there by
 // being dropped as its own block — from the sidebar's Number/Text prefab, or
@@ -127,7 +138,7 @@ function isPreviewableKind(kind: ValueKind): boolean {
 
 async function previewClickedPaletteValue(kind: ValueKind) {
   try {
-    const text = await previewValue(paletteValueFor(kind));
+    const text = await previewValue(resolveFreshValue(kind));
     showPaletteEvalPreview(kind, text, false);
   } catch (err) {
     showPaletteEvalPreview(kind, String(err), true);
@@ -376,7 +387,7 @@ function onPointerUp(e: PointerEvent) {
 
         let incoming: ValueDto;
         if (finished.source.kind === 'fresh') {
-          incoming = paletteValueFor(finished.source.valueKind);
+          incoming = resolveFreshValue(finished.source.valueKind);
         } else {
           incoming = await takeValue(finished.source.location);
           unmarkCapsule(finished.source.location);
@@ -421,7 +432,7 @@ function onPointerUp(e: PointerEvent) {
       // Open canvas.
       const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
       if (finished.source.kind === 'fresh') {
-        await createFloatingValue(x, y, paletteValueFor(finished.source.valueKind));
+        await createFloatingValue(x, y, resolveFreshValue(finished.source.valueKind));
       } else if (finished.source.location.kind === 'Floating' && finished.source.location.path.length === 0) {
         // Whole floating block, just repositioned — no content change. Apply
         // the new position locally first (same optimistic trick as

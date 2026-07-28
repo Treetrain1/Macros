@@ -1816,7 +1816,10 @@ pub(crate) async fn check_for_updates_internal<R: Runtime>(state: &SharedState, 
         }
     }
     #[cfg(not(windows))]
-    let _ = (state, app);
+    if let Ok(mut s) = state.lock() {
+        s.update_check_state = UpdateCheckState::Error("Updates are only supported on Windows".to_string());
+        emit_state_updated(app, &s);
+    }
 }
 
 #[tauri::command]

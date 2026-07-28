@@ -5,6 +5,7 @@
 #endif
 #define MyAppPublisher "Ethan Stokes"
 #define MyAppURL "https://github.com/EthanRStokes/macros"
+#define CEFDir "..\target\x86_64-pc-windows-msvc\release"
 
 [Setup]
 AppId={{5C076DD5-93F2-457D-855D-BCC8AEFBBA43}
@@ -40,7 +41,22 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\target\x86_64-pc-windows-msvc\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Main binary
+Source: "{#CEFDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; CEF runtime
+Source: "{#CEFDir}\libcef.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\chrome_elf.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\libEGL.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\libGLESv2.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\vk_swiftshader.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\vulkan-1.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\vk_swiftshader_icd.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\icudtl.dat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\v8_context_snapshot.bin"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\chrome_100_percent.pak"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\chrome_200_percent.pak"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\resources.pak"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CEFDir}\locales\*"; DestDir: "{app}\locales"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

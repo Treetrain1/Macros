@@ -20,10 +20,18 @@ fn build_frontend() {
     println!("cargo:rerun-if-changed={}", ui_dir.join("package.json").display());
     println!("cargo:rerun-if-changed={}", ui_dir.join("vite.config.js").display());
 
-    // On Windows, pnpm is installed as `pnpm.cmd`/`pnpm.ps1` shims, not a `.exe`.
-    // `Command::new` doesn't consult PATHEXT the way a shell would, so the bare
-    // name resolves to nothing there even when pnpm is on PATH.
-    let pnpm = if cfg!(windows) { "pnpm.cmd" } else { "pnpm" };
+    // On Windows, pnpm may be installed as a `.cmd` shim (npm global) or as
+    // `pnpm.exe` (WinGet/scoop). Try the common candidates and fall back to
+    // the bare name so `Command::new` can resolve it via PATH.
+    let pnpm = if cfg!(windows) {
+        ["pnpm.cmd", "pnpm.exe", "pnpm"]
+            .iter()
+            .find(|name| std::process::Command::new("where").arg(name).output().map_or(false, |o| o.status.success()))
+            .copied()
+            .unwrap_or("pnpm")
+    } else {
+        "pnpm"
+    };
 
     let run = |args: &[&str]| {
         let status = std::process::Command::new(pnpm)

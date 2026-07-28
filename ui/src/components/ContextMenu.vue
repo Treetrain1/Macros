@@ -79,6 +79,15 @@ function onSetRecordingTarget() {
   closeContextMenu();
 }
 function onDeleteBlock() {
+  // A custom block's header row: delete the block definition (which also
+  // removes this body strand and every call site referencing it) rather
+  // than just detaching the strand and leaving an orphaned "My Blocks"
+  // prefab behind — mirrors the drag-to-trash handling in canvasDrag.ts.
+  if (headerBlockId.value) {
+    deleteBlock(headerBlockId.value);
+    closeContextMenu();
+    return;
+  }
   const [x, y] = deleteBlockPosition();
   deleteInstruction(contextMenu.strandId, contextMenu.index, x, y);
   closeContextMenu();

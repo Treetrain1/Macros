@@ -604,40 +604,73 @@ body.sidebar-resizing {
 /* Header blocks (When Ran, and any future top-only blocks) have no top
    notch — a flat top edge with only the bottom tab, because nothing can
    ever sit above a header. The left padding also doesn't need to reserve
-   space for the connector notch since there's none. */
-.instruction-row-header::before {
+   space for the connector notch since there's none.
+
+   Compound `.instruction-row.instruction-row-header` (not just
+   `.instruction-row-header`) for the same reason the cap rule below does
+   it — a single-class `.instruction-row-header::before`/`::after` is the
+   same specificity as the base `.instruction-row::before`/`::after` rules
+   further down this file, and same-specificity same-pseudo rules resolve
+   by source order, so the base rule (declared later) would quietly win
+   and paint the notched shape instead of this flat-topped one. (This was
+   already latent in the pre-existing `::before` rule — it just read as a
+   faint, easy-to-miss dent in the fill. Once `::before` became the crisp
+   border-colored outline layer (see the big comment further down), the
+   same bug became an obvious notch cut into that border, which is what
+   surfaced it.) */
+.instruction-row.instruction-row-header::before {
   clip-path: polygon(
     4px 0,
     calc(100% - 4px) 0, 100% 4px,
     100% calc(100% - var(--connector-notch-depth) - 4px),
     calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
     34.5px calc(100% - var(--connector-notch-depth)),
-    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
-    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
-    24.5px 100%, 17.5px 100%,
-    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
-    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
+    31.5px calc(100% - var(--connector-notch-depth) + 2px),
+    28.5px calc(100% - var(--connector-notch-depth) + 6px),
+    25.5px 100%, 16.5px 100%,
+    13.5px calc(100% - var(--connector-notch-depth) + 6px),
+    10.5px calc(100% - var(--connector-notch-depth) + 2px),
     7.5px calc(100% - var(--connector-notch-depth)),
     4px calc(100% - var(--connector-notch-depth)),
     0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
   );
 }
+/* Mitered 1.5px shrink of the polygon above — see the backer comment on
+   .instruction-row::after for why this pulls inward instead of a layer
+   growing outward past ::before. */
+.instruction-row.instruction-row-header::after {
+  clip-path: polygon(
+    4.6px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 4.6px),
+    calc(100% - 4.6px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    34px calc(100% - var(--connector-notch-depth) - 1.5px),
+    30.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    27.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    25px calc(100% - 1.5px), 17px calc(100% - 1.5px),
+    14.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    11.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    8px calc(100% - var(--connector-notch-depth) - 1.5px),
+    4.6px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 4.6px), 1.5px 4.6px
+  );
+}
 .instruction-row-header .instruction-shape {
   padding: 6px var(--spacing) calc(6px + var(--connector-notch-depth)) var(--spacing);
   clip-path: polygon(
-    4px 0,
-    calc(100% - 4px) 0, 100% 4px,
-    100% calc(100% - var(--connector-notch-depth) - 4px),
-    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
-    34.5px calc(100% - var(--connector-notch-depth)),
-    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
-    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
-    24.5px 100%, 17.5px 100%,
-    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
-    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
-    7.5px calc(100% - var(--connector-notch-depth)),
-    4px calc(100% - var(--connector-notch-depth)),
-    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+    4.6px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 4.6px),
+    calc(100% - 4.6px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    34px calc(100% - var(--connector-notch-depth) - 1.5px),
+    30.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    27.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    25px calc(100% - 1.5px), 17px calc(100% - 1.5px),
+    14.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    11.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    8px calc(100% - var(--connector-notch-depth) - 1.5px),
+    4.6px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 4.6px), 1.5px 4.6px
   );
 }
 
@@ -659,12 +692,25 @@ body.sidebar-resizing {
 .instruction-row.instruction-row-cap { margin-bottom: 0; }
 .instruction-row.instruction-row-cap::before {
   clip-path: polygon(
-    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
+    4px 0, 7.5px 0, 10.5px 2px, 13.5px 6px, 16.5px 8px, 25.5px 8px, 28.5px 6px, 31.5px 2px, 34.5px 0,
     calc(100% - 4px) 0, 100% 4px,
     100% calc(100% - 4px),
     calc(100% - 4px) 100%,
     4px 100%,
     0 calc(100% - 4px), 0 4px
+  );
+}
+/* Mitered 1.5px shrink of the polygon above — see the backer comment on
+   .instruction-row::after for why this pulls inward instead of a layer
+   growing outward past ::before. */
+.instruction-row.instruction-row-cap::after {
+  clip-path: polygon(
+    4.6px 1.5px, 7px 1.5px, 9.5px 3.1px, 12.5px 7.1px, 16px 9.5px, 26px 9.5px, 29.5px 7.1px, 32.5px 3.1px, 35px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - 4.6px),
+    calc(100% - 4.6px) calc(100% - 1.5px),
+    4.6px calc(100% - 1.5px),
+    1.5px calc(100% - 4.6px), 1.5px 4.6px
   );
 }
 .instruction-row-cap .instruction-shape {
@@ -678,12 +724,12 @@ body.sidebar-resizing {
   min-height: calc(60px - var(--connector-notch-depth));
   padding-bottom: 6px;
   clip-path: polygon(
-    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
-    calc(100% - 4px) 0, 100% 4px,
-    100% calc(100% - 4px),
-    calc(100% - 4px) 100%,
-    4px 100%,
-    0 calc(100% - 4px), 0 4px
+    4.6px 1.5px, 7px 1.5px, 9.5px 3.1px, 12.5px 7.1px, 16px 9.5px, 26px 9.5px, 29.5px 7.1px, 32.5px 3.1px, 35px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - 4.6px),
+    calc(100% - 4.6px) calc(100% - 1.5px),
+    4.6px calc(100% - 1.5px),
+    1.5px calc(100% - 4.6px), 1.5px 4.6px
   );
 }
 
@@ -710,11 +756,19 @@ body.sidebar-resizing {
    on a lone block with nothing attached above or below — so a block's
    shape never changes depending on who it's next to.
 
-   The trapezoid: 22px wide at the surface, tapering to 12px at 8px deep,
-   corners chamfered ~2.5px. Every coordinate below is that fixed shape
-   (plus a 4px chamfer on the row's four outer corners) hand-plotted in
-   px — it doesn't scale with --connector-cut-width/--connector-cut-inset,
-   those tokens only drive layout spacing (padding, tab reserve) elsewhere.
+   The trapezoid: 27px wide at the surface, tapering to a 9px floor at 8px
+   deep — proportioned like Scratch/PenguinMod's block notch (floor a third
+   of the opening width), not the narrow near-point a naive "sharpen the
+   corners" pass produces. Each side is a short entry chamfer, a straight
+   diagonal wall, then a short exit chamfer into the floor — three roughly
+   equal horizontal thirds, with the diagonal carrying half the depth and
+   each chamfer a quarter, mirroring how Scratch splits its curve/line/curve
+   notch wall. Sharper than the old rounder multi-facet curve, but still
+   eased at the two corners instead of a hard right angle (plus a 4px
+   chamfer on the row's four outer corners). Every coordinate below is that
+   fixed shape hand-plotted in px — it doesn't scale with
+   --connector-cut-width/--connector-cut-inset, those tokens only drive
+   layout spacing (padding, tab reserve) elsewhere.
 
    Rows stack with a plain `gap: 0` (see .strand-body). The tab needs real
    pixels to occupy, so each row reserves --connector-notch-depth of
@@ -723,26 +777,54 @@ body.sidebar-resizing {
    canceling exactly is what makes two rows touch with zero visible seam
    gap while still rendering the tab into the space it protrudes through.
 
-   A real `border` doesn't follow clip-path cuts, and a separate "ring"
-   pseudo-element behind the row (z-index: -1) doesn't work either — a
-   negative z-index only orders a pseudo-element *below the row's own
-   in-flow content*, never below the row's *own* background (that's always
-   painted first, per the stacking-context painting order), so a solid ring
-   sitting there just tints the whole translucent glass fill instead of
-   reading as a thin edge.
+   A real `border` doesn't follow clip-path cuts, so faking one first meant
+   stacking four hard-edged `drop-shadow()`s on `.instruction-row` (one per
+   cardinal direction) to dilate the clipped silhouette by ~1.5px and read
+   as an outline — abandoned because dilating via 4 axis-shifted copies
+   rounds concave corners (the notch) far more than convex ones (the tab).
+   A second attempt grew a real extra layer (`::after`) outward instead of
+   faking one with shadows — geometrically sharp, but wrong for a different
+   reason: growing the row's *whole* silhouette outward, uniformly, shrinks
+   the notch (a concave cut — growing material *into* it) while it grows
+   the tab (a convex bump — growing material *out of* it). That's correct
+   offset geometry, but the notch and tab aren't independent shapes here —
+   the tab of the row above has to keep reaching exactly as deep as the
+   notch of the row below, or the row below's fill resumes *before* the row
+   above's tab-outline finishes, visibly slicing it off. (Verified: growing
+   both put the tab's deepest point 1.5px past the fill's, 60→61.5px, while
+   shrinking the matching notch 1.5px short, 60→58.5px — a 3px gap. A patch
+   that kept the connector's own depth unchanged and only grew the exposed
+   outer edges closed that gap, but at the cost of a visibly thinner outline
+   exactly along the connector's walls, uneven next to the fully-grown outer
+   edges — worse than what it fixed.)
 
-   `filter: drop-shadow()` gets the shape right, but it has its own trap:
-   clip-path clips *everything* an element paints, including its own
-   filter output — a drop-shadow that would fall outside the clip-path
-   region is silently cut off entirely, not just at the true edge. So
-   clip-path and the drop-shadow outline can't live on the same element.
-   That's why the shape is split in two: `.instruction-row` (this element)
-   is an unclipped wrapper that only does layout + holds `filter`;
-   `.instruction-shape` (child, see below) is the actual clipped, colored
-   puzzle silhouette. Filter applies to an element's whole rendered
-   subtree, so the row's drop-shadow shadows its child's clipped shape,
-   and — because the row itself has no clip-path — is free to extend past
-   that shape's boundary instead of being cut off at it. */
+   The actual fix: stop growing a layer *outward* past the row's own box at
+   all — that's what forces notch and tab to diverge from each other in the
+   first place, since "outward" points opposite ways for a concave dent and
+   a convex bump. Shrink the *fill* inward instead, uniformly, and leave
+   `::before` — the ORIGINAL, never-modified clip-path, identical to what
+   this shape has always been — as the outermost, border-colored layer.
+   Shrinking uniformly has the opposite (and here, correct) bias: the notch
+   grows *deeper* (8px→9.5px, since retreating material enlarges a concave
+   void) while the tab grows *shallower* (8px→6.5px, since retreating
+   material shrinks a convex bump). A shallower tab always fits inside a
+   deeper notch with room to spare — no version of this can ever cut
+   anything off, for any row, regardless of which side is doing the
+   shrinking. And because it's one consistent operation applied uniformly
+   (not two, split between "genuinely exposed" and "interlocking" edges to
+   dodge a conflict), the border reads as a uniform ~1.5px width on every
+   facet, notch and tab included — no thin patch.
+
+   Layer order, back to front: `::before` (border color, ORIGINAL
+   unmodified clip-path — this is what keeps rows locking together with
+   zero gap, exactly as it always has) then `::after` (bg2 backer, shrunk
+   1.5px inward, opaque so the translucent fill above doesn't tint from
+   whatever's further back) then `.instruction-shape` (the translucent
+   glass fill, shrunk the same 1.5px as `::after` so they share one edge).
+   Only `::after` and `.instruction-shape` are inset — `::before` sits at
+   the row's full, untouched box, so it's what every seam alignment still
+   depends on. `.instruction-row` itself keeps a `filter: drop-shadow()`
+   only for the soft elevation shadow, unrelated to any of this. */
 .instruction-row {
   display: block;
   margin-bottom: calc(-1 * var(--connector-notch-depth));
@@ -750,13 +832,38 @@ body.sidebar-resizing {
   cursor: grab;
   touch-action: none;
   transition: filter var(--dur-fast) var(--ease-standard);
-  filter:
-    drop-shadow(1.5px 0 0 var(--border))
-    drop-shadow(-1.5px 0 0 var(--border))
-    drop-shadow(0 1.5px 0 var(--border))
-    drop-shadow(0 -1.5px 0 var(--border));
+  filter: drop-shadow(var(--shadow-sm));
 }
 .instruction-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: var(--border);
+  pointer-events: none;
+  clip-path: polygon(
+    4px 0, 7.5px 0, 10.5px 2px, 13.5px 6px, 16.5px 8px, 25.5px 8px, 28.5px 6px, 31.5px 2px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    100% calc(100% - var(--connector-notch-depth) - 4px),
+    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
+    34.5px calc(100% - var(--connector-notch-depth)),
+    31.5px calc(100% - var(--connector-notch-depth) + 2px),
+    28.5px calc(100% - var(--connector-notch-depth) + 6px),
+    25.5px 100%, 16.5px 100%,
+    13.5px calc(100% - var(--connector-notch-depth) + 6px),
+    10.5px calc(100% - var(--connector-notch-depth) + 2px),
+    7.5px calc(100% - var(--connector-notch-depth)),
+    4px calc(100% - var(--connector-notch-depth)),
+    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+  );
+}
+/* The backer — see the big comment above for why this shrinks inward
+   (uniformly, mitered: every edge of ::before's polygon pulled in exactly
+   1.5px along its own normal, new vertices at the intersection of
+   neighboring offset edges) instead of a layer growing outward past
+   ::before. Computed, not hand-plotted — re-deriving by eye is not
+   recommended if this shape ever needs to change. */
+.instruction-row::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -764,19 +871,19 @@ body.sidebar-resizing {
   background: var(--bg2);
   pointer-events: none;
   clip-path: polygon(
-    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
-    calc(100% - 4px) 0, 100% 4px,
-    100% calc(100% - var(--connector-notch-depth) - 4px),
-    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
-    34.5px calc(100% - var(--connector-notch-depth)),
-    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
-    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
-    24.5px 100%, 17.5px 100%,
-    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
-    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
-    7.5px calc(100% - var(--connector-notch-depth)),
-    4px calc(100% - var(--connector-notch-depth)),
-    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+    4.6px 1.5px, 7px 1.5px, 9.5px 3.1px, 12.5px 7.1px, 16px 9.5px, 26px 9.5px, 29.5px 7.1px, 32.5px 3.1px, 35px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 4.6px),
+    calc(100% - 4.6px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    34px calc(100% - var(--connector-notch-depth) - 1.5px),
+    30.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    27.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    25px calc(100% - 1.5px), 17px calc(100% - 1.5px),
+    14.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    11.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    8px calc(100% - var(--connector-notch-depth) - 1.5px),
+    4.6px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 4.6px), 1.5px 4.6px
   );
 }
 .instruction-row:hover {
@@ -786,20 +893,18 @@ body.sidebar-resizing {
      outline. A positive z-index lifts the hovered row above both
      neighbors regardless of DOM order. */
   z-index: 1;
-  filter:
-    drop-shadow(var(--shadow-sm))
-    drop-shadow(1.5px 0 0 var(--accent))
-    drop-shadow(-1.5px 0 0 var(--accent))
-    drop-shadow(0 1.5px 0 var(--accent))
-    drop-shadow(0 -1.5px 0 var(--accent));
+  filter: drop-shadow(var(--shadow-sm));
+}
+.instruction-row:hover::before {
+  background: var(--accent);
 }
 
 /* The clipped puzzle-piece silhouette itself — background, blur, and the
    notch/tab geometry all live here, filling the parent row exactly
    (parent's padding-bottom above already reserves the tab's real pixels).
-   Same trapezoid described above: 22px wide at the surface, tapering to
-   12px at 8px deep, ~2.5px corner chamfers, plus a 4px chamfer on the
-   row's four outer corners. */
+   Same shrunk-1.5px-inward polygon as ::after right above — they share an
+   edge, since ::after only exists to back this shape's translucency (see
+   the big comment above) — not ::before's full-size original. */
 .instruction-shape {
   position: relative;
   display: flex;
@@ -815,19 +920,19 @@ body.sidebar-resizing {
   transition: background var(--dur-fast) var(--ease-standard);
 
   clip-path: polygon(
-    4px 0, 7.5px 0, 11.3px 2.1px, 13.7px 5.9px, 17.5px 8px, 24.5px 8px, 28.3px 5.9px, 30.7px 2.1px, 34.5px 0,
-    calc(100% - 4px) 0, 100% 4px,
-    100% calc(100% - var(--connector-notch-depth) - 4px),
-    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
-    34.5px calc(100% - var(--connector-notch-depth)),
-    30.7px calc(100% - var(--connector-notch-depth) + 2.1px),
-    28.3px calc(100% - var(--connector-notch-depth) + 5.9px),
-    24.5px 100%, 17.5px 100%,
-    13.7px calc(100% - var(--connector-notch-depth) + 5.9px),
-    11.3px calc(100% - var(--connector-notch-depth) + 2.1px),
-    7.5px calc(100% - var(--connector-notch-depth)),
-    4px calc(100% - var(--connector-notch-depth)),
-    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
+    4.6px 1.5px, 7px 1.5px, 9.5px 3.1px, 12.5px 7.1px, 16px 9.5px, 26px 9.5px, 29.5px 7.1px, 32.5px 3.1px, 35px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 4.6px),
+    calc(100% - 4.6px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    34px calc(100% - var(--connector-notch-depth) - 1.5px),
+    30.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    27.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    25px calc(100% - 1.5px), 17px calc(100% - 1.5px),
+    14.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    11.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    8px calc(100% - var(--connector-notch-depth) - 1.5px),
+    4.6px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 4.6px), 1.5px 4.6px
   );
 }
 .instruction-row:hover .instruction-shape { background: var(--bg3); }
@@ -1015,6 +1120,9 @@ body.sidebar-resizing {
   -webkit-backdrop-filter: none;
 }
 .strand-snap-preview .instruction-row::before {
+  display: none;
+}
+.strand-snap-preview .instruction-row::after {
   background: rgba(var(--accent-rgb), 0.15);
 }
 .strand-snap-preview .instruction-content {

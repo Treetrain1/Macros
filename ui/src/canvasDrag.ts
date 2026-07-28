@@ -393,7 +393,7 @@ function positionGhost(e: PointerEvent) {
   });
 }
 
-const SNAP_THRESHOLD = 28;
+const SNAP_THRESHOLD = 36;
 
 // Shared by both strand-drags (snapping an existing block elsewhere) and
 // palette-drags (dropping a brand new instruction onto a strand); writes the
@@ -409,13 +409,13 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     if (!id || id === excludeId) continue;
     const cardRect = card.getBoundingClientRect();
 
-    // Check horizontal proximity based on actual block position, not pointer
-    if (ghostRect) {
-      const horizMargin = 20;
-      if (ghostRect.right < cardRect.left - horizMargin || ghostRect.left > cardRect.right + horizMargin) continue;
-    } else {
-      if (e.clientX < cardRect.left - 60 || e.clientX > cardRect.right + 60) continue;
-    }
+    // Horizontal proximity is judged against the strand's actual attach
+    // point (its left edge, where every instruction row lines up) rather
+    // than a loose bounding-box overlap — otherwise a block dragged far to
+    // the side could still "overlap" a card and snap despite the attach
+    // points not being remotely aligned.
+    const refX = ghostRect ? ghostRect.left : e.clientX;
+    if (Math.abs(refX - cardRect.left) > SNAP_THRESHOLD) continue;
 
     const body = card.querySelector('.strand-body');
     const rows = Array.from(card.querySelectorAll('.instruction-row'));

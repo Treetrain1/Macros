@@ -112,6 +112,32 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Locate or install Inno Setup
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y
+          }
+
+      - name: Build installer (Inno Setup)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $version = "${{ github.sha }}".Substring(0, 7)
+          & $iscc "/DMyAppVersion=$version-dev" installer\macros.iss
+
+      - name: Upload installer artifact
+        if: matrix.name == 'windows-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macros-windows-x86_64-setup.exe
+          path: dist/macros-windows-x86_64-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Build macOS app bundle
         if: runner.os == 'macOS'
         run: ./scripts/build-macos-bundle.sh ${{ matrix.target }}

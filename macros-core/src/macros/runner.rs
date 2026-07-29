@@ -2,7 +2,7 @@ use crate::input::types::{Coordinate, Direction, InputToken, MacroButton, MacroK
 use crate::input::value::{Evaluated, Value};
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
-use crate::macros::{Instruction, Macro, Strand};
+use crate::macros::{Instruction, Macro};
 use spin_sleep::{SpinSleeper, SpinStrategy};
 use std::collections::HashMap;
 use std::process::Command;

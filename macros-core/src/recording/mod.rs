@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tracing::warn;
 
 pub static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub static RECORD_MOUSE_RELATIVE: AtomicBool = AtomicBool::new(false);

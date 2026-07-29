@@ -1,19 +1,18 @@
 # Macros
 
-A Tauri app to manage and run macros on Windows, Linux, and macOS.
+A Tauri app to visually create and run macros on Windows, Linux, and macOS.
 
 ## Building
 
 ### Build
 ```bash
-git clone https://github.com/EthanRStokes/macros.git
-cd macros
+git clone https://github.com/EthanRStokes/macros.git macros && cd macros
 just
 ```
 
 ### Installation
 
-(Future) AUR: `macros-git`
+AUR: `macros-git`
 
 ```bash
 just install

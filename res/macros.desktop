@@ -5,5 +5,5 @@ Exec=macros
 Terminal=false
 Type=Application
 Icon=macros
-Categories=COSMIC;Utility;
+Categories=Utility;
 Keywords=Macro;Manager;

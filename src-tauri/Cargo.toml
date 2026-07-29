@@ -23,6 +23,8 @@ axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 
 [features]
+default = ["cef"]
+cef = ["tauri/cef"]
 # Debug-only HTTP+WebSocket bridge that lets a plain browser tab (no Tauri
 # webview) drive the real running backend — see src/dev_bridge.rs.
 dev-bridge = ["dep:axum", "dep:tower-http"]

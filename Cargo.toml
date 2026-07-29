@@ -7,7 +7,7 @@ version = "0.3.999"
 edition = "2024"
 
 [workspace.dependencies]
-tauri = { git = "https://github.com/EthanRStokes/tauri", rev = "8e422e5951769be66102e0481351f702f65c55d8", features = ["cef"] }
+tauri = { git = "https://github.com/EthanRStokes/tauri", rev = "8e422e5951769be66102e0481351f702f65c55d8" }
 tracing = "0.1.44"
 tracing-log = "0.2.0"
 tracing-subscriber = "0.3.23"

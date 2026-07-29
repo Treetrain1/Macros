@@ -1,10 +1,10 @@
-use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
-use crate::input::value::{Evaluated, Op, Value};
-use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
-use crate::macros::backend::InputBackend;
-use crate::macros::thread_pool::ThreadPool;
-use crate::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, Strand};
+use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use macros_core::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
+use macros_core::input::value::{Evaluated, Op, Value};
+use macros_core::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
+use macros_core::macros::backend::InputBackend;
+use macros_core::macros::thread_pool::ThreadPool;
+use macros_core::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -123,7 +123,7 @@ pub(crate) struct AppState {
     /// threads exactly like `emulator` — kept out of the main state lock so
     /// a long-running macro never blocks other commands. Synced from the
     /// selected macro's `Macro::variables` on load, written back to disk
-    /// once a run finishes (see `macros::thread`).
+    /// once a run finishes (see `macros_thread`).
     pub(crate) variable_values: Arc<Mutex<HashMap<String, Evaluated>>>,
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
@@ -560,7 +560,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
 }
 
 pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
-    use crate::input::{index_to_mouse_button, key_names::string_to_key};
+    use macros_core::input::{index_to_mouse_button, key_names::string_to_key};
     Some(match dto {
         InstructionDto::Wait { duration } => Instruction::Wait(dto_to_value(duration)),
         InstructionDto::Text { text } => Instruction::Token(InputToken::Text(dto_to_value(text))),
@@ -701,7 +701,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
     let named_hotkey_defaults: Vec<NamedHotkeyDefaultDto> = NAMED_HOTKEY_ACTIONS.iter().map(|action| {
         NamedHotkeyDefaultDto {
             action: hotkey_action_to_dto(action),
-            combo_display: crate::config::default_combo_for_action(action).map(|c| c.format()),
+            combo_display: macros_core::config::default_combo_for_action(action).map(|c| c.format()),
         }
     }).collect();
 
@@ -767,7 +767,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         ipc_port_text: s.ipc_port_text.clone(),
         ipc_port_invalid: s.ipc_port_invalid,
         emulator_available: s.emulator.is_some(),
-        grab_available: !crate::recording::grab_failed(),
+        grab_available: !macros_core::recording::grab_failed(),
         update_check_state,
     }
 }

@@ -8,18 +8,16 @@ name = "macros"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
+macros-core = { path = "../macros-core" }
 tauri.workspace = true
+tauri-runtime-cef.workspace = true
 tracing.workspace = true
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-dirs.workspace = true
 uuid.workspace = true
-rand.workspace = true
-slotmap.workspace = true
 tokio.workspace = true
-spin_sleep.workspace = true
 rfd.workspace = true
 axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
@@ -28,23 +26,6 @@ tower-http = { workspace = true, optional = true }
 # Debug-only HTTP+WebSocket bridge that lets a plain browser tab (no Tauri
 # webview) drive the real running backend — see src/dev_bridge.rs.
 dev-bridge = ["dep:axum", "dep:tower-http"]
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-evdev.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-enigo.workspace = true
-self_update.workspace = true
-http.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-core-graphics.workspace = true
-core-foundation.workspace = true
-foreign-types.workspace = true
 
 [build-dependencies]
 tauri-build.workspace = true

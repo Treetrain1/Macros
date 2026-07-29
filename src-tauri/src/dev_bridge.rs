@@ -12,7 +12,7 @@
 //! (plus an immediate snapshot on connect) rather than re-implementing a
 //! whole event bus.
 //!
-//! Binds to 127.0.0.1 only — same trust model as `crate::ipc`.
+//! Binds to 127.0.0.1 only — same trust model as `macros_core::ipc`.
 
 use crate::commands;
 use crate::state::{self, BlockPieceDto, HotkeyActionDto, InstructionDto, SharedState, ValueDto, ValueLocationDto};

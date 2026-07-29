@@ -1,10 +1,11 @@
-use crate::config;
-use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::macros::runner::VariableStore;
-use crate::macros::{loop_control, thread, BlockPiece, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
-use crate::input::types::InputToken;
-use crate::input::value::{Evaluated, Value, OPERATOR_KINDS};
-use crate::recording;
+use macros_core::config;
+use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use macros_core::macros::runner::VariableStore;
+use macros_core::macros::{loop_control, BlockPiece, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
+use macros_core::input::types::InputToken;
+use macros_core::input::value::{Evaluated, Value, OPERATOR_KINDS};
+use macros_core::recording;
+use crate::macros_thread;
 use crate::state::{
     build_state_dto, dto_to_block_piece, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
     value_to_dto, BlockPieceDto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, KeyCaptureTarget, MacroSnapshot,
@@ -1364,8 +1365,8 @@ pub(crate) fn key_capture_event<R: Runtime>(
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let Some(target) = s.key_capture.take() else { return Ok(()); };
 
-    let captured_key = crate::key_mapping::web_code_to_macro_key(&code)
-        .or_else(|| crate::key_mapping::web_key_to_macro_key(&key));
+    let captured_key = macros_core::key_mapping::web_code_to_macro_key(&code)
+        .or_else(|| macros_core::key_mapping::web_key_to_macro_key(&key));
 
     if let Some(mk) = captured_key {
         match target {
@@ -1380,7 +1381,7 @@ pub(crate) fn key_capture_event<R: Runtime>(
                 }
             }
             KeyCaptureTarget::Standalone => {
-                s.pending_standalone_key = Some(crate::input::key_to_string(&mk).unwrap_or("Unknown").to_string());
+                s.pending_standalone_key = Some(macros_core::input::key_to_string(&mk).unwrap_or("Unknown").to_string());
             }
         }
     }
@@ -1421,7 +1422,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
                 return Ok(());
             }
             let mac_name = mac.name.clone();
-            let loop_task = mac.into_loop_task(
+            let loop_task = macros_thread::into_loop_task(mac, 
                 Arc::clone(&emulator),
                 Arc::clone(&is_looping),
                 speed_multiplier,
@@ -1430,7 +1431,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
                 app.clone(),
             );
             let mut s = state.lock().map_err(|e| e.to_string())?;
-            if let Err(e) = thread::spawn_macro_thread(
+            if let Err(e) = macros_thread::spawn_macro_thread(
                 &mut s.thread_pool,
                 format!("loop_{}", mac_name),
                 loop_task,
@@ -1441,7 +1442,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
         } else {
             let _ = loop_control::set_loop_state(&is_looping, true);
             let mac_name = mac.name.clone();
-            let single_run_task = mac.into_single_run_task(
+            let single_run_task = macros_thread::into_single_run_task(mac, 
                 Arc::clone(&emulator),
                 Arc::clone(&is_looping),
                 speed_multiplier,
@@ -1450,7 +1451,7 @@ pub(crate) fn run_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
                 app.clone(),
             );
             let mut s = state.lock().map_err(|e| e.to_string())?;
-            if let Err(e) = thread::spawn_macro_thread(
+            if let Err(e) = macros_thread::spawn_macro_thread(
                 &mut s.thread_pool,
                 format!("run_{}", mac_name),
                 single_run_task,
@@ -1615,7 +1616,7 @@ pub(crate) fn combo_capture_event<R: Runtime>(
     modifiers: u8,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let key_name = match crate::key_mapping::web_code_to_rdev_name(&code) {
+    let key_name = match macros_core::key_mapping::web_code_to_rdev_name(&code) {
         Some(n) => n,
         None => return Ok(()),
     };
@@ -1750,7 +1751,7 @@ pub(crate) async fn start_ipc_server<R: Runtime>(state: State<'_, SharedState>, 
     if s.ipc_server.is_none() {
         if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
             let (tx, rx) = tokio::sync::watch::channel(false);
-            s.ipc_server = Some(tauri::async_runtime::spawn(crate::ipc::run_server(port, rx)));
+            s.ipc_server = Some(tauri::async_runtime::spawn(macros_core::ipc::run_server(port, rx)));
             s.ipc_shutdown_tx = Some(tx);
             s.ipc_active_port = Some(port);
         }
@@ -1803,7 +1804,7 @@ pub(crate) async fn check_for_updates_internal<R: Runtime>(state: &SharedState, 
     #[cfg(windows)]
     {
         let version = env!("CARGO_PKG_VERSION").to_string();
-        let result = tokio::task::spawn_blocking(move || crate::updater::check_for_update(&version))
+        let result = tokio::task::spawn_blocking(move || macros_core::updater::check_for_update(&version))
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
         if let Ok(mut s) = state.lock() {
@@ -1835,7 +1836,7 @@ pub(crate) fn apply_update<R: Runtime>(state: State<SharedState>, app: tauri::Ap
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let version = env!("CARGO_PKG_VERSION").to_string();
-            let result = tokio::task::spawn_blocking(move || crate::updater::apply_update(&version))
+            let result = tokio::task::spawn_blocking(move || macros_core::updater::apply_update(&version))
                 .await
                 .unwrap_or_else(|e| Err(e.to_string()));
             match result {
@@ -1889,10 +1890,16 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
             }
         }
         HotkeyAction::StopLoop => {
+            // Clears every in-flight run's stop flag, not just loop mode's:
+            // a single (non-looping) run has a stop flag of its own that
+            // `is_looping` alone doesn't reach.
+            let cleared = macros_core::macros::run_registry::stop_all();
+            tracing::info!(cleared, "StopLoop hotkey handled");
             if let Ok(s) = state.lock() {
                 if let Ok(mut lk) = s.is_looping.lock() {
                     *lk = false;
                 }
+                emit_state_updated(app, &s);
             }
         }
         HotkeyAction::NextMacro => {
@@ -1967,7 +1974,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
 
 fn run_macro_task<R: Runtime>(
     mac: Macro,
-    emulator: Arc<std::sync::Mutex<dyn crate::macros::backend::InputBackend>>,
+    emulator: Arc<std::sync::Mutex<dyn macros_core::macros::backend::InputBackend>>,
     is_looping: Arc<std::sync::Mutex<bool>>,
     loop_mode: bool,
     speed_multiplier: f64,
@@ -1975,26 +1982,39 @@ fn run_macro_task<R: Runtime>(
     state: SharedState,
     app: tauri::AppHandle<R>,
 ) {
+    // Kept alive past the move into the task so the pre-run focus/modifier
+    // cleanup can play its releases through the very backend the run will use.
+    #[cfg(windows)]
+    let prep_backend = Arc::clone(&emulator);
+
     if loop_mode {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
         let loop_flag = Arc::clone(&is_looping);
         // `into_loop_task` already loops internally until `loop_flag` clears
         // and persists the final variable values once it stops — no need to
         // hand-roll the loop here too.
-        let task = mac.into_loop_task(emulator, loop_flag, speed_multiplier, variables, state, app);
+        let task = macros_thread::into_loop_task(mac, emulator, loop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
+            // Registered before the run starts so "Stop Loop" can reach it
+            // even during the focus switch below; the task's own registration
+            // only starts once `task()` runs.
+            let playback_guard = macros_core::macros::run_registry::begin_run();
             #[cfg(windows)]
-            crate::macros::backend::windows::prepare_for_macro_execution();
+            macros_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
             task();
+            macros_core::macros::run_registry::end_run(&playback_guard);
         });
     } else {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
         let stop_flag = Arc::clone(&is_looping);
-        let task = mac.into_single_run_task(emulator, stop_flag, speed_multiplier, variables, state, app);
+        let task = macros_thread::into_single_run_task(mac, emulator, stop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
+            // Same pre-registration as the loop branch above.
+            let playback_guard = macros_core::macros::run_registry::begin_run();
             #[cfg(windows)]
-            crate::macros::backend::windows::prepare_for_macro_execution();
+            macros_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
             task();
+            macros_core::macros::run_registry::end_run(&playback_guard);
         });
     }
 }
@@ -2002,8 +2022,8 @@ fn run_macro_task<R: Runtime>(
 #[cfg(test)]
 mod value_location_tests {
     use super::*;
-    use crate::input::types::Coordinate;
-    use crate::input::value::Op;
+    use macros_core::input::types::Coordinate;
+    use macros_core::input::value::Op;
 
     fn test_macro() -> Macro {
         Macro {
@@ -2275,7 +2295,7 @@ mod value_location_tests {
                 id: "s1".into(),
                 x: 0,
                 y: 0,
-                instructions: vec![Instruction::Token(crate::input::types::InputToken::MoveMouse(
+                instructions: vec![Instruction::Token(macros_core::input::types::InputToken::MoveMouse(
                     Value::number(1.0),
                     Value::number(2.0),
                     Coordinate::Rel,

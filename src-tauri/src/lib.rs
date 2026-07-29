@@ -1,21 +1,14 @@
 pub(crate) mod commands;
-pub(crate) mod config;
 #[cfg(feature = "dev-bridge")]
 pub(crate) mod dev_bridge;
-pub(crate) mod hotkey_types;
-pub(crate) mod input;
-pub(crate) mod ipc;
-pub(crate) mod key_mapping;
-pub(crate) mod macros;
-pub(crate) mod recording;
+pub(crate) mod macros_thread;
 pub(crate) mod state;
-#[cfg(windows)]
-pub(crate) mod updater;
 
-use crate::macros::runner::make_backend;
-use crate::macros::thread_pool::ThreadPool;
-use crate::recording::QueueSignal;
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
+use macros_core::macros::runner::make_backend;
+use macros_core::macros::thread_pool::ThreadPool;
+use macros_core::recording::QueueSignal;
+use macros_core::{config, recording};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Cef, Manager};
@@ -77,7 +70,7 @@ pub fn run() {
                 // Load macros; create a default one if empty
                 let macros = config::get_macros_from_config();
                 if macros.is_empty() {
-                    let _ = crate::macros::Macro::new("New Macro".into(), "".into(), vec![]).add();
+                    let _ = macros_core::macros::Macro::new("New Macro".into(), "".into(), vec![]).add();
                 }
                 let macros = config::get_macros_from_config();
                 s.macro_strs = macros.iter().map(|m| m.name.clone()).collect();
@@ -94,13 +87,22 @@ pub fn run() {
                 // macOS accessibility
                 #[cfg(target_os = "macos")]
                 {
-                    let trusted = crate::macros::backend::macos::request_accessibility();
+                    let trusted = macros_core::macros::backend::macos::request_accessibility();
                     if !trusted {
                         recording::set_grab_failed(true);
                     }
                 }
 
                 recording::start_grab_thread();
+
+                // Chromium grabs raw keyboard input for its own focused
+                // window on Windows (chromiumembedded/cef#2609), starving the
+                // WH_KEYBOARD_LL hook `start_grab_thread` installs. This CEF
+                // client callback still sees every keystroke in that case, so
+                // it's wired to feed the same hotkey pipeline as a fallback.
+                tauri_runtime_cef::set_focused_key_hook(|vk, pressed| {
+                    macros_core::macros::backend::dispatch_from_focused_window(vk as u16, pressed)
+                });
 
                 let bindings = config::load_hotkey_bindings();
                 recording::update_hotkey_table(bindings.clone());
@@ -110,7 +112,7 @@ pub fn run() {
                 if s.ipc_auto_start {
                     if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
                         let (tx, rx) = tokio::sync::watch::channel(false);
-                        s.ipc_server = Some(tauri::async_runtime::spawn(crate::ipc::run_server(port, rx)));
+                        s.ipc_server = Some(tauri::async_runtime::spawn(macros_core::ipc::run_server(port, rx)));
                         s.ipc_shutdown_tx = Some(tx);
                         s.ipc_active_port = Some(port);
                     }

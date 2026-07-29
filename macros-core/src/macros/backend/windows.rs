@@ -516,19 +516,6 @@ unsafe extern "system" fn keyboard_proc(
         }
 
         if let Some(macro_key) = vk_to_macro_key(vk as u16) {
-            if pressed {
-                // TEMP DIAGNOSTIC: confirms whether this hook is invoked at
-                // all while our own window has focus. Remove once resolved.
-                let fg = unsafe { GetForegroundWindow() };
-                let mut fg_pid: u32 = 0;
-                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(fg, &mut fg_pid) };
-                info!(
-                    vk,
-                    ?macro_key,
-                    fg_is_self = (fg_pid == std::process::id()),
-                    "keyboard_proc saw key-down"
-                );
-            }
             let event = if pressed {
                 CaptureEvent::KeyPress(macro_key)
             } else {

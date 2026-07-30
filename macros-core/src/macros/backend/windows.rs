@@ -35,35 +35,25 @@ use crate::macros::backend::{CaptureDecision, CaptureEvent, CaptureTimestamp, In
 static CALLBACK: OnceLock<Mutex<Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>>> =
     OnceLock::new();
 
-/// State the keyboard/mouse/desktop-switch hook procedures share. Plain
-/// thread-local `RefCell`, not a `Mutex` or atomics: `WH_KEYBOARD_LL` and
-/// `WH_MOUSE_LL` hook procedures, and a `WINEVENT_OUTOFCONTEXT` WinEvent
-/// callback, are all delivered exclusively on the thread that installed
-/// them — here, the single `winapi-hook` thread spawned in
-/// `start_capture_thread` below, which installs all four and then pumps the
-/// message queue that delivers them. There is no second thread to race
-/// against, so synchronization primitives here would be guarding against
-/// something that can't happen.
+/// State shared by the keyboard/mouse/desktop-switch hook procedures. Plain
+/// thread-local `RefCell`, not `Mutex`/atomics: all three callbacks run only
+/// on the `winapi-hook` thread that installed them, so there's no race to
+/// guard against.
 ///
-/// (`HOTKEY_FOREGROUND_HWND` further down is hook-derived state a genuinely
-/// different thread does read — macro playback, restoring focus before a
-/// run — which is why it stays an atomic.)
+/// (`HOTKEY_FOREGROUND_HWND` below stays an atomic because a different
+/// thread — macro playback — does read it.)
 struct HookThreadState {
-    /// VK codes currently physically held down. Indexed directly — a VK code
-    /// is documented as 1..=254 — rather than hashed, so telling a real press
-    /// from an auto-repeat is a plain array read. `KBDLLHOOKSTRUCT` carries no
-    /// repeat flag of its own; that's only synthesized later, in the
-    /// `WM_KEYDOWN` lParam a window procedure would receive, which a global
-    /// low-level hook runs upstream of.
+    /// VK codes currently held down, indexed directly (0..256) rather than
+    /// hashed. Needed because `KBDLLHOOKSTRUCT` carries no repeat flag of its
+    /// own — that's only synthesized later, downstream of where this hook runs.
     key_held: [bool; 256],
     /// VK codes whose key-down was swallowed, so the matching key-up is
     /// swallowed too rather than reaching the focused window unpaired.
     key_suppressed: [bool; 256],
-    /// Last absolute cursor position seen, to turn `WM_MOUSEMOVE`'s absolute
-    /// coordinates into the relative deltas the rest of the app works in.
-    /// `None` until the first move is seen, rather than a sentinel coordinate:
-    /// a magic `i32::MIN` used to sit here and its unguarded subtraction was
-    /// exactly the overflow that used to panic this thread on startup.
+    /// Last absolute cursor position, used to turn `WM_MOUSEMOVE`'s absolute
+    /// coords into relative deltas. `None` until the first move, rather than
+    /// a sentinel — a magic `i32::MIN` here previously caused an overflow
+    /// panic on startup.
     last_cursor: Option<(i32, i32)>,
 }
 
@@ -80,9 +70,8 @@ thread_local! {
 // Foreground window (HWND as isize) at the moment a hotkey fires.
 static HOTKEY_FOREGROUND_HWND: AtomicUsize = AtomicUsize::new(0);
 
-/// Called from the shared capture callback when a hotkey combo matches, to
-/// snapshot the window a hotkey-triggered macro should be typed back into.
-/// Only meaningful at that instant — see `macro_target_window`.
+/// Called when a hotkey combo matches, to snapshot the window a
+/// hotkey-triggered macro should be typed back into.
 pub fn note_hotkey_matched() {
     HOTKEY_FOREGROUND_HWND.store(unsafe { GetForegroundWindow() } as usize, Ordering::Relaxed);
 }
@@ -90,9 +79,7 @@ pub fn note_hotkey_matched() {
 // ── Key mapping ───────────────────────────────────────────────────────────────
 
 /// Maps this app's `MacroKey` to an `enigo::Key`. `enigo::Key::Other(u32)` is
-/// treated by enigo as a raw Windows VK code, so it's used here for keys with
-/// no named `enigo::Key` equivalent (matching `MacroKey::Other`'s own
-/// "raw VK code" semantics).
+/// a raw VK code, used for keys with no named equivalent.
 fn macro_key_to_enigo_key(key: &MacroKey) -> enigo::Key {
     use enigo::Key;
     match key {
@@ -190,10 +177,9 @@ pub struct WinApiBackend {
 impl WinApiBackend {
     pub fn new() -> Result<Self, String> {
         let settings = Settings {
-            // Match the previous SendInput-based implementation: relative
-            // mouse moves are raw MOUSEEVENTF_MOVE deltas, subject to the
-            // user's OS pointer-speed/acceleration settings, rather than
-            // enigo's default of converting them to an absolute move.
+            // Matches the old SendInput implementation: raw MOUSEEVENTF_MOVE
+            // deltas (subject to OS pointer speed/acceleration) instead of
+            // enigo's default of converting relative moves to absolute.
             windows_subject_to_mouse_speed_and_acceleration_level: true,
             // The previous implementation never auto-released held keys on
             // drop; modifier cleanup is handled explicitly in
@@ -222,9 +208,9 @@ impl InputBackend for WinApiBackend {
         use enigo::{Axis as EAxis, Button as EButton};
         let dir = to_enigo_dir(dir);
         match button {
-            // enigo's vertical scroll sign convention is inverted relative to
-            // the raw MOUSEEVENTF_WHEEL delta this used to send directly, so
-            // negate to keep "ScrollUp" actually scrolling up.
+            // enigo's vertical scroll sign is inverted relative to the raw
+            // wheel delta this used to send directly; negate to keep
+            // "ScrollUp" scrolling up.
             MacroButton::ScrollUp => self.enigo.scroll(-1, EAxis::Vertical),
             MacroButton::ScrollDown => self.enigo.scroll(1, EAxis::Vertical),
             MacroButton::ScrollLeft => self.enigo.scroll(-1, EAxis::Horizontal),
@@ -252,10 +238,9 @@ impl InputBackend for WinApiBackend {
     }
 
     fn scroll(&mut self, amount: i32, axis: Axis) -> Result<(), String> {
-        // enigo negates the vertical length internally before sending
-        // MOUSEEVENTF_WHEEL, so negate here to keep `amount`'s sign matching
-        // the raw wheel-delta convention this trait used before (positive =
-        // up). Horizontal isn't negated by enigo, so it passes through as-is.
+        // enigo negates vertical internally before sending MOUSEEVENTF_WHEEL;
+        // negate here too so `amount` keeps this trait's convention
+        // (positive = up). Horizontal passes through unchanged.
         let (length, axis) = match axis {
             Axis::Vertical => (-amount, enigo::Axis::Vertical),
             Axis::Horizontal => (amount, enigo::Axis::Horizontal),
@@ -297,8 +282,8 @@ pub(super) fn start_capture_thread(
                 let kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), hinstance, 0);
                 let ms_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), hinstance, 0);
                 // Fires on any switch to/from a secure desktop (UAC prompt,
-                // Ctrl+Alt+Del, lock screen) — the situations where the
-                // keyboard hook misses key-ups and `HELD_MODS` would wedge.
+                // Ctrl+Alt+Del, lock screen), where the keyboard hook misses
+                // key-ups and held-modifier state would wedge.
                 let ds_hook = SetWinEventHook(
                     EVENT_SYSTEM_DESKTOPSWITCH,
                     EVENT_SYSTEM_DESKTOPSWITCH,
@@ -309,10 +294,10 @@ pub(super) fn start_capture_thread(
                     WINEVENT_OUTOFCONTEXT,
                 );
 
-                // The process id matters here: CEF runs helper processes by
-                // re-executing this same binary, and a helper that reached
-                // this code would install a competing hook whose queue nobody
-                // consumes. Exactly one of these lines should ever appear.
+                // CEF re-executes this binary for helper processes; a helper
+                // that reached this code would install a competing hook
+                // nobody's queue drains. Exactly one of these lines should
+                // ever appear.
                 if kb_hook.is_null() || ms_hook.is_null() || ds_hook.is_null() {
                     warn!(
                         pid = std::process::id(),
@@ -324,18 +309,14 @@ pub(super) fn start_capture_thread(
                 } else {
                     info!(pid = std::process::id(), "Input hooks installed");
                 }
-                // Surfaced in the UI the same way Linux reports a failed
-                // evdev grab and macOS a refused event tap. Keyed on the two
-                // hooks that actually carry input: without them there is no
-                // recording and no hotkeys, which the user needs telling
-                // about rather than finding out by pressing a dead combo.
+                // Surfaced in the UI like a failed evdev grab (Linux) or
+                // refused event tap (macOS). Keyed on the two hooks that
+                // carry input — without them there's no recording or hotkeys.
                 crate::recording::set_grab_failed(kb_hook.is_null() || ms_hook.is_null());
 
-                // Nothing is dispatched here beyond keeping the queue pumped:
-                // both low-level hooks and the WinEvent hook above are
-                // delivered as callbacks from inside GetMessageW, and hotkeys
-                // are matched in `keyboard_proc` rather than arriving as
-                // messages.
+                // This loop only pumps the queue — hooks deliver via
+                // callbacks from inside GetMessageW, and hotkeys are matched
+                // in `keyboard_proc`, not dispatched as messages.
                 let mut msg: MSG = std::mem::zeroed();
                 while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
                     TranslateMessage(&msg);
@@ -346,21 +327,12 @@ pub(super) fn start_capture_thread(
     });
 }
 
-/// Windows silently removes a low-level hook whose procedure takes longer than
-/// `LowLevelHooksTimeout` (HKCU\Control Panel\Desktop, 300 ms by default) to
-/// return — no error, no notification, and no way to query it afterwards.
-/// Hotkeys and recording just stop working until the app is restarted, which
-/// is indistinguishable from a matching bug.
-///
-/// Every hook procedure runs the shared capture callback through here so that
-/// approaching the budget is at least visible in the log. The threshold is a
-/// third of the default, to leave warning before events start being dropped.
-///
-/// Nothing on the callback's path should get close: it is atomics, a
-/// non-blocking `try_read` of the hotkey table, and a lock-free channel send,
-/// plus one mutex that is drained only when a recording stops. If this ever
-/// fires, that assumption has been broken and the callback needs moving onto a
-/// dispatch thread the way the evdev backend already does it.
+/// Windows silently uninstalls a low-level hook whose procedure exceeds
+/// `LowLevelHooksTimeout` (~300ms default) — no error, just hotkeys and
+/// recording quietly dying. Every hook routes through here so approaching
+/// that budget (set to a third of it, as a warning margin) shows up in the
+/// log; if it ever fires, move the callback onto a dispatch thread the way
+/// the evdev backend already does.
 const HOOK_BUDGET_WARN: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Runs the shared capture callback, timed against the hook budget above.
@@ -383,33 +355,23 @@ fn dispatch(event: CaptureEvent) -> CaptureDecision {
     decision
 }
 
-/// Repeat-tracking for `dispatch_from_focused_window`, separate from
-/// `HOOK_STATE`: that state is thread-local to the `winapi-hook` thread, but
-/// this path is fed from CEF's own UI thread (see its doc comment below), so
-/// it needs its own bookkeeping to tell a fresh press from auto-repeat.
-///
-/// Timestamp-based rather than a held/released flag pair: CEF doesn't
-/// reliably deliver a matching `KEYUP` through `on_pre_key_event` once a
-/// key-down has been reported handled (returning suppress for a matched
-/// hotkey does exactly that), so a flag set on press and cleared on release
-/// can get stuck permanently "held" — every later press of that key would
-/// then look like a repeat of a release that's never coming, and silently
-/// stop firing. A short elapsed-time check can't get stuck: it only ever
-/// looks at how long ago the last press was.
+/// Repeat-tracking for `dispatch_from_focused_window`, kept separate from
+/// `HOOK_STATE` since this path runs on CEF's UI thread, not `winapi-hook`.
+/// Timestamp-based rather than held/released flags: CEF doesn't reliably
+/// deliver a matching `KEYUP` once a key-down was reported handled, so a flag
+/// could get stuck "held" forever and silently swallow every later press. An
+/// elapsed-time check can't get stuck the same way.
 static FOCUSED_KEY_LAST_PRESS: Mutex<[Option<std::time::Instant>; 256]> = Mutex::new([None; 256]);
 
 /// Auto-repeat delivers the next `RAWKEYDOWN` well under this apart (Windows'
-/// fastest repeat-rate setting is ~33ms between repeats); a deliberate second
-/// press of the same key is comfortably slower than that.
+/// fastest repeat rate is ~33ms); a deliberate second press is comfortably
+/// slower.
 const FOCUSED_KEY_REPEAT_WINDOW: std::time::Duration = std::time::Duration::from_millis(60);
 
 /// Feeds a key event from the app's own webview into the same hotkey
-/// pipeline the global OS hook uses, for the one case that hook can't cover:
-/// Chromium grabs raw keyboard input for its own focused window on Windows
-/// (https://github.com/chromiumembedded/cef/issues/2609), which starves
-/// `WH_KEYBOARD_LL` while this app's window has focus. The CEF client's
-/// `on_pre_key_event` still sees every keystroke in that case, so it's wired
-/// to call here instead. Returns whether to suppress the key.
+/// pipeline the global hook uses — needed because Chromium grabs raw
+/// keyboard input for its focused window, starving `WH_KEYBOARD_LL` while
+/// our window has focus. Returns whether to suppress the key.
 pub(crate) fn dispatch_from_focused_window(vk: u16, pressed: bool) -> bool {
     if vk as usize >= 256 {
         return false;
@@ -438,16 +400,11 @@ pub(crate) fn dispatch_from_focused_window(vk: u16, pressed: bool) -> bool {
     matches!(dispatch(event), CaptureDecision::Suppress)
 }
 
-/// Any key held when the desktop switches (UAC prompt, Ctrl+Alt+Del, lock
-/// screen) will have its key-up delivered to the secure desktop, where our
-/// hook can't see it. Every tracker is cleared here because a missed key-up
-/// wedges each of them: the shared modifier state would keep reporting a
-/// phantom modifier (no combo matches again), a stale `key_suppressed` entry
-/// would make the hook swallow that key system-wide forever, and a stale
-/// `key_held` one would make its next real press look like an auto-repeat and
-/// go unreported. Clearing is safe — the user isn't mid-combo across a
-/// desktop switch, and anything genuinely still held on return re-registers
-/// on its next press.
+/// A key held across a desktop switch (UAC prompt, Ctrl+Alt+Del, lock
+/// screen) has its key-up delivered to the secure desktop, invisible to our
+/// hook — so every tracker is cleared here to avoid wedging on the missed
+/// key-up. Safe: the user isn't mid-combo across a switch, and anything
+/// still held re-registers on its next press.
 unsafe extern "system" fn desktop_switch_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
@@ -483,18 +440,13 @@ unsafe extern "system" fn keyboard_proc(
         let vk = kb.vkCode as usize;
         if vk >= 256 {
             // Documented range is 1..=254, but this hook sees whatever any
-            // process on the system injects — guard the array index rather
-            // than trust an external contract, the way an unchecked
-            // assumption in this same file already caused a panic once (see
-            // `last_cursor` above).
+            // process injects, so guard the array index rather than trust that.
             return unsafe { CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param) };
         }
 
-        // Hotkey matching, StopRecording and recording capture all happen in
-        // the shared callback (`recording::start_grab_thread`), against the
-        // same `MacroKey` values Linux and macOS report. This hook's only
-        // extra jobs are telling auto-repeat apart from a real press and
-        // keeping key-up suppression paired with its key-down.
+        // Hotkey matching and recording capture happen in the shared
+        // callback. This hook's extra jobs: telling auto-repeat apart from a
+        // real press, and keeping key-up suppression paired with its key-down.
         let is_repeat = pressed && HOOK_STATE.with_borrow_mut(|s| {
             // Already held means this key-down is a repeat, not a fresh press.
             std::mem::replace(&mut s.key_held[vk], true)
@@ -503,11 +455,9 @@ unsafe extern "system" fn keyboard_proc(
             HOOK_STATE.with_borrow_mut(|s| s.key_held[vk] = false);
         }
         if is_repeat {
-            // Repeats of a suppressed key keep being swallowed — that's what
-            // stops a held-down combo firing its action once per repeat. Every
-            // other repeat still reaches the focused window (swallowing those
-            // would break held-key repeat system-wide); it just isn't reported
-            // to the capture callback a second time.
+            // Repeats of a suppressed key keep being swallowed, so a held
+            // combo only fires its action once. Other repeats still reach
+            // the focused window and just aren't re-reported to the callback.
             return if HOOK_STATE.with_borrow(|s| s.key_suppressed[vk]) {
                 1
             } else {
@@ -529,8 +479,8 @@ unsafe extern "system" fn keyboard_proc(
                     cb_suppress
                 } else {
                     // A key-up whose key-down was swallowed is swallowed too,
-                    // however the callback answers — otherwise the focused
-                    // window sees a release for a press it was never given.
+                    // regardless of the callback's answer — otherwise the
+                    // focused window sees an unpaired release.
                     std::mem::replace(&mut s.key_suppressed[vk], false) || cb_suppress
                 }
             });
@@ -628,12 +578,10 @@ pub(crate) fn vk_to_macro_key(vk: VIRTUAL_KEY) -> Option<MacroKey> {
         VK_RMENU => MacroKey::AltGr,
         VK_LWIN => MacroKey::Meta,
         VK_RWIN => MacroKey::Meta,
-        // A low-level hook reports the side-specific VK for a physically
-        // pressed modifier, so these generic ones are rare. They're mapped
-        // anyway because the shared hotkey matcher derives held modifiers from
-        // `MacroKey::modifier_bit`, and the `Other(vk)` fallback below has no
-        // modifier bit — a generic modifier landing there would silently drop
-        // out of every combo.
+        // Low-level hooks report the side-specific VK, so these generic ones
+        // are rare — but they're mapped anyway since the hotkey matcher
+        // derives held modifiers from `MacroKey::modifier_bit`, and
+        // `Other(vk)` has no modifier bit.
         VK_SHIFT => MacroKey::Shift,
         VK_CONTROL => MacroKey::Control,
         VK_MENU => MacroKey::Alt,
@@ -693,13 +641,10 @@ fn macro_target_window() -> Option<HWND> {
     is_usable_target(stored).then_some(stored)
 }
 
-/// Call before executing a hotkey-triggered macro. Restores focus to the window
-/// the macro should drive and releases any held modifier keys.
-///
-/// Takes the backend the macro is about to play through rather than building
-/// an `Enigo` of its own: a throwaway one would be constructed with default
-/// settings, not the tuned ones `WinApiBackend::new` picks, and these releases
-/// are part of the same input stream the run is about to emit.
+/// Call before executing a hotkey-triggered macro: restores focus to the
+/// target window and releases any held modifier keys. Takes the backend the
+/// macro will play through rather than a throwaway `Enigo`, since a throwaway
+/// one wouldn't have `WinApiBackend::new`'s tuned settings.
 pub fn prepare_for_macro_execution(backend: &Arc<Mutex<dyn InputBackend>>) {
     if let Some(target) = macro_target_window() {
         unsafe {

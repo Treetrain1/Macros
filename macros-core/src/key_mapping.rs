@@ -1,10 +1,8 @@
 use crate::input::types::MacroKey;
 
 /// Maps a Web KeyboardEvent.code string to a MacroKey for named/special keys.
-/// The JS `code` property uses the same names as the rdev key names we store,
-/// so most mappings are direct (KeyA → MacroKey::Other("KeyA") via string_to_key).
-/// This function handles the cases where the iced mapping used a different name
-/// or a dedicated enum variant.
+/// Most JS `code` names match our stored rdev names directly; this handles
+/// the cases that don't.
 pub fn web_code_to_macro_key(code: &str) -> Option<MacroKey> {
     use crate::input::key_names::string_to_key;
     // First try the rdev name lookup (handles KeyA, F1, Space, etc.)

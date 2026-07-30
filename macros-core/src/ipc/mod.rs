@@ -1,9 +1,7 @@
 //! Loopback TCP control interface so external processes (e.g. a Geode mod
 //! running Geometry Dash under Proton) can trigger recording/playback at a
-//! precise moment, without going through a physical hotkey press. Commands
-//! are translated 1:1 onto the existing hotkey `QueueSignal` pipeline so the
-//! rest of the app behaves exactly as if the matching hotkey had been
-//! pressed.
+//! precise moment without a physical hotkey press. Commands translate 1:1
+//! onto the existing hotkey `QueueSignal` pipeline.
 
 use crate::hotkey_types::HotkeyAction;
 use crate::recording::{self, QueueSignal};
@@ -48,17 +46,11 @@ impl IpcResponse {
     }
 }
 
-/// Binds a loopback-only listener and serves connections until `shutdown`
-/// is set to `true`. Never binds beyond 127.0.0.1 — this interface trusts any
-/// local process, matching the trust level already implied by the
-/// global-hotkey grab (anything that can synthesize input locally can already
-/// trigger it).
-///
-/// Each accepted connection is handled in its own spawned task, so `shutdown`
-/// is also forwarded into those tasks (and not just the accept loop) —
-/// otherwise stopping the server would only stop accepting *new* connections
-/// while any already-connected client (e.g. a persistent IPC client) kept
-/// being serviced indefinitely.
+/// Binds a loopback-only listener and serves connections until `shutdown` is
+/// set to `true`. 127.0.0.1 only — this interface trusts any local process,
+/// same as the global-hotkey grab. `shutdown` is forwarded into each
+/// per-connection task too, not just the accept loop, so already-connected
+/// clients get closed rather than serviced forever.
 pub async fn run_server(port: u16, mut shutdown: watch::Receiver<bool>) {
     let listener = match TcpListener::bind(("127.0.0.1", port)).await {
         Ok(listener) => listener,
@@ -127,10 +119,9 @@ mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
 
-    /// Regression test for the bug where "Stop Server" left already-connected
-    /// clients (like the Geode mod's persistent connection) running forever,
-    /// because aborting the accept loop's task doesn't touch the separately
-    /// spawned per-connection tasks.
+    /// Regression test: "Stop Server" used to leave already-connected clients
+    /// running forever, since aborting the accept loop doesn't touch the
+    /// separately spawned per-connection tasks.
     #[tokio::test]
     async fn shutdown_closes_already_connected_clients() {
         let port = 58231;

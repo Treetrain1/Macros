@@ -23,19 +23,14 @@ fn default_speed_multiplier() -> f64 {
     1.0
 }
 
-/// Id used by strands' "main" entry point before "When Ran" blocks existed —
-/// every macro had exactly one strand with this literal id, and it was the
-/// only thing ever executed. Kept around solely so loading an old save file
-/// can find that strand and migrate it (see `From<MacroDe>` below); it has no
-/// special meaning anywhere else anymore.
+/// Id of the single implicit strand used before "When Ran" blocks existed.
+/// Kept only so loading an old save file can find and migrate that strand.
 const LEGACY_ROOT_STRAND_ID: &str = "root";
 
-/// One draggable stack of instructions on the canvas. A strand is an entry
-/// point — one of the possibly-many independent things a macro runs
-/// concurrently — when its first instruction is `Instruction::WhenRan`;
-/// every other strand is still persisted with the macro (so stray/detached
-/// stacks survive a save/reload) but stays inert until dragged under a
-/// "When Ran" block.
+/// One draggable stack of instructions on the canvas. It's an entry point —
+/// one of the possibly-many things a macro runs concurrently — when its
+/// first instruction is `Instruction::WhenRan`; otherwise it stays persisted
+/// but inert until dragged under a "When Ran" block.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Strand {
     #[serde(default = "default_strand_id")]
@@ -50,8 +45,7 @@ pub struct Strand {
 
 /// A value block sitting free on the canvas, not embedded in any
 /// instruction's field — the drag-and-drop "parking spot" for a value block
-/// before/after it's placed into a field's slot (or one of its subfields).
-/// Can never be attached to a strand's instruction list directly.
+/// before/after it's placed into a field's slot.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct FloatingValue {
     #[serde(default = "default_floating_value_id")]
@@ -71,11 +65,9 @@ fn default_variable_value() -> Evaluated {
     Evaluated::Number(0.0)
 }
 
-/// A user-declared macro-wide variable and its current value. The name is
-/// fixed at creation (no rename/delete UI yet); the value is mutated by
-/// `Instruction::SetVariable`/`ChangeVariable` at runtime and persisted with
-/// the macro so it survives an app restart — see `AppState::variable_values`
-/// for the live store this is synced from/to.
+/// A user-declared macro-wide variable and its current value, mutated by
+/// `SetVariable`/`ChangeVariable` at runtime and persisted with the macro so
+/// it survives an app restart.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct VariableDef {
     pub name: String,
@@ -84,16 +76,10 @@ pub struct VariableDef {
 }
 
 /// One piece of a custom block's prototype, in declaration order — either
-/// static label text or a named input slot. `Input`'s `name` is the
-/// parameter name, read inside the block's own body via `Value::Param`, and
-/// unique within that block (enforced at creation/edit time in
-/// `commands.rs`, not here). Both variants' `id` is a stable, opaque
-/// identifier generated once when the piece is first added (client-side,
-/// see `MakeBlockDialog.vue`) and never regenerated — the only way
-/// `edit_block` can tell "this input was renamed" apart from "this input
-/// was removed and an unrelated one added" when reconciling existing call
-/// sites' `args` (see `Macro::reconcile_block_call_args`), since a plain
-/// name (which *does* change on rename) can't serve as that identity.
+/// static label text or a named input slot (read in the body via
+/// `Value::Param`). `id` is a stable identifier assigned once and never
+/// regenerated, since `name` changes on rename and can't serve as identity
+/// when reconciling call sites in `reconcile_block_call_args`.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum BlockPiece {
@@ -110,10 +96,8 @@ impl BlockPiece {
 }
 
 /// A user-defined custom block ("My Blocks") — just the prototype/signature;
-/// the actual instructions it runs live in a `Strand` elsewhere in the same
-/// macro whose `instructions[0]` is `Instruction::BlockHeader(id)`, exactly
-/// the way `WhenRan` marks an entry strand (see `Macro::run`, which builds
-/// its `block_table` by scanning for these header strands directly).
+/// its body lives in a separate `Strand` whose `instructions[0]` is
+/// `Instruction::BlockHeader(id)`.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct BlockDef {
     pub id: String,
@@ -137,17 +121,15 @@ fn default_block_id() -> String {
 }
 
 impl Instruction {
-    /// Returns `true` for "header" blocks — blocks that must be first in their
-    /// strand, cannot have anything stacked above them, and render with a flat
-    /// top edge (no connector notch). `WhenRan` marks a macro entry point;
-    /// `BlockHeader` marks a custom block's body.
+    /// True for "header" blocks (`WhenRan`, `BlockHeader`) — must be first in
+    /// their strand, nothing may stack above them, and they render with a
+    /// flat top edge.
     pub fn is_header(&self) -> bool {
         matches!(self, Instruction::WhenRan | Instruction::BlockHeader(_))
     }
 
-    /// See `Value::rename_var` — also renames a `SetVariable`/`ChangeVariable`
-    /// instruction's own target name, not just `Value::Var` reads nested
-    /// inside its value.
+    /// Renames `Value::Var` reads, plus a `SetVariable`/`ChangeVariable`
+    /// instruction's own target name.
     pub fn rename_var(&mut self, old: &str, new: &str) {
         match self {
             Instruction::Wait(value) | Instruction::Return(value) => value.rename_var(old, new),
@@ -167,10 +149,8 @@ impl Instruction {
         }
     }
 
-    /// Renames every `Value::Param` leaf reading `old` (anywhere this
-    /// instruction embeds a `Value` tree) to `new` — used by
-    /// `Macro::rename_block_input` to keep a block's own body working after
-    /// one of its inputs is renamed.
+    /// Renames every `Value::Param` leaf reading `old` to `new`, keeping a
+    /// block's body working after one of its inputs is renamed.
     pub fn rename_param(&mut self, old: &str, new: &str) {
         match self {
             Instruction::Wait(value) | Instruction::Return(value) => value.rename_param(old, new),
@@ -186,11 +166,8 @@ impl Instruction {
     }
 
     /// Applies `f` to the `args` of every `CallBlock`/`Value::Call` node
-    /// (anywhere this instruction embeds one, including nested inside a
-    /// `Value` tree) that references `block_id` — used by
-    /// `Macro::insert_block_input`/`remove_block_input` to keep every call
-    /// site's argument list positionally aligned with the block's current
-    /// `pieces` after an input is added/removed.
+    /// referencing `block_id`, wherever nested. Used to keep call sites'
+    /// argument lists aligned after a block's inputs change.
     pub fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
         match self {
             Instruction::Wait(value) | Instruction::Return(value) => value.for_each_call_args_mut(block_id, f),
@@ -210,12 +187,9 @@ impl Instruction {
         }
     }
 
-    /// Replaces every `Value::Call` node (anywhere this instruction embeds
-    /// one) referencing `block_id` with a plain `0` leaf, and drops this
-    /// instruction entirely if it's a `CallBlock` referencing `block_id` —
-    /// used by `Macro::remove_block` so deleting a custom block scrubs every
-    /// reference instead of leaving a dangling one with nothing sensible to
-    /// fall back to.
+    /// Replaces every `Value::Call` node referencing `block_id` with a plain
+    /// `0` leaf (a `CallBlock` referencing it is left for the caller to drop
+    /// entirely), so deleting a custom block never leaves a dangling ref.
     pub fn scrub_block_calls(&mut self, block_id: &str) {
         match self {
             Instruction::Wait(value) | Instruction::Return(value) => value.scrub_block_calls(block_id),
@@ -244,20 +218,13 @@ pub struct Macro {
     pub name: String,
     pub description: String,
     pub strands: Vec<Strand>,
-    /// Strand explicitly chosen (via the canvas's "Set Recording Target"
-    /// right-click action) to receive freshly-recorded input. `None` means
-    /// no explicit choice has been made yet — falls back to the automatic
-    /// "first When Ran strand, else first strand" rule. Deliberately kept
-    /// out of the undo/redo stacks (which only snapshot `strands`): it's a
-    /// pointer/preference, not an edit to the macro's instructions.
+    /// Strand explicitly chosen to receive freshly-recorded input; `None`
+    /// falls back to the "first When Ran strand, else first strand" rule.
+    /// Kept out of undo/redo (it's a preference, not an instruction edit).
     #[serde(default)]
     pub recording_target: Option<String>,
-    /// Playback speed for this macro: every `Wait` instruction's duration is
-    /// divided by this when the macro runs, combined with the
-    /// global runtime override (see `AppState::global_speed_multiplier`).
-    /// 1.0 is normal speed, 2.0 is twice as fast (waits are half as long),
-    /// 0.5 is half as fast (waits are twice as long). Clamped to
-    /// `SPEED_MULTIPLIER_RANGE` wherever it's set.
+    /// Playback speed: every `Wait` duration is divided by this at runtime.
+    /// 1.0 is normal, 2.0 is twice as fast. Clamped to `SPEED_MULTIPLIER_RANGE`.
     #[serde(default = "default_speed_multiplier")]
     pub speed_multiplier: f64,
     /// Value blocks parked on open canvas — see `FloatingValue`.
@@ -277,9 +244,8 @@ pub struct Macro {
 pub const SPEED_MULTIPLIER_RANGE: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 
 /// Deserialization shape supporting both the current multi-strand format and
-/// the legacy single flat `code: Vec<Instruction>` format saved by older
-/// versions of the app. Whichever variant matches the JSON on disk wins;
-/// legacy macros become a single root strand holding their old instructions.
+/// the legacy flat `code: Vec<Instruction>` format from older saves; legacy
+/// macros become a single root strand.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum MacroDe {
@@ -313,9 +279,8 @@ impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         match de {
             MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables, block_defs } => {
-                // Pre-"When Ran" saves have a strand literally id=="root" that
-                // was the sole implicit entry point; give it a real WhenRan
-                // block so it keeps running after upgrade.
+                // Pre-"When Ran" saves have a strand id=="root" that was the
+                // implicit entry point; give it a real WhenRan on upgrade.
                 if let Some(legacy) = strands.iter_mut().find(|s| s.id == LEGACY_ROOT_STRAND_ID) {
                     if !legacy.starts_with_when_ran() {
                         legacy.instructions.insert(0, Instruction::WhenRan);
@@ -367,10 +332,8 @@ impl Macro {
         self.floating_values.iter_mut().find(|f| f.id == id)
     }
 
-    /// Writes the live runtime values (`AppState::variable_values`, keyed by
-    /// name) back into this macro's `variables` before it's saved to disk —
-    /// used once a run finishes/a loop stops, not per-instruction (see the
-    /// `macros_thread` module in the tauri app crate).
+    /// Writes live runtime variable values back into this macro's
+    /// `variables` before it's saved to disk, once a run finishes.
     pub fn sync_variables_from(&mut self, values: &HashMap<String, Evaluated>) {
         for var in &mut self.variables {
             if let Some(v) = values.get(&var.name) {
@@ -379,11 +342,9 @@ impl Macro {
         }
     }
 
-    /// Renames a declared variable and every existing reference to it —
-    /// `Value::Var` reads and `SetVariable`/`ChangeVariable` targets, in
-    /// every strand and floating value — so in-progress blocks keep working
-    /// under the new name instead of being silently orphaned. A no-op if
-    /// `old` isn't a declared variable.
+    /// Renames a declared variable and every reference to it (`Value::Var`
+    /// reads, `SetVariable`/`ChangeVariable` targets) across all strands and
+    /// floating values. No-op if `old` isn't declared.
     pub fn rename_variable(&mut self, old: &str, new: &str) {
         if let Some(var) = self.variables.iter_mut().find(|v| v.name == old) {
             var.name = new.to_string();
@@ -401,9 +362,8 @@ impl Macro {
     }
 
     /// Defines a new custom block: appends the `BlockDef` and creates its
-    /// (initially empty) header strand at `(x, y)`, returning the new
-    /// block's id. Caller validates `pieces` (non-empty label text, unique
-    /// input names) beforehand.
+    /// (initially empty) header strand at `(x, y)`. Caller validates
+    /// `pieces` beforehand.
     pub fn create_block(&mut self, pieces: Vec<BlockPiece>, returns_value: bool, x: i32, y: i32) -> String {
         let id = default_block_id();
         self.block_defs.push(BlockDef { id: id.clone(), pieces, returns_value });
@@ -411,14 +371,9 @@ impl Macro {
         id
     }
 
-    /// Renames every `Value::Param` leaf reading `old` to `new`, but *only*
-    /// within `block_id`'s own body (params are scoped per-block, so no
-    /// other block's body is touched) — the body-side half of reconciling a
-    /// renamed input; `edit_block` calls this once per renamed piece before
-    /// overwriting `BlockDef::pieces` wholesale with the caller's new list
-    /// (which is why this doesn't touch `pieces` itself, unlike
-    /// `rename_variable`, whose declaration and references live in the same
-    /// place). A no-op if `block_id` has no header strand.
+    /// Renames every `Value::Param` leaf reading `old` to `new`, scoped to
+    /// `block_id`'s own body. The body-side half of reconciling a renamed
+    /// input; caller still needs to update `BlockDef::pieces` separately.
     pub fn rename_block_input_body(&mut self, block_id: &str, old: &str, new: &str) {
         for strand in &mut self.strands {
             if matches!(strand.instructions.first(), Some(Instruction::BlockHeader(id)) if id == block_id) {
@@ -429,14 +384,11 @@ impl Macro {
         }
     }
 
-    /// Rebuilds every existing call site's `args` (every `CallBlock`/
-    /// `Value::Call` referencing `block_id`, wherever it appears) to line up
-    /// with `new_pieces`' input order, carrying over each surviving input's
-    /// old value by matching `BlockPiece::id` between `old_pieces` and
-    /// `new_pieces` (identity survives a rename; a removed input's old value
-    /// is simply dropped, an added one gets a fresh `0`) — called by
-    /// `edit_block` before it overwrites `BlockDef::pieces`, so `old_pieces`
-    /// should be the def's pieces *before* that happens.
+    /// Rebuilds every call site's `args` to line up with `new_pieces`' input
+    /// order, carrying over each surviving input's value by matching
+    /// `BlockPiece::id` (identity survives a rename); removed inputs drop
+    /// their value, added ones get a fresh `0`. Call before overwriting
+    /// `BlockDef::pieces` — `old_pieces` must be the pieces beforehand.
     pub fn reconcile_block_call_args(&mut self, block_id: &str, old_pieces: &[BlockPiece], new_pieces: &[BlockPiece]) {
         let old_input_ids: Vec<&str> = old_pieces.iter().filter(|p| matches!(p, BlockPiece::Input { .. })).map(BlockPiece::id).collect();
         let new_input_ids: Vec<&str> = new_pieces.iter().filter(|p| matches!(p, BlockPiece::Input { .. })).map(BlockPiece::id).collect();
@@ -457,12 +409,9 @@ impl Macro {
     }
 
     /// Deletes a custom block entirely: its `BlockDef`, its header strand,
-    /// every `CallBlock` instruction that calls it (anywhere), and every
-    /// `Value::Call` node that calls it (collapsed to a plain `0` leaf,
-    /// same "takes over the slot" spirit as `commands::apply_value_kind`) —
-    /// unlike a deleted variable, a dangling block reference has nothing
-    /// sensible to fall back to at resolve time, so it's scrubbed rather
-    /// than left dangling.
+    /// every `CallBlock` instruction calling it, and every `Value::Call`
+    /// node calling it (collapsed to a plain `0` leaf) so nothing is left
+    /// dangling.
     pub fn remove_block(&mut self, block_id: &str) {
         self.block_defs.retain(|b| b.id != block_id);
         self.strands.retain(|s| !matches!(s.instructions.first(), Some(Instruction::BlockHeader(id)) if id == block_id));
@@ -477,11 +426,9 @@ impl Macro {
         }
     }
 
-    /// Strand that freshly-recorded input gets appended to: the explicitly
-    /// chosen `recording_target` if it still exists, else the first "When
-    /// Ran" entry point if one exists, otherwise just the first strand
-    /// (creating one if the macro is completely empty) so recorded input
-    /// always lands somewhere.
+    /// Strand that freshly-recorded input gets appended to: the explicit
+    /// `recording_target` if it still exists, else the first "When Ran"
+    /// strand, else the first strand (creating one if the macro is empty).
     pub fn recording_target_mut(&mut self) -> &mut Strand {
         if let Some(id) = &self.recording_target {
             if let Some(pos) = self.strands.iter().position(|s| &s.id == id) {
@@ -497,10 +444,8 @@ impl Macro {
         &mut self.strands[0]
     }
 
-    /// Read-only counterpart to `recording_target_mut` — same resolution
-    /// order, but never creates a strand, so it's safe to call for display
-    /// purposes (e.g. deciding which strand's top block gets the red
-    /// recording-target dot).
+    /// Read-only counterpart to `recording_target_mut`: same resolution
+    /// order, but never creates a strand.
     pub fn recording_target_id(&self) -> Option<String> {
         if let Some(id) = &self.recording_target {
             if self.strands.iter().any(|s| &s.id == id) {
@@ -521,32 +466,25 @@ pub enum Instruction {
     Wait(Value),
     Command(String),
     Comment(String),
-    /// Marks a strand as an entry point: the strand containing it (always at
-    /// index 0 — enforced by every command that can move/insert blocks) runs
-    /// as its own concurrent thread when the macro is run. A macro can have
-    /// any number of these.
+    /// Marks a strand as an entry point (always at index 0): it runs as its
+    /// own concurrent thread when the macro runs. A macro can have several.
     WhenRan,
-    /// `set <name> to <value>` — overwrites the named variable with whatever
-    /// `value` evaluates to (number, text, or anything else the tree
-    /// resolves down to).
+    /// `set <name> to <value>` — overwrites the named variable.
     SetVariable(String, Value),
     /// `change <name> by <value>` — adds `value` to the named variable.
-    /// `value` must evaluate to a number (a no-op otherwise); the variable's
-    /// own current value is coerced to `0` first if it isn't already
-    /// numeric. See `macros::runner::run_instructions`.
+    /// No-op if `value` isn't numeric; the variable is coerced to `0` first
+    /// if it wasn't already numeric.
     ChangeVariable(String, Value),
-    /// Marks a strand as a custom block's body (see `BlockDef`) — the
-    /// `String` is the `BlockDef::id` it belongs to. Header-only, like
-    /// `WhenRan`; excluded from `Macro::run`'s entry-strand filter so it
-    /// never auto-runs, only via `CallBlock`/`Value::Call`.
+    /// Marks a strand as a custom block's body; the `String` is the
+    /// `BlockDef::id`. Header-only, like `WhenRan`, but never auto-runs —
+    /// only invoked via `CallBlock`/`Value::Call`.
     BlockHeader(String),
     /// Command-position invocation of a `returns_value == false` custom
-    /// block — runs its body inline with `args` bound to its declared
-    /// inputs. See `macros::runner`.
+    /// block: runs its body inline with `args` bound to its inputs.
     CallBlock { block_id: String, args: Vec<Value> },
     /// Only meaningful inside a `returns_value == true` block's body:
-    /// evaluates `Value` and halts that block's execution, handing the
-    /// result back to whatever called it (`CallBlock` or `Value::Call`).
+    /// evaluates `Value` and halts execution, returning the result to the
+    /// caller.
     Return(Value),
 }
 
@@ -600,10 +538,8 @@ enum InstructionDe {
 enum WaitDe {
     /// Oldest save shape: a bare duration, no randomness field existed yet.
     LegacyNumber(u64),
-    /// Pre-`Op::Random` save shape: `[duration, randomness]` — randomness
-    /// was a dedicated field rather than something expressed inside the
-    /// `Value` tree. Migrated into `Op::Random` below rather than dropped,
-    /// so old macros keep producing the same spread of wait times.
+    /// Pre-`Op::Random` save shape: `[duration, randomness]`, migrated into
+    /// `Op::Random` below so old macros keep the same spread of wait times.
     LegacyWithRandomness(Value, Value),
     /// Current shape: a single `Value` (a plain duration, or a duration
     /// wrapped in any operator including `Op::Random`).
@@ -611,12 +547,8 @@ enum WaitDe {
 }
 
 /// Folds a legacy `[duration, randomness]` `Wait` into today's single-`Value`
-/// shape: `duration` alone if there was never any randomness configured,
-/// otherwise `duration` wrapped in `Op::Random` spanning
-/// `[duration - randomness, duration + randomness]` — the same uniform
-/// spread the old dedicated-field jitter produced (see the removed
-/// offset/sign logic this replaced in `runner.rs`), just expressed as a
-/// value-tree node instead of a second instruction field.
+/// shape: `duration` alone if randomness was zero, otherwise `duration`
+/// wrapped in `Op::Random` spanning `[duration - randomness, duration + randomness]`.
 fn migrate_wait_duration(duration: Value, randomness: Value) -> Value {
     if randomness == Value::number(0.0) {
         return duration;

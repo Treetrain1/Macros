@@ -1,18 +1,8 @@
-//! Debug-only HTTP+WebSocket bridge so the real running backend (same
-//! `SharedState`, same evdev/uinput thread, same everything) can be driven
-//! from a plain browser tab instead of the Tauri webview. Only ever compiled
-//! in with `--features dev-bridge`; never part of a release build.
-//!
-//! The frontend's `invoke()`/`listen()` calls all funnel through one file
-//! (`ui/src/tauri.ts`), and the entire app only ever emits one event
-//! (`state-updated`, carrying the full `StateDto`) — which is what makes a
-//! generic bridge tractable: `POST /invoke/:cmd` dispatches by name onto the
-//! same `#[tauri::command]` functions the real IPC pipeline calls, and
-//! `GET /events` is a WebSocket that mirrors every `state-updated` emission
-//! (plus an immediate snapshot on connect) rather than re-implementing a
-//! whole event bus.
-//!
-//! Binds to 127.0.0.1 only — same trust model as `macros_core::ipc`.
+//! Debug-only HTTP+WebSocket bridge (feature-gated, never in release builds)
+//! so the running backend can be driven from a browser tab instead of the
+//! Tauri webview. `POST /invoke/:cmd` dispatches onto the real
+//! `#[tauri::command]` functions; `GET /events` mirrors `state-updated`
+//! emissions over a WebSocket. Binds to 127.0.0.1 only.
 
 use crate::commands;
 use crate::state::{self, BlockPieceDto, HotkeyActionDto, InstructionDto, SharedState, ValueDto, ValueLocationDto};
@@ -42,10 +32,9 @@ pub(crate) async fn run(app: tauri::AppHandle<Cef>) {
     let (state_tx, _) = broadcast::channel::<String>(64);
     let state_tx = Arc::new(state_tx);
 
-    // Tauri's emit/listen event bus is decoupled from any webview — a
-    // Rust-side listener sees every `state-updated` emission (from
-    // `emit_state_updated`) exactly as a real webview would, without needing
-    // to touch state.rs/commands.rs at all.
+    // Tauri's emit/listen event bus is decoupled from any webview, so a
+    // Rust-side listener sees every `state-updated` emission just like a
+    // real webview would.
     {
         let tx = Arc::clone(&state_tx);
         app.listen("state-updated", move |event| {
@@ -79,8 +68,7 @@ async fn ws_handler(ws: WebSocketUpgrade, AxumState(ctx): AxumState<BridgeCtx>) 
 }
 
 async fn handle_socket(mut socket: WebSocket, ctx: BridgeCtx) {
-    // Snapshot on connect so a freshly-opened browser tab doesn't have to
-    // wait for the next mutation to see any state at all.
+    // Snapshot on connect so a freshly-opened tab sees state immediately.
     let shared = ctx.app.state::<SharedState>();
     let initial = match shared.lock() {
         Ok(s) => serde_json::to_string(&state::build_state_dto(&s)).ok(),

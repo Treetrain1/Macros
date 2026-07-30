@@ -21,9 +21,8 @@ pub(crate) enum FieldId {
     SetVariableValue,
     ChangeVariableValue,
     ReturnValue,
-    /// One of `CallBlock`'s N argument slots, indexed positionally against
-    /// the block's declared inputs — the one `FieldId` variant that isn't
-    /// one-per-instruction-type, since a call's arity is dynamic.
+    /// One of `CallBlock`'s N argument slots, indexed positionally since a
+    /// call's arity is dynamic.
     CallArg(usize),
 }
 
@@ -93,11 +92,10 @@ pub(crate) enum ComboCapture {
     Pending,
 }
 
-/// Where a captured keypress should be written once it arrives.
-/// `Strand` is the real editor flow (writes straight into an instruction).
-/// `Standalone` has no instruction to write into — e.g. the sidebar's Key
-/// prefab, which isn't part of any strand — so the captured key is parked in
-/// `AppState::pending_standalone_key` for the frontend to read and clear.
+/// Where a captured keypress should be written once it arrives. `Strand`
+/// writes straight into an instruction; `Standalone` (e.g. the sidebar's Key
+/// prefab) has no instruction to write into, so the key is parked in
+/// `AppState::pending_standalone_key` instead.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KeyCaptureTarget {
     Strand(String, usize),
@@ -119,11 +117,9 @@ pub(crate) struct AppState {
     pub(crate) macros_list: Vec<Macro>,
     pub(crate) macro_strs: Vec<String>,
     pub(crate) emulator: Option<Arc<Mutex<dyn InputBackend>>>,
-    /// Live macro-wide variable store, shared with background execution
-    /// threads exactly like `emulator` — kept out of the main state lock so
-    /// a long-running macro never blocks other commands. Synced from the
-    /// selected macro's `Macro::variables` on load, written back to disk
-    /// once a run finishes (see `macros_thread`).
+    /// Live macro-wide variable store, kept out of the main state lock so a
+    /// long-running macro never blocks other commands. Synced from the
+    /// selected macro on load, written back to disk once a run finishes.
     pub(crate) variable_values: Arc<Mutex<HashMap<String, Evaluated>>>,
     pub(crate) thread_pool: ThreadPool,
     pub(crate) is_looping: Arc<Mutex<bool>>,
@@ -202,10 +198,10 @@ pub(crate) struct MacroDto {
     pub(crate) recording_target_strand_id: Option<String>,
     pub(crate) speed_multiplier: f64,
     pub(crate) floating_values: Vec<FloatingValueDto>,
-    /// Declared variable names only — current values aren't surfaced to the
-    /// frontend (no "watcher" UI), just used by the sidebar/dropdowns.
+    /// Declared variable names only, for the sidebar/dropdowns — current
+    /// values aren't surfaced to the frontend.
     pub(crate) variables: Vec<String>,
-    /// User-defined custom blocks ("My Blocks") — see `BlockDefDto`.
+    /// User-defined custom blocks ("My Blocks").
     pub(crate) block_defs: Vec<BlockDefDto>,
 }
 
@@ -276,9 +272,8 @@ pub(crate) struct FloatingValueDto {
 }
 
 /// Addresses a single `Value` node — either inside an instruction's field
-/// (`Field`) or inside a value block parked on canvas (`Floating`), at
-/// `path` within that root (`Value::get_mut`'s `0`=lhs/`1`=rhs addressing).
-/// Resolved against a `Macro` by `commands::resolve_location_mut`.
+/// (`Field`) or inside a value block parked on canvas (`Floating`), at `path`
+/// within that root. Resolved against a `Macro` by `commands::resolve_location_mut`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ValueLocation {
     Field { strand_id: String, index: usize, field_id: FieldId, path: Vec<u8> },
@@ -294,8 +289,8 @@ impl ValueLocation {
     }
 
     /// True if `self` and `other` address a node in the same tree (ignoring
-    /// `path`) — used to prune stale invalid-text buffers for descendants of
-    /// a subtree that just got replaced wholesale.
+    /// `path`) — used to prune stale invalid-text buffers after a subtree is
+    /// replaced wholesale.
     pub(crate) fn same_root(&self, other: &ValueLocation) -> bool {
         match (self, other) {
             (
@@ -307,8 +302,8 @@ impl ValueLocation {
         }
     }
 
-    /// `Some(strand_id)` for a `Field` location, `None` for `Floating` —
-    /// used to prune buffered entries when a whole strand is removed.
+    /// `Some(strand_id)` for a `Field` location, `None` for `Floating` — used
+    /// to prune buffered entries when a whole strand is removed.
     pub(crate) fn strand_id(&self) -> Option<&str> {
         match self {
             ValueLocation::Field { strand_id, .. } => Some(strand_id),
@@ -318,18 +313,16 @@ impl ValueLocation {
 }
 
 /// Identifies the field currently being typed into, so `commands::push_undo`
-/// can be skipped for keystrokes that continue an edit already in progress —
-/// otherwise every keystroke would land its own undo step. Any other
-/// mutation (a fresh field, a drag, an undo/redo, …) resets this to `None`
-/// via `push_undo`, so the next keystroke there starts a new group.
+/// can skip keystrokes that continue an edit already in progress rather than
+/// giving each its own undo step. Any other mutation resets this to `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TextEditSession {
     Value(ValueLocation),
     Instruction { strand_id: String, index: usize },
 }
 
-/// Wire shape for `ValueLocation` — received from the frontend as command
-/// params, and sent back out as part of `InvalidFieldDto`.
+/// Wire shape for `ValueLocation`, used for both incoming command params and
+/// outgoing `InvalidFieldDto` entries.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind")]
 pub(crate) enum ValueLocationDto {

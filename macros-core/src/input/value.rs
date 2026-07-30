@@ -2,38 +2,31 @@ use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
-/// Operator for a [`Value::Op`] block — arithmetic, [`Op::Random`],
-/// [`Op::Join`] (text concatenation), a zero-arity text constant
-/// (`Op::NewLine`, `Op::Tab`), or one of the text/lookup operators below.
+/// Operator for a [`Value::Op`] block: arithmetic, [`Op::Random`],
+/// [`Op::Join`] (text concat), a zero-arity text constant, or a text/lookup op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Op {
     Add,
     Sub,
     Mul,
     Div,
-    /// `args[0] % args[1]`, always in `[0, args[1])` (via `f64::rem_euclid`)
-    /// rather than Rust's `%`, so a negative left-hand side still reads as a
-    /// normal "wrap around" mod. Errs like `Div` on a zero right-hand side.
+    /// `args[0] % args[1]` via `rem_euclid` (not Rust's `%`), so a negative
+    /// left-hand side still wraps normally. Errs on a zero right-hand side.
     Mod,
     /// `args[0]` rounded to the nearest whole number (half away from zero).
     Round,
-    /// `args[0]`/`args[1]` are the inclusive from/to bounds, not operands to
-    /// combine — evaluated fresh on every call to `eval`, unlike the
-    /// arithmetic ops which are pure functions of their operands. Picks an
-    /// integer when both bounds evaluate to whole numbers, otherwise a
-    /// float — see `eval`'s `Op::Random` arm.
+    /// `args[0]`/`args[1]` are inclusive bounds (not operands), resampled
+    /// fresh on every `eval`. Picks an integer if both bounds are whole
+    /// numbers, otherwise a float.
     Random,
-    /// Concatenates all of `args` as text — the only variable-arity
-    /// operator today (2 or 3 args, depending on which palette entry it was
-    /// dropped from; see `OPERATOR_KINDS`'s `"Join"`/`"Join3"` rows).
+    /// Concatenates all of `args` as text — the only variable-arity operator
+    /// (2 or 3 args depending on which palette entry it came from).
     Join,
-    /// Zero-arity text constants — `args` is always empty. `eval` ignores
-    /// `args` entirely for these.
+    /// Zero-arity text constants — `args` is always empty.
     NewLine,
     Tab,
-    /// 1-based index of `args[0]` (the needle) inside `args[1]` (the
-    /// haystack), both as text; `0` if not found. Character-based, not
-    /// byte-based, so it agrees with `Op::LetterOf`'s indexing.
+    /// 1-based index of `args[0]` (needle) in `args[1]` (haystack), or `0` if
+    /// not found. Character-based, matching `LetterOf`'s indexing.
     IndexOf,
     /// Same as `IndexOf`, but the index of the last occurrence.
     LastIndexOf,
@@ -42,59 +35,41 @@ pub enum Op {
     LetterOf,
     /// Character count of `args[0]` (as text).
     Length,
-    /// Upper/lowercases `args[0]` (as text) depending on `args[1]`, which is
-    /// never a user-editable value slot despite being a plain `Value::Text`
-    /// leaf like any other arg — it's driven entirely by an in-place
-    /// dropdown (`"Upper"`/`"Lower"`) rather than the drag/drop machinery,
-    /// same spirit as `Random`'s bounds not being "operands". See
-    /// `OPERATOR_KINDS`'s `"Case"` row and the frontend's `enumArg` spec.
+    /// Upper/lowercases `args[0]` based on `args[1]` (`"Upper"`/`"Lower"`) —
+    /// a plain `Value::Text` leaf, but driven by an in-place dropdown rather
+    /// than the drag/drop machinery.
     Case,
 }
 
-/// A small recursive expression tree backing a numeric instruction field —
-/// either a number, a piece of text, or an operator applied to its nested
-/// `args` (e.g. `5 + 3`, or `join "a" "b"`). Groundwork for a future
-/// macro-wide variable system: today only `Instruction::Wait` and the
-/// `MoveMouse`/`Scroll` tokens embed one, always evaluated back down to a
-/// number via [`Value::eval_number`]; `Instruction`'s `Text` token embeds one
-/// evaluated to a string via [`Value::eval_text`].
+/// Recursive expression tree backing a numeric/text instruction field — a
+/// number, text, or an operator over nested `args` (e.g. `5 + 3`).
 ///
-/// `Op::saved` is the value the operator displaced when it took over the
-/// slot — not one of the operator's operands, and not addressable via
-/// `get_mut`'s path. It just rides along so the UI can restore it verbatim
-/// if the operator is later dragged back out of the slot.
+/// `saved` holds the value an operator displaced when it took over the slot
+/// (not an operand, not reachable via `get_mut`), so the UI can restore it
+/// if the operator is later dragged back out.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub enum Value {
     Number { value: f64 },
     Text { value: String },
     Op { op: Op, args: Vec<Value>, saved: Box<Value> },
-    /// A read of a macro-wide variable by name — a leaf like `Number`/`Text`
-    /// (no args, no `saved` slot), resolved against the running macro's
-    /// variable store by [`Value::resolve_vars`] before `eval` ever sees it.
+    /// A read of a macro-wide variable by name, resolved against the running
+    /// macro's variable store by [`Value::resolve_vars`] before `eval` sees it.
     Var { name: String },
     /// A read of the current custom-block invocation's bound parameter by
-    /// name — a leaf like `Var`, but resolved against that invocation's
-    /// local parameter scope (`macros::runner::ExecCtx::param_env`) rather
-    /// than the macro-wide variable store, since two concurrent/nested
-    /// invocations of the same block must not share one slot. Only ever
-    /// produced by dragging one of a block's own declared inputs (rendered
-    /// on its header strand) — see `BlockDef`.
+    /// name — resolved against that invocation's local parameter scope (not
+    /// the macro-wide variable store), so nested/concurrent invocations of
+    /// the same block don't share a slot.
     Param { name: String },
-    /// Value-position invocation of a `returns_value == true` custom block
-    /// — mirrors `Op`'s shape (including `saved`, so swapping it in/out of a
-    /// slot round-trips like any other operator) but names a custom block
-    /// instead of a fixed [`Op`]. Resolved by
-    /// `macros::runner::resolve_calls_and_params` before `eval` ever sees
-    /// it, exactly like `Var`/`Param`.
+    /// Value-position invocation of a `returns_value == true` custom block —
+    /// mirrors `Op`'s shape (including `saved`) but names a block instead of
+    /// a fixed [`Op`]. Resolved before `eval` sees it, like `Var`/`Param`.
     Call { block_id: String, args: Vec<Value>, saved: Box<Value> },
 }
 
-/// The result of evaluating a [`Value`] tree — still either a number or
-/// text, since a leaf can be either; only an arithmetic/`Random` [`Op`]
-/// forces its args down to a number (via [`Evaluated::as_number`]). Also
-/// doubles as the persisted representation of a variable's current value
-/// (see `macros::VariableDef`), so it derives the traits that needs.
+/// Result of evaluating a [`Value`] tree — a number or text. Also doubles as
+/// the persisted representation of a variable's current value, hence the
+/// extra derives.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value")]
 pub enum Evaluated {
@@ -120,9 +95,8 @@ impl std::hash::Hash for Evaluated {
 }
 
 impl Evaluated {
-    /// Coerces the evaluated result to a number, parsing text loosely (so a
-    /// `Text` leaf holding `"5"` still works as an operand); fails with a
-    /// readable message for non-numeric text.
+    /// Coerces to a number, parsing text loosely (so a `Text` leaf like
+    /// `"5"` still works as an operand); errs with a readable message otherwise.
     pub fn as_number(&self) -> Result<f64, String> {
         match self {
             Evaluated::Number(n) => Ok(*n),
@@ -131,21 +105,16 @@ impl Evaluated {
     }
 }
 
-/// Static per-palette-entry metadata driving default construction when a
-/// block is dropped from the sidebar — the single place a new operator's
-/// arity and default arguments need registering. Arity lives on the *kind
-/// string*, not on `Op` itself, since `Op::Join` alone doesn't have one true
-/// arity (2 vs 3 is just which palette entry it came from).
-/// `commands.rs`'s `apply_value_kind` is the only consumer.
+/// Per-palette-entry metadata for default construction when a block is
+/// dropped from the sidebar. Arity lives on the kind string, not `Op`, since
+/// `Op::Join` alone covers both the 2- and 3-arg palette entries.
 pub struct OperatorKindSpec {
     pub kind: &'static str,
     pub op: Op,
     pub arity: usize,
-    /// Builds the full default `args` vec (one entry per arg, in order) —
-    /// a function rather than a fixed `Vec` since `Value` isn't `Const`.
-    /// Per-index rather than a single repeated default so mixed-type
-    /// operators (e.g. `LetterOf`'s number-then-text pair) can give each
-    /// slot its own default.
+    /// Builds the default `args` vec — a function (not a fixed `Vec`, since
+    /// `Value` isn't `Const`) so mixed-type operators like `LetterOf` can
+    /// give each slot its own default.
     pub default_args: fn() -> Vec<Value>,
 }
 
@@ -181,9 +150,7 @@ pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
 ];
 
 /// 1-based char index of the first occurrence of `needle` in `haystack`, or
-/// `0` if `needle` is empty, longer than `haystack`, or not found. Scans by
-/// `char`, not byte, so it agrees with `Op::LetterOf`'s indexing on
-/// multi-byte text.
+/// `0` if not found/empty/too long. Scans by char, not byte, for multi-byte text.
 fn char_index_of(haystack: &str, needle: &str) -> usize {
     let h: Vec<char> = haystack.chars().collect();
     let n: Vec<char> = needle.chars().collect();
@@ -212,19 +179,15 @@ impl Value {
         match self {
             Value::Number { value } => Ok(Evaluated::Number(*value)),
             Value::Text { value } => Ok(Evaluated::Text(value.clone())),
-            // Every real call site resolves vars via `resolve_vars` first —
-            // this only fires if that step was skipped, so it reads as a
-            // bug rather than something a user's macro can trigger.
+            // Every real call site resolves vars via `resolve_vars` first; this
+            // only fires if that step was skipped (a bug, not something a
+            // macro can trigger).
             Value::Var { .. } => Err("unresolved variable reference".to_string()),
-            // Same invariant as `Var` above, just for the two node kinds
-            // only `macros::runner::resolve_calls_and_params` can resolve
-            // (it needs to actually run instructions to resolve a `Call`,
-            // which this module deliberately has no access to) — this is
-            // also what keeps `preview_value`/`apply_value_kind`'s
-            // best-effort collapse automatically safe: they only ever call
-            // `resolve_vars(...).eval()`, never the runner's resolution
-            // pass, so a value containing a block call just surfaces as an
-            // ordinary eval error there instead of running anything.
+            // Same invariant as `Var` — only the runner can resolve these
+            // (resolving `Call` requires actually executing instructions,
+            // which this module can't do). That also keeps preview's
+            // best-effort `resolve_vars().eval()` safe: a block call just
+            // errors instead of running anything.
             Value::Param { .. } => Err("unresolved parameter reference".to_string()),
             Value::Call { .. } => Err("custom block calls can't be evaluated directly".to_string()),
             Value::Op { op: Op::Join, args, .. } => {
@@ -303,11 +266,9 @@ impl Value {
         self.eval()?.as_number()
     }
 
-    /// Evaluates the tree down to a string — the entry point the `Text`
-    /// instruction token calls. A `Text` leaf or a text-producing `Op`
-    /// (`Join`, `NewLine`, `Tab`, `LetterOf`, `Case`) result passes through
-    /// verbatim; a `Number` leaf or another `Op` result (always numeric,
-    /// even for `Op::Random`) gets stringified.
+    /// Evaluates the tree to a string — the entry point the `Text`
+    /// instruction calls. Text results pass through verbatim; numeric
+    /// results get stringified.
     pub fn eval_text(&self) -> Result<String, String> {
         Ok(match self.eval()? {
             Evaluated::Text(s) => s,
@@ -327,11 +288,8 @@ impl Value {
         }
     }
 
-    /// Renames every [`Value::Var`] leaf reading `old` (anywhere in this
-    /// tree, including `saved`) to `new` — used by `Macro::rename_variable`
-    /// so an in-progress macro's existing reporter/setter/getter blocks keep
-    /// working after a variable is renamed, rather than being silently
-    /// orphaned.
+    /// Renames every `Value::Var` leaf reading `old` (including in `saved`)
+    /// to `new`, so existing blocks keep working after a variable rename.
     pub fn rename_var(&mut self, old: &str, new: &str) {
         match self {
             Value::Var { name } => {
@@ -349,10 +307,8 @@ impl Value {
         }
     }
 
-    /// Renames every [`Value::Param`] leaf reading `old` (anywhere in this
-    /// tree, including `saved`) to `new` — counterpart to `rename_var`, used
-    /// by `macros::Macro::rename_block_input` so a custom block's own body
-    /// keeps working after one of its inputs is renamed.
+    /// Renames every `Value::Param` leaf reading `old` to `new` (including in
+    /// `saved`) — counterpart to `rename_var`, for when a block input is renamed.
     pub fn rename_param(&mut self, old: &str, new: &str) {
         match self {
             Value::Param { name } => {
@@ -370,11 +326,9 @@ impl Value {
         }
     }
 
-    /// Applies `f` to the `args` of every [`Value::Call`] node (anywhere in
-    /// this tree, including nested inside another call's own `args`) that
-    /// references `block_id` — used by `macros::Macro::insert_block_input`/
-    /// `remove_block_input` to keep every call site's argument list
-    /// positionally aligned with the block's current `pieces`.
+    /// Applies `f` to the `args` of every `Value::Call` node referencing
+    /// `block_id` (including nested calls) — keeps call sites' argument
+    /// lists aligned with the block's current pieces.
     pub fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
         match self {
             Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
@@ -396,10 +350,9 @@ impl Value {
         }
     }
 
-    /// Replaces every [`Value::Call`] node (anywhere in this tree)
-    /// referencing `block_id` with a plain `0` leaf — used by
-    /// `macros::Macro::remove_block` so deleting a custom block scrubs every
-    /// value-position reference instead of leaving a dangling one.
+    /// Replaces every `Value::Call` node referencing `block_id` with a plain
+    /// `0` leaf, so deleting a block scrubs references instead of leaving
+    /// dangling ones.
     pub fn scrub_block_calls(&mut self, block_id: &str) {
         match self {
             Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
@@ -422,12 +375,9 @@ impl Value {
         }
     }
 
-    /// Rebuilds this tree with every [`Value::Var`] leaf replaced by a
-    /// `Number`/`Text` leaf holding its current value from `env` (or `0` if
-    /// the name isn't in `env` — shouldn't happen in practice, but a stray
-    /// reference must still evaluate to something rather than erroring the
-    /// whole tree). Must be called before `eval`/`eval_number`/`eval_text`
-    /// on any tree that might contain a variable read.
+    /// Rebuilds this tree with every `Value::Var` leaf replaced by its
+    /// current value from `env` (defaulting to `0` if missing, so a stray
+    /// reference doesn't error the whole tree). Must run before `eval`.
     pub fn resolve_vars(&self, env: &HashMap<String, Evaluated>) -> Value {
         match self {
             Value::Number { value } => Value::Number { value: *value },
@@ -442,13 +392,9 @@ impl Value {
                 Some(Evaluated::Text(s)) => Value::Text { value: s.clone() },
                 None => Value::number(0.0),
             },
-            // Left untouched here — `Param` is resolved against the current
-            // invocation's parameter scope, and `Call` needs to actually run
-            // the callee's body; both require execution capability this
-            // module deliberately doesn't have. Only their nested `args`
-            // (which may themselves contain `Var` reads) are recursed into.
-            // See `macros::runner::resolve_calls_and_params`, which always
-            // runs on the output of this method.
+            // Left untouched — `Param`/`Call` need execution capability this
+            // module doesn't have; only their nested `args` (which may
+            // contain `Var` reads) get recursed into.
             Value::Param { name } => Value::Param { name: name.clone() },
             Value::Call { block_id, args, saved } => Value::Call {
                 block_id: block_id.clone(),
@@ -496,11 +442,10 @@ impl std::hash::Hash for Value {
     }
 }
 
-/// Accepts either the tagged `{"kind": "...", ...}` shape or a bare number —
-/// old save files have plain numbers in the slots `Value` now occupies
-/// (e.g. `"MoveMouse":[5,10,"Rel"]`), so this keeps them loading without a
-/// wrapper enum at every embedding site, mirroring the `WaitDe`/
-/// `InstructionDe` untagged-enum pattern in `macros/mod.rs`.
+/// Accepts either the tagged `{"kind": ...}` shape or a bare number/string —
+/// old save files have plain values in slots `Value` now occupies, so this
+/// keeps them loading. Mirrors the `WaitDe`/`InstructionDe` untagged-enum
+/// pattern in `macros/mod.rs`.
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -531,9 +476,8 @@ impl<'de> Deserialize<'de> for Value {
                 #[serde(default = "default_saved")]
                 saved: Box<Value>,
             },
-            // Legacy tags predating the `BinaryOp`/`Join` → `Op` unification
-            // — kept only so old save files keep loading; migrated into
-            // `Value::Op` below, never produced by `Serialize`.
+            // Legacy tags predating the `BinaryOp`/`Join` → `Op` unification —
+            // kept so old saves still load, migrated into `Value::Op` below.
             BinaryOp {
                 op: Op,
                 lhs: Box<Value>,
@@ -552,9 +496,8 @@ impl<'de> Deserialize<'de> for Value {
         #[serde(untagged)]
         enum ValueDe {
             Legacy(f64),
-            // Pre-`Value` shape of `InputToken::Text`: a bare JSON string,
-            // from back when the `Text` instruction just held a `String`
-            // rather than a full expression tree.
+            // Pre-`Value` shape of `InputToken::Text` — a bare JSON string,
+            // from when it held a plain `String` rather than a tree.
             LegacyText(String),
             Current(Tagged),
         }

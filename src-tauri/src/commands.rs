@@ -62,10 +62,8 @@ fn refresh_macro_list(s: &mut crate::state::AppState) {
     s.macros_list = macros;
 }
 
-/// Resyncs the live variable store (`AppState::variable_values`) to whatever
-/// `s.current_macro` currently declares — called right after `current_macro`
-/// is (re)assigned (select/new/import), so the store never carries stale
-/// entries from a previously-loaded macro.
+/// Resyncs the live variable store to `current_macro`'s declared variables —
+/// called after `current_macro` is (re)assigned, so stale entries don't linger.
 fn sync_variable_values(s: &mut crate::state::AppState) {
     let values = match &s.current_macro {
         Some(mac) => mac.variables.iter().map(|v| (v.name.clone(), v.value.clone())).collect(),
@@ -210,8 +208,7 @@ pub(crate) fn set_macro_speed_multiplier<R: Runtime>(state: State<SharedState>, 
 }
 
 /// Validates and pushes a new `VariableDef` onto `mac`, returning the
-/// trimmed name on success — factored out of `create_variable` so the
-/// name/duplicate rules are testable without a real `tauri::State`.
+/// trimmed name on success.
 fn create_variable_in(mac: &mut Macro, name: &str) -> Result<String, String> {
     let trimmed = name.trim().to_string();
     if trimmed.is_empty() {
@@ -224,10 +221,8 @@ fn create_variable_in(mac: &mut Macro, name: &str) -> Result<String, String> {
     Ok(trimmed)
 }
 
-/// Declares a new macro-wide variable, starting at `0`. Rejected if the
-/// (trimmed) name is empty or already used — no `push_undo`, same precedent
-/// as `set_title` (a naming/creation action, not an undoable structural
-/// edit).
+/// Declares a new macro-wide variable, starting at `0`. No `push_undo` —
+/// a naming/creation action, not an undoable structural edit.
 #[tauri::command]
 pub(crate) fn create_variable<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, name: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -241,9 +236,8 @@ pub(crate) fn create_variable<R: Runtime>(state: State<SharedState>, app: tauri:
     Ok(())
 }
 
-/// Validates the new name and renames `old_name` to it on `mac` (including
-/// every existing reference — see `Macro::rename_variable`), returning the
-/// trimmed name on success. Renaming to the same (trimmed) name is a no-op
+/// Validates the new name and renames `old_name` to it on `mac`, including
+/// every existing reference. Renaming to its own current name is a no-op
 /// success, not a duplicate error.
 fn rename_variable_in(mac: &mut Macro, old_name: &str, new_name: &str) -> Result<String, String> {
     let trimmed = new_name.trim().to_string();
@@ -257,9 +251,8 @@ fn rename_variable_in(mac: &mut Macro, old_name: &str, new_name: &str) -> Result
     Ok(trimmed)
 }
 
-/// Renames a declared variable and every existing reference to it (see
-/// `Macro::rename_variable`). No `push_undo` — same precedent as
-/// `create_variable`.
+/// Renames a declared variable and every reference to it. No `push_undo`,
+/// same as `create_variable`.
 #[tauri::command]
 pub(crate) fn rename_variable<R: Runtime>(
     state: State<SharedState>,
@@ -282,12 +275,8 @@ pub(crate) fn rename_variable<R: Runtime>(
     Ok(())
 }
 
-/// Removes `name` from `mac.variables` — factored out of `delete_variable`
-/// so it's testable without a real `tauri::State`. Existing `Value::Var`
-/// reads and `SetVariable`/`ChangeVariable` blocks targeting it are left in
-/// place rather than scrubbed — they just harmlessly read/write a name no
-/// longer backed by a declaration (`resolve_vars` defaults an unknown name
-/// to `0`, same as it always has for a stray reference).
+/// Removes `name` from `mac.variables`. Existing references to it are left
+/// in place — `resolve_vars` defaults an unknown name to `0`.
 fn delete_variable_in(mac: &mut Macro, name: &str) {
     mac.variables.retain(|v| v.name != name);
 }
@@ -309,12 +298,9 @@ pub(crate) fn delete_variable<R: Runtime>(state: State<SharedState>, app: tauri:
 
 // ─── Custom blocks ("My Blocks") ────────────────────────────────────────────
 
-/// Validates a candidate `pieces` list: the labels, flattened and trimmed,
-/// must be non-empty (mirrors `create_variable_in`'s non-empty-name rule —
-/// this is effectively the block's "name"), and every input needs a
-/// non-empty, unique (within this block) trimmed name. Factored out of
-/// `create_block`/`edit_block` so the rule is testable without a real
-/// `tauri::State`.
+/// Validates a candidate `pieces` list: the flattened, trimmed labels (the
+/// block's effective name) must be non-empty, and every input needs a
+/// non-empty, unique trimmed name.
 fn validate_block_pieces(pieces: &[BlockPiece]) -> Result<(), String> {
     let flat_label: String = pieces
         .iter()
@@ -343,9 +329,8 @@ fn validate_block_pieces(pieces: &[BlockPiece]) -> Result<(), String> {
 }
 
 /// Defines a new custom block, creating its (initially empty) header strand
-/// next to the macro's other strands (same spawn-position rule as
-/// `add_strand`). Pushes undo — unlike `create_variable`, this has real
-/// canvas footprint (a new strand) the user must be able to undo placing.
+/// next to the macro's other strands. Pushes undo, since it has real canvas
+/// footprint.
 #[tauri::command]
 pub(crate) fn create_block<R: Runtime>(
     state: State<SharedState>,
@@ -365,13 +350,9 @@ pub(crate) fn create_block<R: Runtime>(
     Ok(id)
 }
 
-/// Updates an existing block's prototype and return-type, reconciling every
-/// existing call site's `args` to the new input list (see
-/// `Macro::reconcile_block_call_args`) and renaming any `Value::Param` leaf
-/// in the block's own body whose input kept its identity but changed name
-/// (see `Macro::rename_block_input_body`) — both computed by diffing the
-/// def's *current* pieces against the caller's new list before it's written.
-/// Pushes undo, same reasoning as `create_block`.
+/// Updates a block's prototype/return-type, reconciling every call site's
+/// `args` to the new input list and renaming body params that kept their
+/// identity but changed name. Pushes undo.
 #[tauri::command]
 pub(crate) fn edit_block<R: Runtime>(
     state: State<SharedState>,
@@ -536,14 +517,8 @@ pub(crate) fn add_instruction<R: Runtime>(
     Ok(())
 }
 
-/// Enforces the one rule governing header blocks ("When Ran"/`BlockHeader`):
-/// nothing may ever end up attached underneath one. That means inserting at
-/// index 0 of a strand that already starts with a header is forbidden (it
-/// would push the existing one down to index 1), and inserting a header
-/// anywhere but index 0 is forbidden (it would itself land underneath
-/// whatever's above it) — `BlockHeader` specifically can never be inserted
-/// by this path at all (it's only ever created by `create_block`, never
-/// dragged from a prefab), but the general rule still covers it correctly.
+/// A header block ("When Ran"/`BlockHeader`) must always be first in its
+/// strand — nothing may attach above or in front of one.
 fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -> Result<(), String> {
     if index == 0 && strand.starts_with_when_ran() {
         return Err("Can't attach a block above a When Ran/Block Definition block".to_string());
@@ -554,14 +529,9 @@ fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -
     Ok(())
 }
 
-/// A `Return` block only makes sense inside a `returns_value: true` custom
-/// block's own body — anywhere else, there's nothing for it to hand its
-/// value back to (a `WhenRan` strand's "caller" is just the OS/hotkey that
-/// triggered it; a `returns_value: false` block's callers only ever discard
-/// what `run_block` returns). Not a hard runtime requirement — the
-/// interpreter tolerates a stray `Return` gracefully (see `run_block`) — but
-/// enforced here so it can't be dropped somewhere confusing in the first
-/// place.
+/// A `Return` block only makes sense inside a value-returning custom
+/// block's body — enforced here so it can't be placed somewhere confusing
+/// (the interpreter otherwise tolerates a stray one harmlessly).
 fn check_return_placement(mac: &Macro, strand: &Strand, ins: &Instruction) -> Result<(), String> {
     if !matches!(ins, Instruction::Return(_)) {
         return Ok(());
@@ -585,10 +555,8 @@ pub(crate) fn edit_instruction<R: Runtime>(
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
-    // `Command`/`Comment` are freeform text, edited keystroke-by-keystroke —
-    // coalesce those into one undo group like `edit_value_field` does. Every
-    // other instruction kind here is a discrete dropdown pick, so it always
-    // gets its own undo step.
+    // Freeform text fields coalesce keystrokes into one undo group, like
+    // `edit_value_field`; every other kind gets its own undo step.
     let session = matches!(ins, Instruction::Command(_) | Instruction::Comment(_))
         .then(|| TextEditSession::Instruction { strand_id: strand_id.clone(), index });
     if s.text_edit_session != session || session.is_none() {
@@ -607,9 +575,7 @@ pub(crate) fn edit_instruction<R: Runtime>(
     Ok(())
 }
 
-/// Locates the `Value` tree a `FieldId` names on a given instruction — the
-/// root that a `ValueLocation::Field`'s `path` then walks into via
-/// [`Value::get_mut`].
+/// Locates the `Value` tree a `FieldId` names on a given instruction.
 fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
     match (ins, field) {
         (Instruction::Wait(d), FieldId::WaitDuration) => Some(d),
@@ -625,10 +591,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
     }
 }
 
-/// Resolves a `ValueLocation` (a field slot inside an instruction, or a
-/// value block parked on canvas) down to the specific `Value` node it
-/// addresses — the one function every value-editing command in this file
-/// routes through.
+/// Resolves a `ValueLocation` (a field slot, or a floating value block) to
+/// the specific `Value` node it addresses.
 fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Option<&'a mut Value> {
     match location {
         ValueLocation::Field { strand_id, index, field_id, path } => {
@@ -640,35 +604,28 @@ fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Opt
     }
 }
 
-/// `MoveMouseX/Y` and `ScrollAmount` were always `i32` fields; a `Number`
-/// leaf under one of them keeps that integer-only constraint even now that
-/// it's nested inside a `Value` tree. `WaitDuration`, and every floating
-/// value block (not tied to any specific instruction field), allow decimals.
+/// `MoveMouseX/Y` and `ScrollAmount` are integer-only fields; everything
+/// else (including floating value blocks) allows decimals.
 fn location_requires_integer(location: &ValueLocation) -> bool {
     matches!(location, ValueLocation::Field { field_id, .. }
         if matches!(field_id, FieldId::MoveMouseX | FieldId::MoveMouseY | FieldId::ScrollAmount))
 }
 
-/// Drops any buffered invalid-text entries in the same tree as `location`
-/// whose path is `location`'s path itself or a descendant of it — used
-/// after a subtree gets replaced wholesale (kind change, take/put), since
-/// any buffered text for a leaf that no longer exists there would otherwise
-/// linger and be shown against the wrong node.
+/// Drops buffered invalid-text entries at or beneath `location` — used
+/// after a subtree is replaced wholesale, so stale text doesn't linger
+/// against the wrong node.
 fn prune_value_buffers(buffers: &mut HashMap<ValueLocation, String>, location: &ValueLocation) {
     let path = location.path();
     buffers.retain(|loc, _| !(loc.same_root(location) && loc.path().starts_with(path)));
 }
 
-/// Applies `kind`'s default construction to `node`, in place — used by
-/// `set_value_kind` for dropping a fresh block from the sidebar onto an
-/// occupied slot (best-effort keeps the old leaf rather than discarding it,
-/// see the match arms below).
+/// Applies `kind`'s default construction to `node` in place — used when
+/// dropping a fresh block onto an occupied slot. Best-effort keeps the old
+/// value rather than discarding it.
 fn apply_value_kind(node: &mut Value, kind: &str, env: &HashMap<String, Evaluated>) -> Result<(), String> {
     match kind {
         "Number" => {
-            // Best-effort: collapsing `(2)+(3)` gives `5` instead of
-            // discarding the user's work; a `Var` reporter best-effort
-            // carries over its current value the same way.
+            // Best-effort: collapses `(2)+(3)` to `5` instead of discarding it.
             let n = node.resolve_vars(env).eval().and_then(|e| e.as_number()).unwrap_or(0.0);
             *node = Value::number(n);
         }
@@ -681,23 +638,16 @@ fn apply_value_kind(node: &mut Value, kind: &str, env: &HashMap<String, Evaluate
             *node = Value::Text { value: text };
         }
         _ if kind.starts_with("Var:") => {
-            // A variable reporter is a plain leaf, like `Number`/`Text` —
-            // no arity, no `saved` slot to tuck the old content into (it
-            // restores to a plain `0` on take-out, same as any other leaf).
+            // A variable reporter is a plain leaf — restores to `0` on take-out.
             let name = kind["Var:".len()..].to_string();
             *node = Value::Var { name };
         }
         _ => {
-            // Any other kind is an operator — looked up in the shared
-            // registry (`value.rs`'s `OPERATOR_KINDS`) rather than matched
-            // by hand here, so a new operator never needs a new arm in this
-            // function. Already an operator: just swap it, resizing `args`
-            // to the new arity (padding with fresh default args) and
-            // keeping whatever it's shadowing — flip `+` to `×`, or grow
-            // `Join` to `Join3`, without losing work. Otherwise the operator
-            // takes over the slot fresh — the old value is tucked away as
-            // `saved` rather than promoted into `args`, so it comes back
-            // untouched if this operator is ever dragged back out.
+            // Any other kind is an operator, looked up in `OPERATOR_KINDS`.
+            // Swapping between operators resizes `args` to the new arity,
+            // keeping whatever it shadowed; otherwise the old value is
+            // tucked away as `saved` so it comes back untouched if dragged
+            // back out.
             let spec = OPERATOR_KINDS.iter().find(|s| s.kind == kind).ok_or_else(|| format!("Unknown value kind: {kind}"))?;
             let existing = std::mem::replace(node, Value::number(0.0));
             *node = match existing {
@@ -726,9 +676,7 @@ pub(crate) fn edit_value_field<R: Runtime>(
 ) -> Result<(), String> {
     let loc = location.to_location()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    // Coalesce a run of keystrokes into this field into a single undo step —
-    // only the first keystroke of a session (or the first after some other
-    // edit interrupts it, per `push_undo`) opens a new one.
+    // Coalesce a run of keystrokes into this field into a single undo step.
     let session = Some(TextEditSession::Value(loc.clone()));
     if s.text_edit_session != session {
         push_undo(&mut s);
@@ -737,8 +685,7 @@ pub(crate) fn edit_value_field<R: Runtime>(
     if let Some(mac) = &mut s.current_macro {
         if let Some(node) = resolve_location_mut(mac, &loc) {
             if matches!(node, Value::Text { .. }) {
-                // Text leaves are always valid — no invalid-buffer
-                // bookkeeping, unlike the numeric case below.
+                // Text leaves are always valid — no invalid-buffer bookkeeping needed.
                 *node = Value::Text { value: text };
                 auto_save(&s);
             } else {
@@ -784,14 +731,10 @@ pub(crate) fn set_value_kind<R: Runtime>(
     result
 }
 
-/// Removes the value at `location` and returns it — a `Field` location is
-/// left holding whatever the taken node was shadowing (its `saved`, for an
-/// operator) or `Value::number(0.0)` (for a leaf, which has nothing to
-/// restore); a `Floating` location at its own root (`path == []`) is
-/// deleted entirely; a `Floating` location at a nested path behaves like
-/// `Field`. The first half of "drag an existing block somewhere else" —
-/// the frontend follows up with `put_value`/`create_floating_value` (or
-/// nothing, if the drop turned out to be a no-op).
+/// Removes the value at `location` and returns it, leaving a `Field`
+/// location holding whatever it was shadowing (or `0` for a plain leaf); a
+/// root `Floating` location is deleted entirely. Pairs with `put_value`/
+/// `create_floating_value` on the frontend side of a drag.
 #[tauri::command]
 pub(crate) fn take_value<R: Runtime>(
     state: State<SharedState>,
@@ -826,10 +769,8 @@ pub(crate) fn take_value<R: Runtime>(
 }
 
 /// Overwrites the node at `location` with `value` — the "put" half of
-/// moving an existing block into a field/subfield slot. If the incoming
-/// value is an operator, whatever it's shadowing gets overwritten with the
-/// destination's prior content — restoring an operator always hands back
-/// what was in the slot it currently occupies, not wherever it started out.
+/// moving a block into a field/subfield slot. An incoming operator's
+/// shadowed value is overwritten with the destination's prior content.
 #[tauri::command]
 pub(crate) fn put_value<R: Runtime>(
     state: State<SharedState>,
@@ -856,12 +797,8 @@ pub(crate) fn put_value<R: Runtime>(
 }
 
 /// One-shot sample evaluation of a value tree, for the click-to-preview
-/// tooltip on operator blocks (`ValueBlock.vue`'s pointerup handling in
-/// `valueDrag.ts`) — stateless, doesn't touch `AppState` or emit any update.
-/// Uses `eval_text` (not `eval_number`) so a `Join`/`NewLine`/`Tab` preview
-/// reads as text rather than erroring as "not a number"; a numeric result
-/// still comes back stringified. `Op::Random` samples fresh every call, same
-/// as it would during an actual macro run.
+/// tooltip on operator blocks — stateless. Uses `eval_text` so text-only
+/// ops (`Join`/`NewLine`/`Tab`) preview without erroring as "not a number".
 #[tauri::command]
 pub(crate) fn preview_value(state: State<SharedState>, value: ValueDto) -> Result<String, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -875,9 +812,8 @@ fn preview_value_with_env(value: &ValueDto, env: &HashMap<String, Evaluated>) ->
     dto_to_value(value).resolve_vars(env).eval_text()
 }
 
-/// Creates a new value block parked on open canvas — used both for a fresh
-/// block dropped from the sidebar and as the "create" half of taking an
-/// existing block out of a field and dropping it on canvas.
+/// Creates a new value block parked on open canvas — for a sidebar drop, or
+/// the "create" half of dragging an existing block out onto canvas.
 #[tauri::command]
 pub(crate) fn create_floating_value<R: Runtime>(
     state: State<SharedState>,
@@ -896,9 +832,8 @@ pub(crate) fn create_floating_value<R: Runtime>(
     Ok(id)
 }
 
-/// Repositions a floating value block — used when it's dropped on open
-/// canvas without landing on any field/subfield slot. No `push_undo`: pure
-/// repositioning, same as `move_strand`.
+/// Repositions a floating value block dropped on open canvas. No
+/// `push_undo` — pure repositioning, same as `move_strand`.
 #[tauri::command]
 pub(crate) fn move_floating_value<R: Runtime>(
     state: State<SharedState>,
@@ -957,11 +892,9 @@ pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tau
     Ok(())
 }
 
-/// Deletes the instruction at `index` in `strand_id`, keeping everything
-/// above it in place; anything that was below it is split off into a brand
-/// new strand at `(x, y)` (same idea as `split_strand`, but atomic with the
-/// removal so it's one undo step). Returns the new strand's id, or `None` if
-/// there was nothing below the deleted block to split off.
+/// Deletes the instruction at `index`, splitting anything below it off into
+/// a new strand at `(x, y)` — atomic with the removal, so it's one undo
+/// step. Returns the new strand's id, or `None` if nothing was split off.
 #[tauri::command]
 pub(crate) fn delete_instruction<R: Runtime>(
     state: State<SharedState>,
@@ -992,8 +925,8 @@ pub(crate) fn delete_instruction<R: Runtime>(
     } else {
         None
     };
-    // A strand left with no blocks is just dead weight on the canvas — drop
-    // it instead of leaving an empty card behind.
+    // A strand left with no blocks is dead weight — drop it instead of
+    // leaving an empty card behind.
     if now_empty {
         mac.strands.retain(|s| s.id != strand_id);
     }
@@ -1068,9 +1001,8 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
     } else {
         push_undo(&mut s);
         if let Some(mac) = &mut s.current_macro {
-            // Clearing wipes every strand, including any "When Ran" blocks —
-            // matching "start this macro over from scratch". Emptied strands
-            // aren't kept around as empty cards; the canvas ends up blank.
+            // Clearing wipes every strand, including "When Ran" blocks —
+            // "start this macro over from scratch".
             mac.strands.clear();
             s.invalid_field_buffers.clear();
             auto_save(&s);
@@ -1100,10 +1032,8 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
             mac.ensure_id();
         }
         s.invalid_field_buffers.clear();
-        // The snapshot just popped was the one a resumed edit would've
-        // coalesced into — without this, the next keystroke into the same
-        // field would see a "continuing" session and skip pushing a new
-        // undo step, making the just-undone state itself un-undo-able.
+        // Without this, the next keystroke into the same field would see a
+        // "continuing" session and skip pushing a new undo step.
         s.text_edit_session = None;
         auto_save(&s);
     }
@@ -1149,11 +1079,8 @@ pub(crate) fn redo<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<
 // ─── Strands (canvas) ──────────────────────────────────────────────────────
 
 /// Creates a new detached strand. `x`/`y` default to an auto-picked spot
-/// next to the farthest-right strand (used by the plain "add strand"
-/// button); an explicit position is passed when this is the result of
-/// dropping a palette block onto empty canvas. An initial `instruction` can
-/// be supplied so a palette-block drop is one atomic, one-undo-step call
-/// instead of create-then-move-then-add.
+/// next to the farthest-right strand; an explicit position and initial
+/// `instruction` are passed for a palette-block drop, as one atomic call.
 #[tauri::command]
 pub(crate) fn add_strand<R: Runtime>(
     state: State<SharedState>,
@@ -1211,11 +1138,9 @@ pub(crate) fn move_strand<R: Runtime>(state: State<SharedState>, app: tauri::App
     Ok(())
 }
 
-/// Detaches the instructions at and after `index` in `strand_id` into a new
-/// strand positioned at `(x, y)`, returning the new strand's id. This is how
-/// the frontend "picks up" a block: grabbing a block always splits it (and
-/// everything stacked below it) off first, then either drops it as a new
-/// stray strand or re-merges it elsewhere via `merge_strand`.
+/// Detaches the instructions at and after `index` into a new strand at
+/// `(x, y)`, returning its id. This is how the frontend "picks up" a
+/// block: split first, then drop as a stray strand or re-merge elsewhere.
 #[tauri::command]
 pub(crate) fn split_strand<R: Runtime>(
     state: State<SharedState>,
@@ -1242,11 +1167,8 @@ pub(crate) fn split_strand<R: Runtime>(
 }
 
 /// Splices `dragged_id`'s instructions into `target_id` at `index` and
-/// deletes the (now empty) dragged strand — this is how two stacks snap
-/// together on the canvas. A strand headed by a "When Ran" block can only
-/// ever be a merge target (and only past its own head), never the dragged
-/// side — merging it into another strand would attach it underneath
-/// something, which is never allowed.
+/// deletes the (now empty) dragged strand — how two stacks snap together.
+/// A "When Ran" strand can only be a merge target, never the dragged side.
 #[tauri::command]
 pub(crate) fn merge_strand<R: Runtime>(
     state: State<SharedState>,
@@ -1290,9 +1212,8 @@ pub(crate) fn merge_strand<R: Runtime>(
     Ok(())
 }
 
-/// Creates a new detached strand at `(x, y)` holding `instructions` verbatim —
-/// how the "Paste" right-click action drops previously-copied blocks onto the
-/// canvas. Like `add_strand` but for a whole list of instructions at once.
+/// Creates a new detached strand at `(x, y)` holding `instructions`
+/// verbatim — how "Paste" drops previously-copied blocks onto the canvas.
 #[tauri::command]
 pub(crate) fn paste_instructions<R: Runtime>(
     state: State<SharedState>,
@@ -1316,11 +1237,9 @@ pub(crate) fn paste_instructions<R: Runtime>(
     Ok(new_id)
 }
 
-/// Sets the strand that freshly-recorded input is appended to — the "Set
-/// Recording Target" right-click action. Not part of the undo/redo stacks
-/// (those only snapshot `strands`), so this survives undo/redo untouched, and
-/// silently does nothing if `strand_id` doesn't exist (e.g. a stale menu
-/// click after a concurrent delete).
+/// Sets the strand that freshly-recorded input is appended to. Not part of
+/// the undo/redo stacks, so it survives undo/redo untouched; no-ops if
+/// `strand_id` doesn't exist.
 #[tauri::command]
 pub(crate) fn set_recording_target<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -1389,9 +1308,8 @@ pub(crate) fn key_capture_event<R: Runtime>(
     Ok(())
 }
 
-/// Consumes `pending_standalone_key` — called by the frontend once it has
-/// copied the captured key into its local (strand-less) instruction, so a
-/// stale value can't leak into the next standalone capture.
+/// Consumes `pending_standalone_key` once the frontend has copied it, so a
+/// stale value can't leak into the next capture.
 #[tauri::command]
 pub(crate) fn clear_standalone_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -1879,10 +1797,8 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                 drop(s);
                 if let Some(mac) = mac {
                     let speed_multiplier = mac.speed_multiplier * global_speed_multiplier;
-                    // A fresh store seeded from this macro's own persisted
-                    // values — not `AppState::variable_values`, which tracks
-                    // whichever macro is currently *selected* and may not be
-                    // the one a `RunSpecificMacro` hotkey is running.
+                    // Seeded from this macro's own persisted values, not
+                    // `AppState::variable_values` (tracks the *selected* macro).
                     let variables: VariableStore =
                         Arc::new(Mutex::new(mac.variables.iter().map(|v| (v.name.clone(), v.value.clone())).collect()));
                     run_macro_task(mac, emulator, is_looping, loop_mode, speed_multiplier, variables, shared_state, app.clone());
@@ -1890,9 +1806,8 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
             }
         }
         HotkeyAction::StopLoop => {
-            // Clears every in-flight run's stop flag, not just loop mode's:
-            // a single (non-looping) run has a stop flag of its own that
-            // `is_looping` alone doesn't reach.
+            // Clears every in-flight run's stop flag, not just loop mode's —
+            // a single run has its own stop flag that `is_looping` doesn't reach.
             let cleared = macros_core::macros::run_registry::stop_all();
             tracing::info!(cleared, "StopLoop hotkey handled");
             if let Ok(s) = state.lock() {
@@ -1958,10 +1873,8 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
             }
         }
         HotkeyAction::StopRecording => {
-            // Only meaningful while a recording is active, which is handled
-            // directly in recording::start_grab_thread's capture callback
-            // (so it can suppress the trigger key before it's captured as a
-            // macro step). Reached here only if pressed while idle — no-op.
+            // Handled directly in recording::start_grab_thread while active;
+            // reached here only if pressed while idle — no-op.
         }
         HotkeyAction::Undo => {
             let _ = perform_undo(state, app);
@@ -1990,14 +1903,12 @@ fn run_macro_task<R: Runtime>(
     if loop_mode {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
         let loop_flag = Arc::clone(&is_looping);
-        // `into_loop_task` already loops internally until `loop_flag` clears
-        // and persists the final variable values once it stops — no need to
-        // hand-roll the loop here too.
+        // `into_loop_task` already loops until `loop_flag` clears and
+        // persists final variable values — no need to hand-roll it here.
         let task = macros_thread::into_loop_task(mac, emulator, loop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
             // Registered before the run starts so "Stop Loop" can reach it
-            // even during the focus switch below; the task's own registration
-            // only starts once `task()` runs.
+            // even during the focus switch below.
             let playback_guard = macros_core::macros::run_registry::begin_run();
             #[cfg(windows)]
             macros_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
@@ -2535,10 +2446,7 @@ mod value_location_tests {
         assert_eq!(caller.instructions[0], Instruction::SetVariable("x".to_string(), Value::number(0.0)));
     }
 
-    /// A value tree with an unresolved `Call` node must degrade gracefully
-    /// (an ordinary `Err`, same as any other eval failure) through both
-    /// headless/UI-thread paths that never get to run real instructions —
-    /// never panic, never silently execute anything.
+    /// An unresolved `Call` node must degrade to an ordinary `Err`, never panic.
     #[test]
     fn preview_value_with_env_errors_on_unresolved_call() {
         let dto = ValueDto::Call { block_id: "missing".into(), args: vec![], saved: Box::new(ValueDto::Number { value: 0.0 }) };

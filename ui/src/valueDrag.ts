@@ -1,17 +1,11 @@
-// Pointer-drag state machine for value blocks (Number/Text/Add/Sub/Mul/Div/Random),
-// deliberately separate from canvasDrag.ts's strand drag/snap machinery: a
-// value block can be dropped into a field/subfield slot or onto open canvas,
-// but must never attach to a strand's instruction list — keeping this in its
-// own module means that's structural (this file simply never imports
-// addInstruction/addStrand/mergeStrand/splitStrand), not just a runtime
-// check that could bit-rot.
+// Pointer-drag state machine for value blocks (Number/Text/Add/Sub/Mul/Div/Random).
+// Kept separate from canvasDrag.ts's strand drag/snap machinery so a value
+// block structurally can't attach to a strand's instruction list (this file
+// never imports addInstruction/addStrand/mergeStrand/splitStrand).
 //
-// Same imperative approach as canvasDrag.ts (real-time pointer tracking +
-// live DOM hit-testing), simplified where the strand system's extra
-// complexity doesn't apply here: existing blocks are always dragged as a
-// cloned ghost (never a real-DOM-node move), and take/put/create calls only
-// fire at drop time, not at pickup — there's no split-at-pickup equivalent
-// needed since nothing needs to preserve Vue component identity mid-drag.
+// Same imperative pointer-tracking/hit-testing approach as canvasDrag.ts, but
+// simpler: existing blocks always drag as a cloned ghost, and take/put/create
+// only fire at drop time, not pickup.
 import { ref } from 'vue';
 import { state } from './store';
 import { capturePointer, clientToCanvas, getCanvasZoom, isOverSidebar, setSidebarArmed } from './canvasDrag';
@@ -22,27 +16,17 @@ import { numberValue } from './types';
 import { locationsEqual } from './invalidField';
 import type { ValueDto, ValueKind, ValueLocationDto } from './types';
 
-/** The full `ValueDto` a fresh (never-yet-real) sidebar prefab currently
- * represents, dispatched by kind — `Call:<blockId>` (a "My Blocks" reporter,
- * dynamic arity per block) goes to blockDefs.ts; everything else (Number/
- * Text/operators/Var/Param, all fixed-shape per kind) goes to
- * paletteState.ts's registry-driven `paletteValueFor`. The one place that
- * needs to know both exist. */
+/** The `ValueDto` a fresh sidebar prefab represents, dispatched by kind —
+ * `Call:<blockId>` goes to blockDefs.ts, everything else to
+ * paletteState.ts's `paletteValueFor`. */
 function resolveFreshValue(kind: ValueKind): ValueDto {
   return kind.startsWith('Call:') ? paletteCallValueFor(kind.slice('Call:'.length)) : paletteValueFor(kind);
 }
 
-// Field/subfield locations whose current leaf (Number/Text) got there by
-// being dropped as its own block — from the sidebar's Number/Text prefab, or
-// an existing block dragged over — rather than just being the field's
-// unremarkable native content. ValueBlock.vue's `boxed` consults this so a
-// dropped-in leaf keeps its `.value-card-shape` capsule look (and stays
-// pickup-draggable) instead of flattening into a bare input like an
-// ordinary field. An `Op` block doesn't need an entry (already boxed by
-// kind), but dropping one over a previously-marked location still clears the mark
-// via markOrUnmark below, so a stale entry can't linger under new content.
-// Purely a frontend affordance — not persisted, so it won't survive a
-// reload or reflect an undo/redo that changes a slot's content underneath it.
+// Field/subfield locations whose current leaf (Number/Text) got there by being
+// dropped in (not just typed) — ValueBlock.vue's `boxed` consults this so a
+// dropped-in leaf keeps its capsule look and stays pickup-draggable. Frontend-
+// only affordance, not persisted; doesn't survive reload or undo/redo.
 export const capsuleLocations = ref<ValueLocationDto[]>([]);
 
 export function isCapsuleLocation(location: ValueLocationDto): boolean {
@@ -60,23 +44,17 @@ function unmarkCapsule(location: ValueLocationDto) {
   if (isCapsuleLocation(location)) capsuleLocations.value = capsuleLocations.value.filter(l => !locationsEqual(l, location));
 }
 
-// While an existing field/subfield value is mid-drag, the ValueBlock at its
-// origin location renders this instead of its real prop — the exact value
-// take_value would leave behind (an operator's `saved` operand, or a bare
-// zero for a leaf; see src-tauri/src/commands.rs's take_value) — so the slot
-// reads correctly the instant the block lifts off, rather than sitting blank
-// until the drop's async take/put round trip lands and Vue re-renders it for
-// real. Consulted by ValueBlock.vue via locationsEqual.
+// While a field/subfield value is mid-drag, its origin ValueBlock renders this
+// instead of its real prop — the value take_value would leave behind — so the
+// slot reads correctly immediately instead of sitting blank until the async
+// take/put round trip lands.
 export const dragReveal = ref<{ location: ValueLocationDto; value: ValueDto } | null>(null);
 
 const EVAL_PREVIEW_TIMEOUT_MS = 2500;
 
-// A pointerdown-then-pointerup on an operator block that never crossed the
-// drag threshold (see `onPointerUp` below) samples-evaluates that exact node
-// and shows the result here — ValueBlock.vue renders a small tooltip beside
-// whichever block's location matches. Auto-dismisses after a timeout, and
-// any new pickup clears a stale one immediately rather than leaving it to
-// linger under a different block.
+// A click (pointerdown+up without crossing the drag threshold) on an operator
+// block samples-evaluates it and shows the result here; ValueBlock.vue renders
+// a tooltip beside the matching location. Auto-dismisses after a timeout.
 export const evalPreview = ref<{ location: ValueLocationDto; text: string; error: boolean } | null>(null);
 let evalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -106,9 +84,8 @@ async function previewClickedOperator(location: ValueLocationDto, value: ValueDt
   }
 }
 
-// Same idea as `evalPreview` above, but for a sidebar palette prefab —
-// which has no `ValueLocationDto` (it isn't a real block anywhere yet), so
-// it's keyed by `kind` instead. PaletteValueBlock.vue renders the tooltip.
+// Same idea as `evalPreview`, but for a sidebar prefab — keyed by `kind`
+// since it has no `ValueLocationDto` yet. PaletteValueBlock.vue renders it.
 export const paletteEvalPreview = ref<{ kind: ValueKind; text: string; error: boolean } | null>(null);
 let paletteEvalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -129,9 +106,8 @@ function clearPaletteEvalPreview() {
   paletteEvalPreview.value = null;
 }
 
-// Number/Text prefabs are plain literals — previewing "5" as "5" isn't
-// useful, and matches ValueBlock.vue's own rule that a bare leaf (not boxed)
-// never previews on click, only an operator or variable reporter does.
+// Number/Text prefabs are plain literals — previewing "5" as "5" isn't useful,
+// so only operators/variables preview on click.
 function isPreviewableKind(kind: ValueKind): boolean {
   return kind !== 'Number' && kind !== 'Text';
 }
@@ -166,19 +142,15 @@ interface ValueDragState {
   source: ValueDragSource;
   dropTarget: { el: HTMLElement; location: ValueLocationDto } | null;
   overTrash: boolean;
-  // The real floating-card element being dragged, hidden for the drag's
-  // duration so it doesn't sit fully visible next to the ghost that's
-  // tracking the pointer — unlike an embedded field/subfield (which has
-  // dragReveal to show a placeholder in its place), a whole floating block
-  // has nothing left behind to show; the card itself is what's moving.
+  // The real floating-card element, hidden for the drag's duration so it
+  // doesn't sit visible next to the ghost tracking the pointer.
   hiddenAnchorEl: HTMLElement | null;
 }
 let valueDrag: ValueDragState | null = null;
 
-/** Picking up a block that already exists — embedded in a field/subfield,
- * or parked floating on canvas. `anchorEl` is that block's own rendered
- * root (`.value-card-shape`), cloned into the drag ghost once the pointer
- * actually moves past the click-vs-drag threshold. */
+/** Picking up a block that already exists (embedded in a field/subfield, or
+ * floating on canvas). `anchorEl` is cloned into the drag ghost once the
+ * pointer crosses the click-vs-drag threshold. */
 export function beginValuePickup(e: PointerEvent, location: ValueLocationDto, value: ValueDto, anchorEl: HTMLElement) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
@@ -190,8 +162,7 @@ export function beginValuePickup(e: PointerEvent, location: ValueLocationDto, va
 }
 
 /** Dragging a brand-new block off the sidebar's "Operator" section.
- * `anchorEl` is that kind's hidden ghost template (see InstructionSidebar's
- * existing `registerGhost` pattern for instruction rows — same idea). */
+ * `anchorEl` is that kind's hidden ghost template. */
 export function beginValuePaletteDrag(e: PointerEvent, valueKind: ValueKind, anchorEl: HTMLElement) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
@@ -225,14 +196,9 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
   ghost.appendChild(candidate.anchorEl.cloneNode(true) as HTMLElement);
   document.body.appendChild(ghost);
 
-  // A palette drag's anchorEl is the sidebar's hidden off-screen template
-  // (InstructionSidebar renders it at `left: -9999px; top: -9999px`), so its
-  // rect.left/top are that off-screen position, not anything cursor-relative
-  // — deriving the pointer offset from them (as the 'existing' case does)
-  // sent both the ghost and, since drop coordinates are computed by
-  // subtracting this same offset, the new block itself flying off toward
-  // -9999,-9999. Center the ghost under the pointer instead; only picking up
-  // a real, on-screen block has a meaningful click-relative offset to keep.
+  // A palette drag's anchorEl is the sidebar's hidden off-screen template, so
+  // its rect is off-screen, not cursor-relative — center the ghost under the
+  // pointer instead of deriving a click-relative offset from it.
   const isFresh = candidate.source.kind === 'fresh';
   const offsetX = isFresh ? rect.width / 2 : e.clientX - rect.left;
   const offsetY = isFresh ? rect.height / 2 : e.clientY - rect.top;
@@ -240,10 +206,8 @@ function startValueDrag(e: PointerEvent, candidate: ValueDragCandidate) {
   let hiddenAnchorEl: HTMLElement | null = null;
   if (candidate.source.kind === 'existing') {
     const { location, value } = candidate.source;
-    // A whole floating block (root, empty path) has no field left behind to
-    // reveal anything in — the card itself is what's moving/disappearing, so
-    // hide the real one (already cloned into the ghost above) instead of
-    // leaving it sitting fully visible at its old spot for the whole drag.
+    // A whole floating block has no field to reveal a placeholder in — hide
+    // the real card (already cloned into the ghost) instead.
     if (location.kind === 'Floating' && location.path.length === 0) {
       candidate.anchorEl.style.visibility = 'hidden';
       hiddenAnchorEl = candidate.anchorEl;
@@ -277,12 +241,8 @@ function isSelfOrDescendant(candidate: ValueLocationDto, root: ValueLocationDto)
   return candidate.path.length >= root.path.length && root.path.every((p, i) => candidate.path[i] === p);
 }
 
-/** Walks up from the topmost element under the pointer to the nearest
- * `[data-value-location]` block, skipping only the dragged block's own
- * subtree (can't drop a block into itself or one of its own operands). A
- * floating card's own root (path `[]`) is a valid target like any other —
- * dropping onto one swaps its content in place (see `swapValue` in
- * onPointerUp), ejecting whatever it held as its own new floating card. */
+/** Walks up to the nearest `[data-value-location]` block, skipping the
+ * dragged block's own subtree (can't drop into itself or its own operand). */
 function findDropTarget(clientX: number, clientY: number, exclude: ValueLocationDto | null): { el: HTMLElement; location: ValueLocationDto } | null {
   let el: Element | null = document.elementFromPoint(clientX, clientY);
   while (el) {
@@ -347,10 +307,8 @@ function onPointerUp(e: PointerEvent) {
   if (valueDragCandidate && valueDragCandidate.pointerId === e.pointerId) {
     const candidate = valueDragCandidate;
     valueDragCandidate = null;
-    // Never crossed the drag threshold — a plain click. A real pointerup
-    // (not a cancel) on an existing operator/variable block, or a
-    // sidebar operator/variable prefab, samples-evaluates it; a leaf or a
-    // cancelled gesture does nothing, same as today.
+    // Never crossed the drag threshold — a plain click. A real pointerup (not
+    // a cancel) on an operator/variable block or prefab samples-evaluates it.
     if (e.type === 'pointerup') {
       if (candidate.source.kind === 'existing' && (candidate.source.value.kind === 'Op' || candidate.source.value.kind === 'Var')) {
         void previewClickedOperator(candidate.source.location, candidate.source.value);
@@ -393,29 +351,16 @@ function onPointerUp(e: PointerEvent) {
           unmarkCapsule(finished.source.location);
         }
 
-        // A floating card's root is just a positioned container holding one
-        // value, not "a block someone placed there on purpose" the way an
-        // operator embedded in a field is — it's the slot itself, there's no
-        // separate outer thing to keep distinct from what's inside it. So
-        // dropping onto one always swaps its content in place via put_value
-        // (old content tucked away as the incoming operator's `saved`,
-        // exactly like any other unboxed slot) rather than ejecting the old
-        // value as a separate stray card next to it; the card keeps its
-        // id/x/y throughout.
+        // A floating card's root is just the slot itself (not "a block placed
+        // on purpose"), so dropping onto it always swaps content in place via
+        // put_value, keeping the card's id/x/y.
         const isFloatingRoot = targetLoc.kind === 'Floating' && targetLoc.path.length === 0;
 
-        // A boxed *field* target (an operator, or a leaf capsule dropped in
-        // earlier — see `boxed` in ValueBlock.vue) is a real block someone
-        // placed there on purpose, so replacing it shouldn't just quietly
-        // disappear it into the incoming operator's `saved` — take it out
-        // and eject it as its own floating card next to the field first, so
-        // it visibly reads as "moved aside" rather than deleted. An unboxed
-        // target is just ordinary field content (typed in, not dragged in),
-        // so it keeps the plain put_value-absorbs-the-old-value behavior.
-        // Read the class off the live element rather than the value tree —
-        // there's no frontend helper to resolve an arbitrary location to its
-        // current ValueDto, and the rendered class already reflects exactly
-        // the same `boxed` check we'd otherwise have to duplicate.
+        // A boxed field target (operator, or a dropped-in leaf capsule) was
+        // placed there on purpose, so replacing it ejects the old value as its
+        // own floating card instead of silently absorbing it. An unboxed
+        // (typed-in) target keeps plain put_value behavior. Read the class off
+        // the live element since it already reflects ValueBlock.vue's `boxed`.
         if (!isFloatingRoot && targetEl.classList.contains('value-card-shape')) {
           const r = targetEl.getBoundingClientRect();
           const [x, y] = clientToCanvas(r.right + 16, r.top);
@@ -434,11 +379,9 @@ function onPointerUp(e: PointerEvent) {
       if (finished.source.kind === 'fresh') {
         await createFloatingValue(x, y, resolveFreshValue(finished.source.valueKind));
       } else if (finished.source.location.kind === 'Floating' && finished.source.location.path.length === 0) {
-        // Whole floating block, just repositioned — no content change. Apply
-        // the new position locally first (same optimistic trick as
-        // canvasDrag.ts's strand move) and reveal the real card immediately
-        // after, so it reappears at the drop point instead of flashing at
-        // its old position for the round trip to moveFloatingValue.
+        // Whole floating block, just repositioned. Apply the position
+        // optimistically and reveal the real card immediately (same trick as
+        // canvasDrag.ts's strand move), rather than waiting on moveFloatingValue.
         const floatingId = finished.source.location.floating_id;
         const fv = state.current_macro?.floating_values?.find(f => f.id === floatingId);
         if (fv) {
@@ -455,9 +398,8 @@ function onPointerUp(e: PointerEvent) {
     } catch (err) {
       console.error('value drag drop failed:', err);
     } finally {
-      // Cleared only once the backend call(s) above have resolved, so the
-      // source slot/card never flashes back to its real pre-drag content in
-      // the window between drop and the state-updated round trip landing.
+      // Cleared only after the backend call(s) resolve, so the source
+      // slot/card never flashes back to its pre-drag content in between.
       dragReveal.value = null;
       if (finished.hiddenAnchorEl) finished.hiddenAnchorEl.style.visibility = '';
     }

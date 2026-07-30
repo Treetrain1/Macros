@@ -7,31 +7,20 @@ export type MouseButton = 'Left' | 'Right' | 'Middle' | 'Side' | 'Extra';
 export type Coordinate = 'Absolute' | 'Relative';
 export type ScrollAxis = 'Vertical' | 'Horizontal';
 
-// A small recursive expression tree backing a numeric instruction field —
-// either a number, a piece of text, or an operator applied to its nested
-// `args` (e.g. `(5) + (3)`, or `join "a" "b"`). Mirrors
+// A small recursive expression tree backing a value field — a number, text,
+// or an operator applied to nested `args` (e.g. `(5) + (3)`). Mirrors
 // src-tauri/src/state.rs's ValueDto.
 export type ValueOp =
   | 'Add' | 'Sub' | 'Mul' | 'Div' | 'Mod' | 'Round' | 'Random' | 'Join' | 'NewLine' | 'Tab'
   | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case';
-// 'Join'/'Join3' are two distinct palette entries (2 vs 3 args) that both
-// produce an `{ kind: 'Op', op: 'Join', ... }` ValueDto — there's no `Join3`
-// on the wire, only `args.length` differs. See valueOps.ts's OPERATOR_KINDS.
-// `Var:<name>` is a per-variable palette/kind identifier, not a fixed
-// operator — one exists per user-declared variable (see valueOps.ts's header
-// comment on why it's kept out of OPERATOR_KINDS). `Param:<name>` is the same
-// idea for a custom block's own declared input, scoped to that block's body
-// — see blockDefs.ts. `Call:<blockId>` is a "My Blocks" reporter (a
-// `returns_value: true` custom block used in value position) — one exists
-// per such block, args built dynamically from its declared inputs rather
-// than a fixed arity, so (unlike every other kind here) it isn't handled by
-// `defaultValueForKind`/`paletteValueFor`; see blockDefs.ts's own
-// `paletteCallValueFor`.
+// Join/Join3 both emit op 'Join' (only args.length differs, no 'Join3' on the
+// wire). `Var:<name>`/`Param:<name>` are per-variable/per-input identifiers,
+// not fixed operators. `Call:<blockId>` (a "My Blocks" reporter) has dynamic
+// arity, so it isn't handled by defaultValueForKind/paletteValueFor — see
+// blockDefs.ts's paletteCallValueFor.
 export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3' | `Var:${string}` | `Param:${string}` | `Call:${string}`;
-// `saved` is whatever value the operator displaced when it took over its
-// slot — not one of the operator's args, just carried along so the backend
-// can hand it straight back if this operator block is later dragged out of
-// the slot (see src-tauri/src/input/value.rs's `Value::Op`).
+// `saved` is the value the operator displaced when it took over the slot —
+// carried along so the backend can hand it back if this block is dragged out.
 export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
@@ -48,29 +37,24 @@ export function textValue(value: string): ValueDto {
   return { kind: 'Text', value };
 }
 
-// Fresh default tree for a value block just dragged off the sidebar palette
-// — mirrors src-tauri/src/commands.rs's `apply_value_kind` defaults. Looks
-// up arity/argument-type in valueOps.ts's registry rather than hardcoding
-// per-kind cases, so a new operator never needs a new case here.
+// Fresh default tree for a value block dragged off the sidebar palette —
+// mirrors src-tauri/src/commands.rs's apply_value_kind, looked up from
+// valueOps.ts's registry so a new operator never needs a new case here.
 export function defaultValueForKind(kind: ValueKind): ValueDto {
   if (kind === 'Number') return { kind: 'Number', value: 0 };
   if (kind === 'Text') return { kind: 'Text', value: '' };
   if (kind.startsWith('Var:')) return { kind: 'Var', name: kind.slice('Var:'.length) };
   if (kind.startsWith('Param:')) return { kind: 'Param', name: kind.slice('Param:'.length) };
-  // `Call:` normally goes through blockDefs.ts's `paletteCallValueFor`
-  // instead (it needs the block's current input count, which isn't
-  // recoverable from the kind string alone) — this is just a safe fallback
-  // so an unexpected caller gets a well-formed zero-arg call instead of the
-  // `Unknown value kind` throw below.
+  // Normally blockDefs.ts's paletteCallValueFor handles `Call:` (it needs the
+  // block's input count); this is just a safe zero-arg fallback.
   if (kind.startsWith('Call:')) return { kind: 'Call', block_id: kind.slice('Call:'.length), args: [], saved: numberValue(0) };
   const spec = specForKind(kind);
   if (!spec) throw new Error(`Unknown value kind: ${kind}`);
   return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
 }
 
-// Addresses a single Value node: either inside an instruction's field
-// (Field) or inside a value block parked on canvas (Floating), at `path`
-// within that root (0..N-1 into args at each Op level). Mirrors
+// Addresses a single Value node: inside an instruction field (Field) or a
+// floating canvas block (Floating), at `path` within that root. Mirrors
 // src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
 export type ValueLocationDto =
   | { kind: 'Field'; strand_id: string; index: number; field_id: string; path: number[] }
@@ -107,9 +91,7 @@ export type InstructionDto =
 export type InstructionType = InstructionDto['type'];
 
 // Fresh instruction for a given type — mirrors src-tauri/src/commands.rs's
-// instruction defaults. Used both to seed a brand-new drop from the sidebar
-// (when the palette hasn't been touched) and, via paletteState.ts, as the
-// starting point for a prefab's editable state.
+// defaults. Seeds both a brand-new sidebar drop and a prefab's editable state.
 export function defaultInstruction(type: InstructionType): InstructionDto {
   switch (type) {
     case 'WhenRan': return { type: 'WhenRan' };
@@ -136,10 +118,9 @@ export function isHeaderType(type: InstructionDto['type']): boolean {
   return HEADER_TYPES.has(type);
 }
 
-// "Cap" blocks are the mirror of header blocks: nothing may ever be stacked
-// *below* them, so they render with a flat bottom edge (no connector tab)
-// instead of a header's flat top edge. `Return` ends its strand's control
-// flow, so nothing after it would ever run.
+// "Cap" blocks (the mirror of header blocks) never have anything stacked
+// below them — `Return` ends the strand's control flow — so they render
+// with a flat bottom edge instead of a connector tab.
 export const CAP_TYPES = new Set<InstructionDto['type']>(['Return']);
 
 export function isCapType(type: InstructionDto['type']): boolean {
@@ -161,30 +142,23 @@ export interface MacroDto {
   recording_target_strand_id: string | null;
   speed_multiplier: number;
   floating_values: FloatingValueDto[];
-  /** Declared variable names only — current values aren't surfaced to the
-   * frontend, there's no "watcher" UI. Insertion order; sort with
-   * `sortedVariableNames` for display. */
+  /** Declared variable names only — no current-value "watcher" UI. Insertion
+   * order; use `sortedVariableNames` for display. */
   variables: string[];
   /** User-defined custom blocks ("My Blocks") — see `BlockDefDto`. */
   block_defs: BlockDefDto[];
 }
 
-/** Alphabetical variable names for a macro — used by the sidebar's reporter
- * list and every Set/Change dropdown, so sort order never needs re-deriving
- * ad hoc at each call site. */
+/** Alphabetical variable names for a macro — shared by the sidebar reporter
+ * list and every Set/Change dropdown. */
 export function sortedVariableNames(macro: MacroDto | null | undefined): string[] {
   return [...(macro?.variables ?? [])].sort((a, b) => a.localeCompare(b));
 }
 
 // One piece of a custom block's prototype, in declaration order — mirrors
-// src-tauri/src/macros/mod.rs's BlockPiece (via state.rs's BlockPieceDto).
-// `id` is a stable, opaque identifier generated once when a piece is first
-// added (see MakeBlockDialog.vue's `newPieceId`) and preserved verbatim
-// across edits — it's what lets the backend tell "this input was renamed"
-// apart from "removed and an unrelated one added" when reconciling existing
-// call sites' args on edit_block (see macros/mod.rs's
-// `reconcile_block_call_args`); a plain name can't serve as that identity
-// since renaming *is* the edit being made.
+// src-tauri/src/macros/mod.rs's BlockPiece. `id` is a stable identifier
+// (not the name) so the backend can tell "renamed" apart from "removed +
+// added" when reconciling call sites' args on edit_block.
 export type BlockPieceDto = { kind: 'Label'; id: string; text: string } | { kind: 'Input'; id: string; name: string };
 
 export interface BlockDefDto {
@@ -200,8 +174,7 @@ export function blockInputNames(def: BlockDefDto): string[] {
 }
 
 /** Looks up a custom block by id in the current macro's `block_defs` — used
- * wherever a `CallBlock`/`Value.Call`/`BlockHeader` needs its prototype
- * (rendering labels/inputs) rather than just its id. */
+ * wherever a call/header needs its prototype, not just its id. */
 export function findBlockDef(macro: MacroDto | null | undefined, blockId: string): BlockDefDto | undefined {
   return macro?.block_defs.find(b => b.id === blockId);
 }

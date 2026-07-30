@@ -1,9 +1,8 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Stop flags for every macro run currently executing, so "Stop Loop" can
-/// abort *any* run rather than only loop-mode ones. Loop runs register the
-/// shared `is_looping` flag they already loop on; single runs register a flag
-/// of their own (see `begin_run`).
+/// abort *any* run, not just loop-mode ones. Loop runs register their shared
+/// `is_looping` flag; single runs register one of their own (see `begin_run`).
 static ACTIVE_RUNS: OnceLock<Mutex<Vec<Arc<Mutex<bool>>>>> = OnceLock::new();
 
 fn active_runs() -> &'static Mutex<Vec<Arc<Mutex<bool>>>> {
@@ -19,9 +18,8 @@ pub fn register(flag: &Arc<Mutex<bool>>) {
 }
 
 /// Creates a fresh registered stop flag for one run. Single runs get their own
-/// rather than sharing `is_looping`: that flag is cleared whenever *any* run
-/// finishes, which would cut a concurrently-started run short — the spurious
-/// stop that previously forced single runs to execute unstoppably.
+/// rather than sharing `is_looping`, which is cleared whenever *any* run
+/// finishes and would otherwise cut a concurrently-started run short.
 pub fn begin_run() -> Arc<Mutex<bool>> {
     let flag = Arc::new(Mutex::new(true));
     register(&flag);
@@ -39,8 +37,8 @@ pub fn end_run(flag: &Arc<Mutex<bool>>) {
 }
 
 /// Clears every in-flight run's stop flag, returning how many were cleared.
-/// `run_block` checks these between instructions and while a `Wait` elapses,
-/// so the run unwinds promptly.
+/// `run_block` checks these between instructions and during `Wait`s so runs
+/// unwind promptly.
 pub fn stop_all() -> usize {
     let mut cleared = 0;
     if let Ok(runs) = active_runs().lock() {

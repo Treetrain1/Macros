@@ -13,25 +13,16 @@ pub static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub static RECORD_MOUSE_RELATIVE: AtomicBool = AtomicBool::new(false);
 static GRAB_FAILED: AtomicBool = AtomicBool::new(false);
 
-/// Modifier keys currently held physically, maintained from the capture
-/// callback below and used to match hotkey combos. Backends must not deliver
-/// their own injected events here, or a macro holding Ctrl down would change
-/// which combo the user's next keypress matches.
-///
-/// Static rather than closure-local so a backend can clear it — see
-/// [`reset_held_mods`].
+/// Modifier keys currently held physically; used to match hotkey combos.
+/// Backends must not feed their own injected events into this, or a macro
+/// holding Ctrl down would change which combo the next keypress matches.
 static HELD_MODS: AtomicU8 = AtomicU8::new(0);
 
-/// Clears the tracked modifier state. For backends that can miss key-ups: on
-/// Windows a modifier released while a secure desktop (UAC prompt,
-/// Ctrl+Alt+Del, lock screen) is in front never reaches the hook, and the
-/// phantom bit left behind would stop every combo from matching thereafter.
-///
-/// Safe to call whenever key-ups may have been lost — the user isn't mid-combo
-/// across such a switch, and anything genuinely still held re-registers on its
-/// next press.
-// Only Windows has a event it can hang this off today; evdev holds the devices
-// open across the equivalent transitions, so nothing there loses key-ups.
+/// Clears tracked modifier state. Needed on Windows, where a modifier released
+/// while a secure desktop (UAC, Ctrl+Alt+Del, lock screen) is in front never
+/// reaches the hook, leaving a phantom bit that would block future combos.
+// Only Windows has an event to hang this off; evdev holds devices open across
+// the equivalent transitions and never loses key-ups.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn reset_held_mods() {
     HELD_MODS.store(0, Ordering::Relaxed);
@@ -45,35 +36,28 @@ pub fn set_grab_failed(v: bool) {
     GRAB_FAILED.store(v, Ordering::Relaxed);
 }
 
-/// A signal pushed from a synchronous capture callback (OS hook/evdev thread)
-/// to the GUI's async subscription. Delivered over an unbounded channel
-/// instead of a polled queue so the GUI reacts as soon as it's sent, not on
-/// the next fixed-interval poll tick.
+/// A signal pushed from the synchronous capture callback to the GUI's async
+/// subscription, over an unbounded channel so the GUI reacts immediately.
 pub enum QueueSignal {
     Hotkey(HotkeyAction),
     Stop,
 }
 
 static RECORDING_QUEUE: OnceLock<Mutex<VecDeque<Instruction>>> = OnceLock::new();
-// Anchors for whichever `CaptureTimestamp` variant a session's backend produces
-// (Linux evdev always reports `Hardware`; Windows/macOS always report `Now`),
-// so timing is measured against the backend's own clock instead of the time
-// the event happens to reach this callback.
+// Anchors for whichever `CaptureTimestamp` variant the backend produces
+// (evdev: Hardware; Windows/macOS: Now), measuring against the backend's own clock.
 static BASELINE_NOW: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 static BASELINE_HW: OnceLock<Mutex<Option<SystemTime>>> = OnceLock::new();
 static LAST_ELAPSED: OnceLock<Mutex<Option<Duration>>> = OnceLock::new();
 static LAST_MOUSE_POS: OnceLock<Mutex<Option<(f64, f64)>>> = OnceLock::new();
-// Offset added to every hardware-timestamped elapsed so the first event
-// correctly captures the gap between recording-start and the first input,
-// rather than collapsing to zero because the hardware baseline is lazily
-// initialised to that first event's own timestamp.
+// Offset added to hardware-timestamped elapsed so the first event reflects
+// the gap since recording-start, instead of collapsing to zero.
 static HW_ELAPSED_OFFSET: OnceLock<Mutex<Duration>> = OnceLock::new();
 
 static HOTKEY_TABLE: OnceLock<RwLock<Vec<HotkeyBinding>>> = OnceLock::new();
 
-/// Armed when a `StartRecordingImmediate` hotkey combo is pressed, so recording
-/// can be deferred until every key in the combo has been released — otherwise
-/// the combo's own key-up events would be captured as the first recorded steps.
+/// Armed when a `StartRecordingImmediate` combo is pressed, so recording waits
+/// until every key in the combo releases — otherwise those key-ups get recorded.
 struct PendingRecordStart {
     mods_mask: u8,
     trigger_key: MacroKey,
@@ -144,31 +128,25 @@ pub fn get_recording_queue() -> &'static Mutex<VecDeque<Instruction>> {
 }
 
 pub fn update_hotkey_table(bindings: Vec<HotkeyBinding>) {
-    // The single hotkey table for every platform. Matching happens in
-    // start_grab_thread's shared capture callback rather than through any
-    // OS-level hotkey registration, since StopRecording must only fire while
-    // RECORDING_ACTIVE, not system-wide at all times.
+    // Matching happens in start_grab_thread's capture callback rather than via
+    // OS-level hotkey registration, since StopRecording must only fire while recording.
     let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
     if let Ok(mut t) = table.write() {
         *t = bindings;
     }
 }
 
-/// Anchors both clocks to the moment recording actually starts (right after
-/// the countdown), rather than lazily to whichever event happens to arrive
-/// first. This way the gap between "recording started" and the first
-/// captured input is itself measured and turned into a leading `Wait`,
-/// instead of being silently dropped.
+/// Anchors both clocks to the moment recording actually starts, rather than
+/// lazily to the first event — so the gap before the first captured input
+/// becomes a leading `Wait` instead of being dropped.
 pub fn reset_timing() {
     if let Ok(mut t) = BASELINE_NOW.get_or_init(|| Mutex::new(None)).lock() {
         *t = Some(Instant::now());
     }
     if let Ok(mut t) = BASELINE_HW.get_or_init(|| Mutex::new(None)).lock() {
-        // Reset to None so elapsed_since_session_start lazily sets the baseline
-        // from the first Hardware event's own clock (mach_absolute_time on macOS,
-        // evdev timeval on Linux). Setting it here with SystemTime::now() breaks
-        // macOS because mach_absolute_time (ns since boot) is incompatible with
-        // Unix time — duration_since always errors → every delta collapses to 0.
+        // Reset to None so elapsed_since_session_start lazily sets the baseline from
+        // the first Hardware event. Setting it directly with SystemTime::now() breaks
+        // macOS, whose mach_absolute_time clock isn't comparable to Unix time.
         *t = None;
     }
     if let Ok(mut t) = LAST_ELAPSED.get_or_init(|| Mutex::new(None)).lock() {
@@ -182,11 +160,9 @@ pub fn reset_timing() {
     }
 }
 
-/// Elapsed time since this recording session's first event, measured on
-/// whichever clock the backend reported `ts` against. Negative deltas
-/// (e.g. a `SystemTime` clock step, or two evdev devices' messages arriving
-/// at the dispatch channel out of hardware-timestamp order) clamp to zero
-/// rather than corrupting the recording.
+/// Elapsed time since the session's first event, on whichever clock `ts` uses.
+/// Negative deltas (clock steps, or out-of-order evdev device messages) clamp
+/// to zero rather than corrupting the recording.
 fn elapsed_since_session_start(ts: CaptureTimestamp) -> Duration {
     match ts {
         CaptureTimestamp::Now => {
@@ -213,10 +189,8 @@ fn elapsed_since_session_start(ts: CaptureTimestamp) -> Duration {
                     raw
                 }
             } else {
-                // Lazily initialise the hardware baseline on the first event,
-                // then use the Instant-based elapsed (which was pre-anchored
-                // at reset_timing() time) as the offset so the first event
-                // correctly reflects the gap from recording-start.
+                // Lazily initialise the hardware baseline on first event, using the
+                // pre-anchored Instant-based elapsed as the offset for that gap.
                 *baseline = Some(now);
                 drop(baseline);
                 let instant_elapsed = elapsed_since_session_start(CaptureTimestamp::Now);
@@ -233,11 +207,9 @@ fn check_hotkey(mods: u8, key_name: &str) -> Option<HotkeyAction> {
     let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
     if let Ok(bindings) = table.try_read() {
         for binding in bindings.iter() {
-            // StopRecording only ever fires while a recording is in progress
-            // (checked directly in start_grab_thread's RECORDING_ACTIVE branch),
-            // never through this general lookup — otherwise its unmodified
-            // single key would be swallowed system-wide any time the app is
-            // simply running.
+            // StopRecording is handled directly in start_grab_thread's
+            // RECORDING_ACTIVE branch; skip it here or its unmodified key would
+            // be swallowed system-wide whenever the app is running.
             if matches!(binding.action, HotkeyAction::StopRecording) {
                 continue;
             }
@@ -249,9 +221,8 @@ fn check_hotkey(mods: u8, key_name: &str) -> Option<HotkeyAction> {
     None
 }
 
-/// Looks up the configured `StopRecording` binding's key name, if any. That
-/// binding is always combo-less (zero modifiers) — enforced when it's
-/// captured — so matching only needs to compare the key itself.
+/// Looks up the configured `StopRecording` binding's key name, if any. It's
+/// always combo-less (enforced at capture time), so matching only compares the key.
 fn stop_recording_key() -> Option<String> {
     let table = HOTKEY_TABLE.get_or_init(|| RwLock::new(vec![]));
     table.try_read().ok().and_then(|bindings| {
@@ -285,10 +256,7 @@ pub fn start_grab_thread() {
 
             if RECORDING_ACTIVE.load(Ordering::Relaxed) {
                 // The configured (combo-less) StopRecording key stops recording.
-                // Escape has no special status here — it only stops recording if
-                // the user has it (still) bound to StopRecording, which is the
-                // shipped default but can be changed or cleared like any other
-                // hotkey.
+                // Escape has no special status — it's just the shipped default binding.
                 if let CaptureEvent::KeyPress(key) = &event {
                     let is_stop_key = key
                         .hotkey_name()
@@ -335,9 +303,8 @@ pub fn start_grab_thread() {
                 _ => {}
             }
 
-            // Hotkey detection (only when not recording). Every platform
-            // matches here, against the physical keys its backend reports —
-            // no OS-level hotkey registration is involved anywhere.
+            // Hotkey detection (only when not recording), against the physical
+            // keys the backend reports — no OS-level hotkey registration involved.
             if let CaptureEvent::KeyPress(key) = &event {
                 if !key.is_modifier() {
                     if let Some(name) = key.hotkey_name() {
@@ -349,9 +316,8 @@ pub fn start_grab_thread() {
                             } else {
                                 push_queue_signal(QueueSignal::Hotkey(action));
                             }
-                            // Swallow the trigger so the combo doesn't also
-                            // reach whatever has focus. Backends are expected
-                            // to suppress the matching key-up too.
+                            // Swallow the trigger so the combo doesn't also reach
+                            // whatever has focus; backends suppress the key-up too.
                             return CaptureDecision::Suppress;
                         }
                     }

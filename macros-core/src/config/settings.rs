@@ -11,10 +11,8 @@ pub struct AppSettings {
     pub global_hotkeys: Option<Vec<HotkeyBinding>>,
     pub selected_macro_id: Option<String>,
     /// Runtime-only playback speed override applied on top of each macro's
-    /// own `speed_multiplier`, so it scales everything without editing
-    /// individual macros. Persisted across restarts like the rest of
-    /// `AppSettings`, but conceptually a session knob rather than a macro
-    /// property.
+    /// own `speed_multiplier`. Persisted like the rest of `AppSettings`, but
+    /// conceptually a session knob rather than a macro property.
     pub global_speed_multiplier: Option<f64>,
 }
 

@@ -1,36 +1,27 @@
 // Single source of truth for every operator value-block kind — mirrors
-// src-tauri/src/input/value.rs's `OPERATOR_KINDS`. Adding a new operator (or
-// a new-arity palette entry for an existing one, like Join/Join3) is one row
-// here; every consumer (the sidebar palette list, the palette's default
-// argument state, and both ValueBlock.vue/PaletteValueBlock.vue's rendering)
-// reads from this table instead of hardcoding its own copy.
+// src-tauri/src/input/value.rs's OPERATOR_KINDS. Add a new operator (or
+// arity variant, like Join/Join3) as one row here.
 //
-// Only type-only imports from ./types below — this file has no runtime
-// dependency on it, so types.ts (which does depend on this file, for
-// defaultValueForKind) can import it back without a circular-init hazard.
+// Type-only import below avoids a circular-init hazard with types.ts.
 import type { ValueDto, ValueKind, ValueOp } from './types';
 
-/** Every `ValueKind` that's an operator (i.e. not a `Number`/`Text` leaf) —
- * derived here so `Record<OperatorValueKind, ...>` state (paletteState.ts)
- * never needs `Number`/`Text` entries and never needs updating by hand. */
+/** Every operator `ValueKind` (excludes the `Number`/`Text` leaves) — lets
+ * `Record<OperatorValueKind, ...>` state stay in sync automatically. */
 export type OperatorValueKind = Exclude<ValueKind, 'Number' | 'Text'>;
 
 export interface OperatorKindSpec {
   kind: OperatorValueKind;
   op: ValueOp;
   arity: number;
-  /** One entry per arg, in declaration order — lets an operator mix
-   * argument types (e.g. LetterOf's number-then-text pair) instead of
-   * assuming every arg is the same kind of leaf. */
+  /** One entry per arg, in order — lets an operator mix types (e.g.
+   * LetterOf's number-then-text pair). */
   argTypes: ('number' | 'text')[];
   /** Rendered before the first arg (word-phrase operators like Random/Join). */
   prefix?: string;
   /** Rendered between each consecutive pair of args, symbol or word alike. */
   infix?: string;
-  /** If set, `args[enumArg.index]` isn't a draggable/typable Value slot but
-   * a fixed choice rendered as a dropdown (edited via `editValueField`,
-   * never the drag/drop machinery) — e.g. Case's upper/lowercase toggle.
-   * See src-tauri/src/input/value.rs's `Op::Case` doc comment. */
+  /** If set, `args[enumArg.index]` is a fixed dropdown choice, not a
+   * draggable Value slot — e.g. Case's upper/lowercase toggle. */
   enumArg?: { index: number; options: { value: string; label: string }[] };
 }
 
@@ -63,10 +54,8 @@ export function specForKind(kind: ValueKind): OperatorKindSpec | undefined {
   return OPERATOR_KINDS.find(s => s.kind === kind);
 }
 
-/** Rendering an existing `Op` node only carries `op` (not which palette kind
- * built it) — labels happen to be identical across a given op's arities
- * today (Join and Join3 both say "join"), so this just returns the first
- * spec matching `op`. */
+/** An existing `Op` node only carries `op`, not which palette kind built it —
+ * returns the first spec matching `op` (labels match across arities, e.g. Join/Join3). */
 export function specForOp(op: ValueOp): OperatorKindSpec | undefined {
   return OPERATOR_KINDS.find(s => s.op === op);
 }

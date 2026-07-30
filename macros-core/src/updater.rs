@@ -47,14 +47,10 @@ pub fn check_for_update(current_version: &str) -> Result<Option<UpdateInfo>, Str
 }
 
 /// Blocking — call via `tokio::task::spawn_blocking`. Downloads the latest release's installer
-/// and launches it, then the caller is expected to kill the current process immediately.
-///
-/// This deliberately does not touch the running exe at all — every attempt at replacing it
-/// in-process (directly, or via a helper process copying itself) kept hitting "used by another
-/// process". Instead we just download the real installer
-/// (`macros-windows-x86_64-setup.exe`, already produced by the release workflow) and run it like
-/// a normal exe; since we exit right after spawning it, it finds nothing locking the install by
-/// the time it gets to copying files.
+/// and launches it; the caller is expected to kill the current process immediately after.
+/// Deliberately doesn't touch the running exe — every in-process replacement attempt hit
+/// "used by another process" — so it just runs the real installer, which finds nothing
+/// locking the install once this process exits.
 pub fn apply_update(current_version: &str) -> Result<PathBuf, String> {
     let updater = build_updater(current_version)?;
     let release = updater
@@ -71,10 +67,8 @@ pub fn apply_update(current_version: &str) -> Result<PathBuf, String> {
     let installer_path = temp_dir.join(INSTALLER_ASSET_NAME);
     let mut installer_file = fs::File::create(&installer_path).map_err(|err| err.to_string())?;
 
-    // self_update's `download_url` is GitHub's *API* asset endpoint, not the public
-    // browser_download_url — without this header it returns a JSON description of the asset
-    // instead of its binary content, which then gets written to installer_path verbatim,
-    // producing a garbage "exe" that Windows can't recognize as a valid PE (hence "16-bit").
+    // GitHub's API asset endpoint returns a JSON description instead of binary content
+    // without this header, producing a garbage "exe" Windows can't recognize as a valid PE.
     let mut download = Download::from_url(&installer_asset.download_url);
     download.show_progress(false);
     download.set_header(

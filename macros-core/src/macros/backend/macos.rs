@@ -313,13 +313,11 @@ unsafe extern "C" {
     ) -> core_graphics::sys::CGEventRef;
 }
 
-/// OS-assigned timestamp (mach_absolute_time-based ns since boot, NOT
-/// Unix time) for when CoreGraphics generated this event — not when our
-/// CFRunLoop callback happened to run. Stuffed into a `SystemTime` purely
-/// as an opaque carrier for `CaptureTimestamp::Hardware`: the recorder
-/// only ever diffs two `Hardware` values from the same session via
-/// `duration_since`, never reads it as real wall-clock time (same
-/// convention evdev's hardware timestamps already rely on).
+/// OS-assigned timestamp (mach_absolute_time-based ns since boot, NOT Unix
+/// time) for when CoreGraphics generated this event. Stuffed into a
+/// `SystemTime` purely as an opaque carrier for `CaptureTimestamp::Hardware`
+/// — the recorder only ever diffs two `Hardware` values via `duration_since`,
+/// never reads it as real wall-clock time.
 fn cgevent_hardware_timestamp(event: &CGEvent) -> std::time::SystemTime {
     let ns = unsafe { CGEventGetTimestamp(event.as_ptr()) };
     std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(ns)
@@ -458,10 +456,9 @@ pub(super) fn start_capture_thread(
                 }
 
                 // ── Mouse tap (listen-only) ────────────────────────────────────
-                // The OS fires this callback as a notification — it does NOT wait
-                // for us before delivering events to apps or the window manager.
-                // This means window dragging and resizing are never blocked or
-                // delayed by our recording code.
+                // The OS fires this as a notification, not waiting for us before
+                // delivering events elsewhere — window dragging/resizing is never
+                // blocked or delayed by our recording code.
                 let cb_mouse = Arc::clone(&callback);
                 match CGEventTap::new(
                     CGEventTapLocation::Session,

@@ -1,11 +1,7 @@
-// Imperative Scratch-style strand-canvas drag/drop/pan/zoom machinery —
-// ported near-verbatim from the original vanilla app.js. This is deliberately
-// NOT a reactive/declarative rewrite: it's a real-time pointer-event state
-// machine doing live DOM measurement (getBoundingClientRect/offsetWidth) that
-// Vue's reactivity graph has no visibility into, so a "more Vue" version
-// would just re-derive the same imperative logic for no behavioral gain and
-// real regression risk. See the per-function comments (carried over from the
-// original) for the specific bugs this exact structure avoids.
+// Imperative Scratch-style strand-canvas drag/drop/pan/zoom machinery, ported
+// near-verbatim from the original vanilla app.js. Deliberately not a
+// reactive/declarative rewrite — it's a real-time pointer/DOM-measurement
+// state machine Vue's reactivity graph has no visibility into.
 import { state } from './store';
 import { addInstruction, addStrand, deleteBlock, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import { clonePaletteInstruction } from './paletteState';
@@ -13,13 +9,11 @@ import { paletteCallInstructionFor } from './blockDefs';
 import type { InstructionDto, MacroDto } from './types';
 import { isCapType, isHeaderType } from './types';
 
-// Strand x/y from the backend are canvas-space coordinates that can go
-// negative; canvas-inner is sized to the strands' bounding box each render,
-// offset by this padding so cards never touch the edge.
+// Strand x/y can go negative; canvas-inner is sized to the strands' bounding
+// box each render, padded so cards never touch the edge.
 const CANVAS_PAD = 400;
-// Bounds always extend at least this far past the canvas origin in every
-// direction, so there's room to pan around even when a macro has only one
-// strand sitting right at (0, 0).
+// Bounds always extend at least this far past the origin, so there's room
+// to pan even when a macro has only one strand at (0, 0).
 const ROOT_MARGIN = 1000;
 
 function cssEscape(s: string): string {
@@ -31,17 +25,16 @@ function findStrand(strandId: string) {
 }
 
 // ── Zoom (ctrl+scroll) ──────────────────────────────────────────────────────
-// canvas-inner stays laid out at unscaled canvas-space coordinates and is
-// visually scaled with a CSS transform; canvas-sizer's box is set to the
-// zoomed footprint so the scrollbars/scroll range match what's on screen.
+// canvas-inner stays laid out at unscaled coordinates and is visually scaled
+// via CSS transform; canvas-sizer's box matches the zoomed footprint so
+// scrollbars match what's on screen.
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 2.5;
 let canvasZoom = 1;
 let currentMacroId: string | null = null;
 
 // Value-block drag ghosts (valueDrag.ts) live outside canvas-inner's scaled
-// subtree too, so they need this to counter-scale themselves the same way
-// strand/palette ghosts do below.
+// subtree too, so they need this to counter-scale themselves.
 export function getCanvasZoom(): number {
   return canvasZoom;
 }
@@ -50,11 +43,8 @@ export function getCanvasZoom(): number {
 // back into canvas (strand.x/y) space when a drag ends on empty canvas.
 let lastBounds = { minX: 0, minY: 0 };
 
-/**
- * DOM geometry pass: measures the just-rendered (Vue-created) strand cards
- * and positions them in canvas space. Call this after Vue has patched the
- * DOM for state.current_macro.strands (e.g. from a `flush: 'post'` watcher).
- */
+/** DOM geometry pass: measures rendered strand cards and positions them in
+ * canvas space. Call after Vue patches the DOM (e.g. a `flush: 'post'` watcher). */
 export function positionCanvas(macro: MacroDto | null | undefined) {
   const inner = document.getElementById('canvas-inner');
   const sizer = document.getElementById('canvas-sizer');
@@ -105,12 +95,8 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   inner.style.transform = `scale(${canvasZoom})`;
   sizer.style.width = `${innerW * canvasZoom}px`;
   sizer.style.height = `${innerH * canvasZoom}px`;
-  // A strand placed beyond the previous extent (e.g. a palette drop out in
-  // blank space) pushes minX/minY outward, which shifts every card's
-  // rendered position by the same amount. Without this, that shift happens
-  // under a scroll position that didn't move, so the thing that was just
-  // dropped visibly jumps away from the cursor — compensate scroll so the
-  // content the user was looking at stays exactly where it was.
+  // A strand beyond the previous extent pushes minX/minY outward, shifting
+  // every card's position — compensate scroll so nothing visibly jumps.
   if (minX !== prevMinX || minY !== prevMinY) {
     scrollEl.scrollLeft += (prevMinX - minX) * canvasZoom;
     scrollEl.scrollTop += (prevMinY - minY) * canvasZoom;
@@ -129,18 +115,10 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     card.style.top = `${fv.y - minY + CANVAS_PAD}px`;
   }
 
-  // A split-drag's new strand renders here as a real, fully visible card at
-  // the split point the instant its state update lands — which can be well
-  // before the user drops anywhere. Left alone, that reads as "the block
-  // isn't following the cursor": a separate ghost clone quietly tracks the
-  // pointer while this solid, static card just sits there until drop calls
-  // moveStrand. Hide it for the duration, same idea as the whole-strand-grab
-  // case where the real card itself becomes the ghost.
-  //
-  // The resolvedId is set asynchronously (when the splitStrand invoke
-  // resolves), but the backend can emit state-updated before that response
-  // arrives — so we also check preExistingStrandIds to catch new strands
-  // even before resolvedId is known.
+  // A split-drag's new strand can render as a real, visible card at the split
+  // point before drop — hide it for the drag's duration (same idea as the
+  // whole-strand-grab ghost). resolvedId is set async by splitStrand, but
+  // state-updated can arrive first, so preExistingStrandIds catches it too.
   if (drag && !drag.restoreCard) {
     const targetId = drag.resolvedId;
     if (targetId) {
@@ -165,8 +143,7 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     currentMacroId = macroId;
     requestAnimationFrame(() => {
       // Center the initial view on the canvas origin — strands generally
-      // spawn near (0, 0), and there's no longer a single canonical strand
-      // to scroll to.
+      // spawn near (0, 0).
       scrollEl.scrollLeft = Math.max(0, -minX + CANVAS_PAD - 60);
       scrollEl.scrollTop = Math.max(0, -minY + CANVAS_PAD - 60);
     });
@@ -211,13 +188,10 @@ export function capturePointer(e: PointerEvent) {
   }
 }
 
-// On Linux, a middle click is X11's "paste primary selection" gesture —
-// CEF honors it against whatever element already has focus, independent of
-// hit-testing the click point, so preventDefault()-ing the pointerdown above
-// doesn't stop it. The paste still goes through the normal cancelable
-// ClipboardEvent though, so swallow that instead while a middle-click pan is
-// in flight (a plain click that never reaches beginPan's checks never sets
-// this, so real Ctrl+V/menu pastes elsewhere are untouched).
+// On Linux, middle click is X11's "paste primary selection" — CEF honors it
+// against the focused element regardless of hit-testing, so preventDefault()
+// on pointerdown doesn't stop it. Swallow the resulting ClipboardEvent
+// instead while a middle-click pan is in flight.
 let blockPrimaryPaste = false;
 let blockPrimaryPasteGeneration = 0;
 
@@ -278,45 +252,28 @@ interface DragState {
   resolvingPromise: Promise<string | void> | null;
   snap: { targetId: string; index: number } | null;
   overTrash?: boolean;
-  // Set for a whole-strand grab of a strand headed by a `BlockHeader` — its
-  // custom block's id, so dropping this on the trash deletes the block
-  // definition (and every call site referencing it, see
-  // `Macro::remove_block`) via `deleteBlock` instead of just detaching the
-  // now-orphaned body strand via `removeStrand`, which would leave the
-  // block's prefab still sitting in the "My Blocks" sidebar section with no
-  // body behind it.
+  // Set for a whole-strand grab of a BlockHeader strand — its custom block's
+  // id, so trashing it deletes the block definition (deleteBlock) instead of
+  // just detaching the body strand and orphaning the "My Blocks" prefab.
   blockId: string | null;
-  // Whole-strand grab of a strand headed by a "When Ran" block: it can be
-  // moved around freely but never snapped/merged into another strand (that
-  // would attach it underneath something), so snap detection is skipped
-  // entirely for the whole drag.
+  // A "When Ran"-headed strand can be moved freely but never snapped/merged
+  // into another (that would attach it underneath something).
   noSnap: boolean;
-  // The real DOM node(s) being dragged are physically relocated into the
-  // ghost (not cloned/hidden), so the strand itself visibly follows the
-  // pointer. Vue reuses these exact nodes by key on the next patch and never
-  // touches their position in the tree itself, so they MUST be moved back to
-  // where they came from explicitly on every drag end (move/merge/trash/
-  // error) or Vue's next patch gets confused about where they live — only a
-  // full remount (undo/redo, reload) would otherwise reset them.
+  // The real DOM node(s) are physically relocated into the ghost (not
+  // cloned), so the strand visibly follows the pointer. Vue reuses these
+  // nodes by key, so they MUST be moved back explicitly on every drag end
+  // or Vue's next patch gets confused about where they live.
   restoreCard: { el: HTMLElement; parent: Node; next: Node | null } | null;
-  // Partial (split) drags can't use the same real-node move: splitStrand
-  // fires at pickup and its response — which makes Vue patch the old
-  // strand's row list — can land mid-drag, while these rows are sitting
-  // detached inside the ghost. Vue would then unmount them from the wrong
-  // (ghost) parent, and restoring them afterwards would resurrect an
-  // orphaned zombie node Vue no longer tracks. So these stay hidden clones
-  // instead, same as before the real-node-move change.
+  // Partial (split) drags can't use the real-node move: splitStrand's
+  // response can patch the old strand's row list mid-drag while rows sit
+  // detached in the ghost, so these stay hidden clones instead.
   hiddenRowEls: HTMLElement[];
-  // Once a split resolves, its brand-new strand renders as a real, fully
-  // visible card at the split point almost immediately (the backend event
-  // round trip is near-instant) — long before drop. positionCanvas hides it
-  // for us each render (see there); tracked here purely so pointerup knows
-  // what to unhide.
+  // A resolved split's new strand renders visible at the split point almost
+  // immediately; positionCanvas hides it each render — tracked here so
+  // pointerup knows what to unhide.
   hiddenNewCardEl: HTMLElement | null;
-  // Strand IDs that existed when the drag started. Used by positionCanvas to
-  // detect newly created split-strand cards even before the invoke response
-  // sets resolvedId — the backend's state-updated event can arrive before the
-  // invoke resolves, leaving a window where the new card renders unhidden.
+  // Strand IDs that existed when the drag started — lets positionCanvas
+  // detect new split-strand cards before resolvedId is set.
   preExistingStrandIds: Set<string>;
 }
 let drag: DragState | null = null;
@@ -324,10 +281,8 @@ let drag: DragState | null = null;
 interface PaletteDragState {
   pointerId: number;
   insType: InstructionDto['type'];
-  // Set only for a `CallBlock` drag from the "My Blocks" section — which
-  // specific custom block, since (unlike every other instruction type)
-  // there's no single fixed prefab: `clonePaletteInstruction` can't resolve
-  // it from `insType` alone. See `beginPaletteDrag`'s `blockId` param.
+  // Set only for a `CallBlock` drag from "My Blocks" — clonePaletteInstruction
+  // can't resolve which custom block from `insType` alone.
   blockId?: string;
   offsetX: number;
   offsetY: number;
@@ -344,9 +299,8 @@ export function beginPickup(e: PointerEvent, strandId: string, index: number) {
   dragCandidate = { strandId, index, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
 }
 
-// Dragging a palette entry previews the actual instruction block it'll
-// create (not the sidebar chip) — dropped on empty canvas it becomes exactly
-// that: a single ordinary-looking block, nothing else.
+// Dragging a palette entry previews the actual instruction block it creates
+// (not the sidebar chip).
 export function beginPaletteDrag(e: PointerEvent, insType: InstructionDto['type'], ghostRowEl: HTMLElement, blockId?: string) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
@@ -395,9 +349,8 @@ function positionGhost(e: PointerEvent) {
 
 const SNAP_THRESHOLD = 36;
 
-// Shared by both strand-drags (snapping an existing block elsewhere) and
-// palette-drags (dropping a brand new instruction onto a strand); writes the
-// result onto `target.snap` and updates the shared snap preview.
+// Shared by strand-drags and palette-drags; writes the result onto
+// `target.snap` and updates the shared snap preview.
 interface SnapCandidate { targetId: string; index: number; dist: number; y: number; left: number; width: number }
 
 function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; index: number } | null }, excludeId: string | null | undefined, ghostEl?: HTMLElement) {
@@ -409,11 +362,8 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     if (!id || id === excludeId) continue;
     const cardRect = card.getBoundingClientRect();
 
-    // Horizontal proximity is judged against the strand's actual attach
-    // point (its left edge, where every instruction row lines up) rather
-    // than a loose bounding-box overlap — otherwise a block dragged far to
-    // the side could still "overlap" a card and snap despite the attach
-    // points not being remotely aligned.
+    // Judge horizontal proximity against the strand's actual attach point
+    // (left edge), not a loose bounding-box overlap.
     const refX = ghostRect ? ghostRect.left : e.clientX;
     if (Math.abs(refX - cardRect.left) > SNAP_THRESHOLD) continue;
 
@@ -423,27 +373,22 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; i
     boundaries.push(rows.length
       ? rows[rows.length - 1].getBoundingClientRect().bottom
       : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
-    // Index 0 (the very top boundary) would attach something above the
-    // strand's first block — never allowed when that first block is a
-    // "When Ran", since nothing may ever end up underneath it.
+    // Index 0 would attach above the strand's first block — never allowed
+    // when that's a "When Ran" (nothing may end up above it).
     const strandInstructions = findStrand(id)?.instructions ?? [];
     const headIsWhenRan = strandInstructions[0] && isHeaderType(strandInstructions[0].type);
     for (let idx = 0; idx < boundaries.length; idx++) {
       if (idx === 0 && headIsWhenRan) continue;
-      // A boundary directly below a cap block (Return) would attach
-      // something underneath it — never allowed, since a cap block always
-      // ends its strand's control flow.
+      // A boundary below a cap block (Return) would attach something
+      // underneath it — never allowed, since it ends the strand's flow.
       if (idx > 0 && isCapType(strandInstructions[idx - 1].type)) continue;
       const y = boundaries[idx];
       const refY = ghostRect ? ghostRect.top : e.clientY;
       const dist = Math.abs(refY - y);
       if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
-        // For the "after last row" boundary, the insertion point is 6px
-        // above the boundary: the last row's margin-bottom: -6px means the
-        // next item starts 6 px above its border-box bottom. That 6px is a
-        // canvas-space (unscaled) constant, but `y` here is already a
-        // measured, zoomed screen coordinate — scale the offset too, or it
-        // over/undershoots the real gap at any zoom besides 1.
+        // The last row's margin-bottom: -6px means the next item starts 6px
+        // above its border-box bottom. That's a canvas-space constant, but
+        // `y` is a zoomed screen coordinate — scale the offset too.
         const insY = idx === rows.length ? y - 6 * canvasZoom : y;
         best = { targetId: id, index: idx, dist, y: insY, left: cardRect.left, width: cardRect.width };
       }
@@ -504,8 +449,7 @@ export function clientToCanvas(clientX: number, clientY: number): [number, numbe
 }
 
 // The ghost is the real `.strand-card`/`.instruction-row` node(s), physically
-// moved into it (not cloned, not hidden) — so the block being dragged is
-// literally the strand itself following the pointer, not a stand-in.
+// moved into it — the block dragged is literally the strand itself.
 function startDrag(e: PointerEvent, candidate: DragCandidate) {
   const { strandId, index, pointerId } = candidate;
   const strand = findStrand(strandId);
@@ -523,10 +467,8 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   if (wholeStrandGrab) {
     if (cardEl) {
       restoreCard = { el: cardEl, parent: cardEl.parentNode as Node, next: cardEl.nextSibling };
-      // The card's left/top are canvas-space coordinates meant for its usual
-      // absolutely-positioned home; inside the fixed-position ghost they'd
-      // just add an unwanted offset on top of the pointer-tracked transform,
-      // so drop them while it's on loan and let the ghost alone place it.
+      // The card's left/top are canvas-space coordinates for its usual home;
+      // drop them while on loan so the ghost's transform alone places it.
       cardEl.style.position = 'static';
       cardEl.style.left = '';
       cardEl.style.top = '';
@@ -540,10 +482,8 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
     const ghostBody = document.createElement('div');
     ghostBody.className = 'strand-body';
     rowEls.forEach(el => {
-      // Clone first, hide second — cloneNode copies the inline style
-      // attribute verbatim, so hiding the original before cloning made the
-      // clone itself invisible too, leaving the ghost blank for the whole
-      // drag.
+      // Clone first, hide second — cloneNode copies inline style verbatim,
+      // so hiding first would make the clone invisible too.
       const clone = el.cloneNode(true) as HTMLElement;
       clone.style.visibility = '';
       ghostBody.appendChild(clone);
@@ -588,14 +528,9 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   positionGhost(e);
 }
 
-// Each branch below only ever handles the event once it has confirmed the
-// event's pointerId actually belongs to that gesture — never on a bare "some
-// other gesture is active" check. Only one of pan/paletteDrag/drag/
-// dragCandidate is ever really in flight at once, but if any one of them were
-// ever left stuck (e.g. a pointerup missed while panning), a blanket
-// early-return here would silently swallow every *other* pointer's
-// moves/ups forever, which is exactly what made palette drops stop working
-// in the original implementation.
+// Each branch below confirms the event's pointerId belongs to that gesture
+// before handling it, rather than a blanket "some gesture is active" check —
+// a stuck gesture would otherwise swallow every other pointer's events forever.
 function onPointerMove(e: PointerEvent) {
   if (pan && e.pointerId === pan.pointerId) {
     const scrollEl = document.getElementById('canvas-scroll');
@@ -608,8 +543,7 @@ function onPointerMove(e: PointerEvent) {
   if (paletteDrag && e.pointerId === paletteDrag.pointerId) {
     positionGhost(e);
     // A brand-new "When Ran" always becomes its own detached strand — it
-    // can never snap into an existing one (it would either attach itself
-    // underneath something, or land anywhere but the required index 0).
+    // can never snap into an existing one.
     if (isOverSidebar(e) || isHeaderType(paletteDrag.insType)) {
       paletteDrag.snap = null;
       clearSnapPreview();
@@ -650,12 +584,9 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp(e: PointerEvent) {
   if (pan && pan.pointerId === e.pointerId) {
     pan = null;
-    // The primary-selection paste fires off the middle-button *release*,
-    // dispatched by the native layer slightly after this pointerup handler
-    // runs — clearing the flag synchronously here would re-open the window
-    // right before the paste event arrives. Let it ride out a tick first.
-    // Guard with a generation counter so this stale timer can't clear the
-    // flag out from under a fresh pan that started in the meantime.
+    // The primary-selection paste fires on middle-button release slightly
+    // after this handler runs, so clear the flag after a tick, not
+    // synchronously. Guard with a generation counter against a fresh pan.
     const generation = blockPrimaryPasteGeneration;
     setTimeout(() => {
       if (blockPrimaryPasteGeneration === generation) blockPrimaryPaste = false;
@@ -698,38 +629,29 @@ function onPointerUp(e: PointerEvent) {
   drag = null;
   clearSnapPreview();
   setSidebarArmed(false);
-  // Move the real card back to where it came from before removing the
-  // (now-empty) ghost wrapper — unconditionally (move/merge/trash/error), so
-  // Vue finds it exactly where its vnode tree still expects it on the next
-  // patch. The backend round trip that would otherwise settle this is async
-  // and, for trash/merge, may never re-render this node at all.
+  // Move the real card back before removing the ghost wrapper —
+  // unconditionally, so Vue finds it where its vnode tree expects on the
+  // next patch (the async backend round trip may never re-render it at all).
   if (finished.restoreCard) {
     finished.restoreCard.el.style.position = '';
     finished.restoreCard.parent.insertBefore(finished.restoreCard.el, finished.restoreCard.next);
   }
   // Remove the ghost first so the real card at the split point isn't
-  // visible alongside the ghost's clones — that brief overlap reads as a
-  // "copy of the dragged block left behind at the original position".
+  // briefly visible alongside the ghost's clones.
   finished.ghostEl.remove();
-  // The split-drag rows were only ever hidden (their DOM parent never
-  // changed), so just make them visible again — see the hiddenRowEls comment
-  // on DragState for why they can't be physically moved like the card above.
-  // For split-drags these references may be stale (Vue re-rendered the
-  // original strand after splitStrand resolved), but the unhide is harmless.
+  // The split-drag rows were only hidden (parent never changed), so unhide
+  // them here (see hiddenRowEls on DragState for why they can't be moved
+  // like the card). References may be stale post-resolve, but unhiding is harmless.
   for (const el of finished.hiddenRowEls) el.style.visibility = '';
-  // Don't unhide hiddenNewCardEl here — for merge/trash the strand is
-  // removed by the backend so it should stay hidden; for the move case it's
-  // unhidden in the async callback after the optimistic x/y update so the
-  // card appears at the drop position, not the split point.
+  // Don't unhide hiddenNewCardEl here — merge/trash removes the strand so it
+  // stays hidden; move unhides it after the optimistic x/y update below.
 
   void (async () => {
     const id = finished.resolvedId ?? (finished.resolvingPromise ? await finished.resolvingPromise : null);
     if (!id) return;
     if (finished.overTrash) {
       // A custom block's header strand: delete the block definition (which
-      // also removes this body strand and every call site referencing it)
-      // rather than just detaching the strand and leaving an orphaned
-      // "My Blocks" prefab behind.
+      // removes the body strand and every call site) rather than just detaching it.
       if (finished.blockId) {
         await deleteBlock(finished.blockId);
       } else {
@@ -740,9 +662,7 @@ function onPointerUp(e: PointerEvent) {
     } else {
       const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
       // Optimistic: apply locally so the card renders at the drop point
-      // immediately instead of sitting at its old position (or hidden, pre-
-      // fix) until the invoke + state-updated round trip lands — that lag
-      // is what read as the block "teleporting" once the mouse was let go.
+      // immediately instead of "teleporting" once the round trip lands.
       const strand = findStrand(id);
       if (strand) {
         strand.x = x;

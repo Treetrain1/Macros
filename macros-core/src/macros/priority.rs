@@ -1,11 +1,8 @@
 use tracing::warn;
 
-/// Best-effort: raise the calling thread's OS scheduling priority so the OS is
-/// less likely to preempt it for multiple milliseconds under load. This is the
-/// only defense against scheduler-induced jitter that `spin_sleep`'s own
-/// accuracy tuning can't reach. Silently falls back to default priority if the
-/// platform/permissions don't allow it (e.g. missing `CAP_SYS_NICE`/`rtprio`
-/// limit on Linux) — never treated as a hard failure.
+/// Best-effort: raise the calling thread's OS scheduling priority so it's less
+/// likely to be preempted for multiple milliseconds under load. Falls back to
+/// default priority silently if the platform/permissions don't allow it.
 #[cfg(unix)]
 pub fn raise_current_thread_priority() {
     let param = unsafe {

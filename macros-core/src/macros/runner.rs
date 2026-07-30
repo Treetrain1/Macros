@@ -11,49 +11,30 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-/// Shared, macro-wide variable store — `AppState::variable_values` is the
-/// UI/persistence side of this same map; execution threads share it via this
-/// `Arc` so a `Set`/`Change` in one strand is visible to another running
-/// concurrently. See `Macro::run`.
+/// Shared, macro-wide variable store, so a `Set`/`Change` in one strand is
+/// visible to others running concurrently.
 pub type VariableStore = Arc<Mutex<HashMap<String, Evaluated>>>;
 
-/// A custom block's runtime shape — just enough to invoke it: its declared
-/// input names (in prototype order, the positional key `args` line up
-/// against) and its body instructions (everything after its `BlockHeader`).
-/// Built once per run from `Macro::block_defs` + each block's header strand
-/// (see `Macro::run`), then shared read-only via `ExecCtx::block_table` —
-/// definitions are fixed for the duration of one run, same as the rest of
-/// the instruction list.
+/// A custom block's runtime shape: input names in prototype order (matched
+/// positionally against call args) plus its body instructions. Built once
+/// per run and shared read-only via `ExecCtx::block_table`.
 pub struct BlockRuntime {
     pub input_names: Vec<String>,
     pub body: Vec<Instruction>,
 }
 
-/// Custom-block call depth guard — the only protection against runaway
-/// self-/mutually-recursive blocks. Recursion itself is just plain Rust
-/// function calls (`run_block`/`resolve_calls_and_params` calling back into
-/// each other), so without this a cycle would eventually stack-overflow the
-/// whole process instead of failing cleanly for just that one run.
-/// Conservative rather than generous: each level of recursion here crosses
-/// several real Rust stack frames (`resolve_calls_and_params` ->
-/// `call_block` -> `run_block` -> back into `resolve_calls_and_params` for
-/// the callee's own `Return`), and execution threads don't get an enlarged
-/// stack (see the tauri app's `macros_thread` module and its plain
-/// `thread::Builder::new().spawn`) — a
-/// higher limit risks a real stack overflow (aborting the whole process)
-/// before this check ever gets a chance to return a clean `Err`.
+/// Guards against runaway recursive custom blocks; without it a cycle would
+/// eventually stack-overflow the whole process instead of failing cleanly.
+/// Kept low because each level crosses several real Rust stack frames and
+/// execution threads don't get an enlarged stack.
 const MAX_CALL_DEPTH: u32 = 64;
 
 /// Everything one strand's execution needs, threaded by `&mut` through
-/// `run_block` and its recursive custom-block calls. `pressed_keys` is
-/// shared for the *whole* strand's run (including every nested call) so
-/// cleanup only ever happens once, at the outermost level (see
-/// `run_strand`) — matching the pre-custom-blocks behavior where a strand's
-/// run was a single flat instruction list with one release-on-exit pass.
-/// `param_env` is the one field that's swapped out (saved/restored around a
-/// nested call — see `call_block`) rather than shared, since each
-/// invocation's bound parameters must stay isolated from its caller's and
-/// from any concurrent/sibling invocation of the same block.
+/// `run_block` and its recursive custom-block calls. `pressed_keys`/
+/// `pressed_buttons` are shared across the whole call tree so cleanup only
+/// happens once, at the outermost level. `param_env` is swapped (not
+/// shared) around nested calls so each invocation's bound parameters stay
+/// isolated from its caller's.
 struct ExecCtx<'a> {
     emulator: Arc<Mutex<dyn InputBackend>>,
     stop_flag: Option<Arc<Mutex<bool>>>,
@@ -61,22 +42,17 @@ struct ExecCtx<'a> {
     variables: VariableStore,
     block_table: Arc<HashMap<String, BlockRuntime>>,
     pressed_keys: &'a mut Vec<MacroKey>,
-    /// Mouse buttons held by this strand, tracked and cleaned up exactly like
-    /// `pressed_keys`. Without this, stopping a run between a button's press
-    /// and its release leaves that button physically stuck down for the rest
-    /// of the session — the pointer drags across every window and the machine
-    /// looks broken, which reads as "the macro is still running".
+    /// Mouse buttons held by this strand, tracked and cleaned up like
+    /// `pressed_keys`. Without this, stopping between a press and release
+    /// leaves the button physically stuck down for the rest of the session.
     pressed_buttons: &'a mut Vec<MacroButton>,
     param_env: HashMap<String, Evaluated>,
 }
 
 impl<'a> ExecCtx<'a> {
-    /// Resolves `value` all the way down to a tree `Value::eval()` can
-    /// safely consume: macro-wide `Var` reads first (pure, tolerates a
-    /// poisoned lock by falling back to an empty environment), then this
-    /// invocation's `Param` reads and any `Call` nodes (which may run real
-    /// instructions — see `resolve_calls_and_params`). Every instruction
-    /// field's value resolution funnels through this one method.
+    /// Resolves `value` into a tree `Value::eval()` can consume: macro-wide
+    /// `Var` reads first (falling back to an empty environment if the lock
+    /// is poisoned), then `Param` reads and any `Call` nodes.
     fn resolve(&mut self, value: &Value, depth: u32) -> Result<Value, String> {
         let vars_resolved = match self.variables.lock() {
             Ok(guard) => value.resolve_vars(&guard),
@@ -86,14 +62,10 @@ impl<'a> ExecCtx<'a> {
     }
 }
 
-/// Walks a `Var`-resolved tree substituting `Param` leaves (from `ctx`'s
-/// current invocation scope) and `Call` nodes (by actually running the
-/// callee's body and capturing its `Return`) — the impure counterpart to
-/// `Value::resolve_vars`, kept here rather than in `input/value.rs` because
-/// it needs `run_block`/`call_block`'s execution capability, which that
-/// module deliberately doesn't have (see `Value::eval`'s `Param`/`Call`
-/// error arms — this is the *only* place allowed to resolve them away
-/// first).
+/// Walks a `Var`-resolved tree substituting `Param` leaves and `Call` nodes
+/// (by actually running the callee's body and capturing its `Return`).
+/// Lives here rather than in `input/value.rs` because it needs real
+/// execution capability that module deliberately doesn't have.
 fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Result<Value, String> {
     match value {
         Value::Number { value } => Ok(Value::Number { value: *value }),
@@ -111,9 +83,8 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
             Ok(Value::Op { op: *op, args, saved: saved.clone() })
         }
         Value::Call { block_id, args, .. } => {
-            // Args are evaluated in the *caller's* current scope (ctx's
-            // param_env as it is right now), fully resolved down to concrete
-            // values before `call_block` swaps in the callee's own scope.
+            // Args evaluate in the caller's scope, fully resolved to
+            // concrete values before call_block swaps in the callee's scope.
             let mut evaluated_args = Vec::with_capacity(args.len());
             for a in args {
                 let resolved = resolve_calls_and_params(a, ctx, depth)?;
@@ -128,21 +99,16 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
     }
 }
 
-/// Runs custom block `block_id`'s body with `arg_values` bound to its
-/// declared inputs, returning whatever `Return` produced (`None` if the
-/// body ran to completion without one — a well-formed `returns_value: true`
-/// block should always `Return`, but a `CallBlock`/`returns_value: false`
-/// invocation legitimately never does). Shared by both call positions:
-/// `resolve_calls_and_params`'s `Value::Call` arm (value position) and
-/// `run_block`'s own `Instruction::CallBlock` arm (command position, which
-/// just discards the `Option`).
+/// Runs custom block `block_id` with `arg_values` bound to its declared
+/// inputs, returning whatever `Return` produced (`None` if it ran to
+/// completion without one). Shared by both the value-position `Value::Call`
+/// and command-position `Instruction::CallBlock` call sites.
 fn call_block(block_id: &str, arg_values: Vec<Evaluated>, ctx: &mut ExecCtx, depth: u32) -> Result<Option<Evaluated>, String> {
     if depth > MAX_CALL_DEPTH {
         return Err("custom block call depth exceeded (possible infinite recursion)".to_string());
     }
-    // Cloning the Arc (not the table) sidesteps any borrow-checker
-    // entanglement between reading `ctx.block_table` and later mutably
-    // swapping `ctx.param_env` for the nested call.
+    // Clone the Arc (not the table) to avoid a borrow-checker conflict
+    // between reading block_table and mutating param_env below.
     let block_table = Arc::clone(&ctx.block_table);
     let runtime = block_table.get(block_id).ok_or_else(|| format!("call to unknown custom block '{block_id}'"))?;
     let new_env: HashMap<String, Evaluated> = runtime.input_names.iter().cloned().zip(arg_values).collect();
@@ -163,21 +129,16 @@ fn spin_sleeper() -> &'static SpinSleeper {
     SLEEPER.get_or_init(|| SpinSleeper::default().with_spin_strategy(SpinStrategy::SpinLoopHint))
 }
 
-/// Polling granularity while waiting for a `Wait` instruction to elapse during
-/// a stoppable (loop-mode) run, so a stop signal lands quickly instead of
-/// only being noticed once the full wait has elapsed.
+/// Polling granularity during a `Wait`, so a stop signal lands quickly
+/// instead of only being noticed once the full wait elapses.
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(15);
 
 impl Macro {
-    /// Runs every "When Ran" entry-point strand (one whose first instruction
-    /// is `Instruction::WhenRan`) concurrently, each on its own thread, all
-    /// sharing the same `stop_flag` — so stopping a run stops every strand at
-    /// once. Strands that aren't entry points are preserved on the macro but
-    /// stay inert, *except* a custom block's header strand, whose body is
-    /// extracted into the shared `block_table` (built once, up front) rather
-    /// than run directly — it only ever executes via `CallBlock`/`Value::Call`.
-    /// Blocks until every entry strand has finished (or been stopped),
-    /// matching the old single-root behavior for callers.
+    /// Runs every "When Ran" entry-point strand concurrently on its own
+    /// thread, sharing one `stop_flag`. A custom block's header strand isn't
+    /// run directly — its body is extracted into `block_table` and only
+    /// executes via `CallBlock`/`Value::Call`. Blocks until every strand
+    /// finishes or is stopped.
     pub fn run(
         self,
         emulator: Arc<Mutex<dyn InputBackend>>,
@@ -226,16 +187,11 @@ impl Macro {
     }
 }
 
-/// Per-thread entry point for one strand's run: sets up a fresh `ExecCtx`
-/// (empty `param_env`, its own `pressed_keys`) and runs the strand's
-/// instructions top to bottom via `run_block`, releasing any keys still held
-/// afterward — whether the strand finished naturally or was stopped, and
-/// regardless of how deep any custom-block calls nested along the way, since
-/// `pressed_keys` is shared through the whole call tree. The top-level
-/// `Result`/`Option` `run_block` returns is discarded: a `Return` reaching
-/// all the way out to strand level (rather than being caught by an
-/// enclosing `call_block`) has nothing left to hand the value to, and a
-/// resolve error here has already been `warn!`-logged at its source.
+/// Per-thread entry point for one strand: runs it via `run_block`, then
+/// releases any keys/buttons still held, whether the strand finished,
+/// stopped, or errored. The returned `Result`/`Option` is discarded — a
+/// `Return` reaching strand level has nowhere to hand its value, and resolve
+/// errors are already `warn!`-logged at their source.
 fn run_strand(
     instructions: Vec<Instruction>,
     emulator: Arc<Mutex<dyn InputBackend>>,
@@ -280,8 +236,7 @@ fn run_strand(
 }
 
 /// Convenience entry point equivalent to `run_strand` with an empty
-/// `block_table` — kept for callers/tests that don't need custom blocks, so
-/// they can construct an `ExecCtx` without caring about the concept.
+/// `block_table`, for callers/tests that don't need custom blocks.
 pub fn run_instructions(
     instructions: Vec<Instruction>,
     emulator: Arc<Mutex<dyn InputBackend>>,
@@ -292,37 +247,24 @@ pub fn run_instructions(
     run_strand(instructions, emulator, stop_flag, speed_multiplier, variables, Arc::new(HashMap::new()));
 }
 
-/// Runs `instructions` top to bottom against `ctx`, returning `Ok(Some(v))`
-/// the instant a `Return` is hit (unwinding out of this call — and only this
-/// call, via the early `return` below — back to whoever invoked it: either
-/// `call_block`, for a nested custom-block call, or `run_strand`, at the
-/// outermost level), `Ok(None)` if it runs to completion, or `Err` if
-/// resolving/evaluating a value along the way failed hard enough to abort
-/// (a call-depth overrun, or an inner `Return`'s own value failing to
-/// resolve) — most per-instruction resolve errors are non-fatal and instead
-/// `warn!`-log + skip that one instruction, exactly like before custom
-/// blocks existed.
+/// Runs `instructions` top to bottom, returning `Ok(Some(v))` the instant a
+/// `Return` is hit, `Ok(None)` on completion, or `Err` on a hard failure
+/// (call-depth overrun, or a `Return`'s value failing to resolve). Most
+/// per-instruction resolve errors are non-fatal and just `warn!`-log + skip.
 ///
 /// `stop_flag`, when present, is checked between every instruction (and
-/// while a `Wait` is elapsing) so the run can be aborted early — e.g. when
-/// the "Stop Loop" hotkey is pressed mid-iteration.
+/// during a `Wait`) so the run can be aborted early.
 ///
-/// `speed_multiplier` scales every `Wait` instruction's duration
-/// inversely — 2.0 runs waits at half their length (twice as
-/// fast), 0.5 runs them at double length (half as fast) — so it behaves
-/// like an actual playback speed rather than a wait-length multiplier. The
-/// caller combines the macro's own multiplier with the global runtime
-/// override into this single factor before calling in.
+/// `speed_multiplier` scales every `Wait` inversely (2.0 = half-length,
+/// twice as fast), combining the macro's own multiplier with the global
+/// runtime override.
 fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Result<Option<Evaluated>, String> {
     if depth > MAX_CALL_DEPTH {
         return Err("custom block call depth exceeded (possible infinite recursion)".to_string());
     }
 
-    // Anchors this call's own `Wait` pacing — deliberately local to this one
-    // invocation (not threaded through `ctx`), so a nested call's waits pace
-    // against each other independently; once it returns, the caller's own
-    // (now possibly stale) deadline just falls behind and re-anchors on its
-    // next `Wait`, the same "fell behind" handling already below.
+    // Local to this invocation (not in `ctx`) so a nested call's waits pace
+    // independently; the caller's deadline just re-anchors on its next Wait.
     let mut deadline = Instant::now();
 
     let stop_requested = |flag: &Arc<Mutex<bool>>| -> bool {
@@ -367,9 +309,8 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                         }
                     }
                 }
-                // A well-formed `returns_value: false` block's body has no
-                // `Return`; if one somehow sneaks in, it just ends this
-                // nested call early rather than the value going anywhere.
+                // A `returns_value: false` block's body normally has no
+                // `Return`; if one sneaks in, it just ends the call early.
                 let _ = call_block(block_id, evaluated_args, ctx, depth + 1)?;
             }
             Instruction::Wait(duration) => {
@@ -380,10 +321,8 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                         continue;
                     }
                 };
-                // Clamped rather than trusted as non-negative: `duration` may
-                // be an `Op::Random` node whose lower bound sits below zero
-                // (e.g. a jitter range wider than the base wait), and
-                // `Duration::from_secs_f64` panics on a negative input.
+                // Clamped since duration may be an Op::Random node with a
+                // negative lower bound; from_secs_f64 panics on negative input.
                 let actual = (duration / ctx.speed_multiplier).max(0.0);
                 deadline += Duration::from_secs_f64(actual / 1000.0);
 
@@ -759,10 +698,8 @@ mod tests {
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(7.0)));
     }
 
-    /// A macro with one custom "double" block (returns_value, `Return
-    /// param*2`) called via `Value::Call` from a `SetVariable`'s value tree
-    /// should write the doubled result — exercising the whole
-    /// resolve_calls_and_params -> call_block -> run_block -> Return path.
+    /// A macro with one custom "double" block (`Return param*2`) called via
+    /// `Value::Call` should write the doubled result.
     fn macro_with_double_block(caller_instructions: Vec<Instruction>) -> Macro {
         let block_id = "double".to_string();
         Macro {
@@ -818,9 +755,8 @@ mod tests {
     }
 
     /// A `returns_value` block whose body never hits `Return` should leave
-    /// the caller's `SetVariable` un-applied (the whole resolve chain errs,
-    /// same as any other unresolvable value — logged and skipped) rather
-    /// than panicking or silently defaulting to some value.
+    /// the caller's `SetVariable` un-applied rather than panicking or
+    /// defaulting to some value.
     #[test]
     fn value_call_to_block_without_return_leaves_variable_unset() {
         let vars = empty_vars();
@@ -854,9 +790,8 @@ mod tests {
         assert_eq!(vars.lock().unwrap().get("x"), None);
     }
 
-    /// A `CallBlock` (command position) with real `Wait`s inside its body
-    /// should actually take real time, proving the callee's instructions
-    /// genuinely execute inline rather than being skipped/no-op'd.
+    /// A `CallBlock` with real `Wait`s inside its body should take real
+    /// time, proving the callee's instructions genuinely execute inline.
     #[test]
     fn call_block_runs_real_instructions_including_wait() {
         let block_id = "waiter".to_string();
@@ -937,10 +872,9 @@ mod tests {
         assert_eq!(vars.lock().unwrap().get("x"), None);
     }
 
-    /// One reporter block ("triple") calling another ("double") in its own
-    /// `Return` expression should compose correctly — proves multi-level
-    /// `Value::Call` resolution genuinely nests rather than only working one
-    /// level deep.
+    /// One reporter block calling another in its own `Return` expression
+    /// should compose correctly, proving multi-level `Value::Call`
+    /// resolution nests rather than working one level deep.
     #[test]
     fn reporter_block_composes_with_another_reporter_block() {
         let vars = empty_vars();

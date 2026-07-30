@@ -42,8 +42,8 @@ pub trait InputBackend: Send + 'static {
     fn cursor_pos(&self) -> Option<(i32, i32)>;
 }
 
-/// Start the global input capture thread for the current platform.
-/// The callback is called for each input event and returns whether to suppress it.
+/// Start the global input capture thread for the current platform. The
+/// callback is called for each input event and returns whether to suppress it.
 pub fn start_capture(
     callback: Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static>,
 ) {
@@ -64,20 +64,18 @@ pub fn start_capture(
     }
 }
 
-/// Called from the shared capture callback the instant a hotkey combo matches,
-/// before the action is dispatched. Lets a backend snapshot state that is only
-/// meaningful at that moment — on Windows, the foreground window a
-/// hotkey-triggered macro should be typed back into. No-op elsewhere.
+/// Called the instant a hotkey combo matches, before the action is
+/// dispatched. Lets a backend snapshot state only meaningful at that
+/// moment — on Windows, the foreground window to type the macro back into.
+/// No-op elsewhere.
 pub fn note_hotkey_matched() {
     #[cfg(windows)]
     windows::note_hotkey_matched();
 }
 
 /// Feeds a key event from the app's own webview into the same hotkey
-/// pipeline the global OS hook uses. See `windows::dispatch_from_focused_window`
-/// for why this exists — Chromium starves the Windows low-level keyboard hook
-/// while the app's own window has focus. No-op (never suppresses) elsewhere,
-/// since only Windows exhibits this behavior.
+/// pipeline the global OS hook uses (Chromium starves the Windows low-level
+/// keyboard hook while the app's own window has focus). No-op elsewhere.
 pub fn dispatch_from_focused_window(vk: u16, pressed: bool) -> bool {
     #[cfg(windows)]
     return windows::dispatch_from_focused_window(vk, pressed);
@@ -88,8 +86,8 @@ pub fn dispatch_from_focused_window(vk: u16, pressed: bool) -> bool {
     }
 }
 
-/// Create the platform-specific input backend wrapped in `Arc<Mutex<dyn InputBackend>>`.
-/// The coercion to the trait object happens here while we still hold the concrete type.
+/// Create the platform-specific input backend wrapped in
+/// `Arc<Mutex<dyn InputBackend>>`.
 pub fn create_backend() -> Option<Arc<Mutex<dyn InputBackend>>> {
     #[cfg(target_os = "linux")]
     {

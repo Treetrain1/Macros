@@ -10,9 +10,8 @@ use tauri::{AppHandle, Runtime};
 use tracing::warn;
 
 /// Writes the run's final variable values back into the (still-selected)
-/// macro and saves it to disk — called once when a run finishes or a loop
-/// stops, not per-instruction, so a tight loop doesn't hammer the disk. A
-/// no-op if the macro was switched away from mid-run.
+/// macro and saves it to disk. Called once per run/loop finish rather than
+/// per-instruction, and a no-op if the macro was switched away mid-run.
 fn persist_variables<R: Runtime>(shared_state: &SharedState, app: &AppHandle<R>, macro_id: &str, variables: &VariableStore) {
     let Ok(mut s) = shared_state.lock() else { return };
     let Some(mac) = s.current_macro.as_mut() else { return };
@@ -73,11 +72,9 @@ pub(crate) fn into_single_run_task<R: Runtime>(
     move || {
         println!("Running macro: {}", mac.name);
         let macro_id = mac.id.clone();
-        // A stop flag of this run's own, not the shared `is_looping` that
-        // `stop_flag` refers to: `is_looping` is cleared by whichever run
-        // finishes first, which used to stop a concurrently-started run
-        // mid-wait — the spurious stop that previously made this path pass
-        // `None` and so run uninterruptibly.
+        // A stop flag of this run's own, not the shared `is_looping` `stop_flag`
+        // refers to — that one gets cleared by whichever run finishes first,
+        // which would spuriously cut a concurrently-started run short.
         let run_flag = run_registry::begin_run();
         mac.run(emulator, Some(Arc::clone(&run_flag)), speed_multiplier, Arc::clone(&variables));
         run_registry::end_run(&run_flag);

@@ -25,6 +25,12 @@ axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 
 [features]
+default = ["cef"]
+# Mirrors the `cef` feature already force-enabled on the `tauri` workspace
+# dependency. `cargo tauri dev`'s macOS bundler only takes the CEF code path
+# (building a real .app so CEF can find its Frameworks dir) when it sees this
+# feature declared and enabled on this package's own manifest.
+cef = ["tauri/cef"]
 # Debug-only HTTP+WebSocket bridge that lets a plain browser tab (no Tauri
 # webview) drive the real running backend — see src/dev_bridge.rs.
 dev-bridge = ["dep:axum", "dep:tower-http"]

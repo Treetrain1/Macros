@@ -3,8 +3,8 @@ pub(crate) mod selection;
 pub(crate) mod settings;
 
 pub(crate) use persistence::{get_macros_from_config, read_macro_file, write_macro_file};
-pub(crate) use selection::{get_macro_by_id, get_selected_macro_id, set_selected_macro_id};
-pub(crate) use settings::{load_settings, save_settings, update_settings, AppSettings};
+pub(crate) use selection::{get_selected_macro_id, set_selected_macro_id};
+pub(crate) use settings::{load_settings, update_settings};
 
 pub(crate) const APP_ID: &str = "Macros";
 pub(crate) const GLOBAL_HOTKEYS_KEY: &str = "global_hotkeys";

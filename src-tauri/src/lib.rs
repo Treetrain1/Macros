@@ -15,7 +15,7 @@ pub(crate) mod updater;
 use crate::macros::runner::make_backend;
 use crate::macros::thread_pool::ThreadPool;
 use crate::recording::QueueSignal;
-use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
+use crate::state::{AppState, Page, RecordingPhase, SharedState, UpdateCheckState};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Cef, Manager};
@@ -25,6 +25,13 @@ pub fn run() {
     let _ = tracing_log::LogTracer::init();
 
     tauri::Builder::<Cef>::default()
+        // Chromium's OSCrypt normally stores its "Safe Storage" encryption
+        // key in the system keychain, prompting for the login password on
+        // every launch because dev builds get a fresh ad-hoc signature each
+        // time and macOS can't recognize them as the item's original owner.
+        // The app doesn't rely on Chromium's encrypted storage (cookies,
+        // saved passwords, etc.), so use an in-memory mock key instead.
+        .command_line_args([("--use-mock-keychain", None::<String>)])
         .setup(|app| {
             let settings = config::load_settings();
 

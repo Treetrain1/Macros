@@ -1,5 +1,5 @@
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
+use crate::input::types::{Axis, Coordinate, Direction, InputToken};
 use crate::input::value::{Evaluated, Op, Value};
 use crate::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use crate::macros::backend::InputBackend;

@@ -6,9 +6,7 @@
   <summary>Visually create and run keyboard and mouse macros</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
-  <!-- TODO: confirm GPL-3.0-only vs GPL-3.0-or-later against any per-file license
-       headers in the repo; LICENSE currently only contains the bare GPLv3 text. -->
-  <project_license>GPL-3.0-or-later</project_license>
+  <project_license>GPL-3.0-only</project_license>
 
   <developer id="dev.ethanstokes">
     <name>Ethan Stokes</name>
@@ -27,17 +25,15 @@
     </p>
   </description>
 
-  <!-- TODO: Flathub requires at least one real, permanently-hosted screenshot
-       before submission. Replace with actual image URLs (e.g. raw.githubusercontent.com
-       links pinned to a tag, or a stable project website) and uncomment. -->
-  <!--
+  <!-- TODO: this points at the master branch to match the flatpak
+       manifest's current, temporary source pin. Update both together once
+       pinned to a real release tag before submitting. -->
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/EthanRStokes/Macros/main/res/screenshots/main.png</image>
-      <caption>Editing a macro</caption>
+      <image>https://raw.githubusercontent.com/EthanRStokes/Macros/master/res/screenshots/Screenshot_20260730_010613.png</image>
+      <caption>Building a macro in the block editor</caption>
     </screenshot>
   </screenshots>
-  -->
 
   <url type="homepage">https://github.com/EthanRStokes/Macros</url>
   <url type="bugtracker">https://github.com/EthanRStokes/Macros/issues</url>

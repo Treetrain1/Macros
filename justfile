@@ -60,3 +60,25 @@ replace: build uninstall install
 flatpak-sources fbt_path:
     python3 {{fbt_path}}/cargo/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
     python3 {{fbt_path}}/node/flatpak-node-generator.py pnpm ui/pnpm-lock.yaml --pnpm-store-version v11 -o packaging/flatpak/node-sources.json
+
+# Build the Flatpak from source into ./flatpak-build, exporting to a local
+# ./flatpak-repo (both gitignored). Matches the paths .github/workflows/*.yml
+# use, so this reproduces exactly what CI does. If your flatpak-builder errors
+# with "Failed to spawn rofiles-fuse", add --disable-rofiles-fuse (needed in
+# some sandboxed/containerized dev environments where FUSE isn't available).
+flatpak-build *args:
+    flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/dev.ethanstokes.Macros.yml {{args}}
+
+# Install the just-built Flatpak from the local repo, adding it as a remote
+# first if needed. Re-run after every flatpak-build to pick up changes.
+flatpak-install:
+    flatpak remote-add --user --if-not-exists --no-gpg-verify macros-local flatpak-repo
+    flatpak install --user -y --reinstall macros-local {{appid}}
+
+# Build, install, and launch in one go -- the normal "does it still work" loop.
+flatpak-test *args: (flatpak-build args) flatpak-install
+    flatpak run {{appid}}
+
+# Remove the local test install (leaves flatpak-repo/flatpak-build in place).
+flatpak-uninstall:
+    flatpak uninstall --user -y {{appid}}

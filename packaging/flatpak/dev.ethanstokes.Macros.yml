@@ -73,9 +73,20 @@ finish-args:
   # No --talk-name=org.freedesktop.DBus: confirmed empirically the app runs fine
   # without it -- CEF's internal "Failed to connect to the bus" errors (it wants
   # the system bus for UPower battery status) are harmless and non-fatal.
-  - --filesystem=home # TODO: confirm this is still needed -- rfd's file dialogs go
-  # through the portal (no fs permission required) already; only keep this if macro
-  # actions can touch arbitrary file paths outside of a picker.
+  # Confirmed necessary, not incidental: rfd's import/export file dialogs are
+  # portal-routed and need no fs permission on their own (see
+  # src-tauri/src/commands.rs's export_macro/import_macro, which only ever touch
+  # the path the picker itself returns), and config/data persistence lives under
+  # the standard XDG config dir (auto-redirected into the sandbox, no permission
+  # needed either) -- see macros-core/src/config/persistence.rs. What actually
+  # needs this is macros-core/src/macros/runner.rs's `Instruction::Command`,
+  # which runs a free-text macro action via `bash -c` with no path restriction of
+  # its own (macros-core/src/macros/mod.rs). That's a deliberate feature (macros
+  # can shell out to arbitrary commands), so confining it to a narrower
+  # filesystem scope would just make that action silently misbehave outside the
+  # narrowed path instead of actually sandboxing it -- if tighter confinement is
+  # wanted later, it belongs on the Command instruction itself, not here.
+  - --filesystem=home
 
 modules:
   - name: macros

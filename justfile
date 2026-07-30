@@ -59,4 +59,4 @@ replace: build uninstall install
 # that repo's READMEs for current generator flags before running.
 flatpak-sources fbt_path:
     python3 {{fbt_path}}/cargo/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
-    python3 {{fbt_path}}/node/flatpak-node-generator.py pnpm ui/pnpm-lock.yaml -o packaging/flatpak/node-sources.json
+    python3 {{fbt_path}}/node/flatpak-node-generator.py pnpm ui/pnpm-lock.yaml --pnpm-store-version v11 -o packaging/flatpak/node-sources.json

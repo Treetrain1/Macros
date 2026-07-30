@@ -21,13 +21,36 @@ branch: stable
 # something to verify, not something already confirmed working.
 
 build-options:
-  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
+  # pnpm-bin (see build-commands step 1) has to be on PATH, not just invoked via a
+  # relative path in build-commands: src-tauri/build.rs shells out to bare `pnpm`
+  # itself (to build the frontend as part of `cargo build`), and that invocation
+  # has no way to know about a repo-relative path.
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin:/run/build/macros/pnpm-bin
   env:
-    # flatpak-cargo-generator's generated-sources.json (see sources below) writes a
-    # .cargo/config.toml into the build tree pointing crates-io at the vendored
-    # crates, so plain `cargo --offline` from the repo root picks it up with no
-    # further CARGO_HOME wiring needed.
+    # flatpak-cargo-generator's cargo-sources.json (see sources below) writes its
+    # vendored-crates config to cargo/config, not .cargo/config.toml -- cargo only
+    # picks that up if CARGO_HOME points at that "cargo" dir (confirmed empirically:
+    # without this, cargo silently uses the default ~/.cargo and never sees the
+    # vendor config, then fails trying to hit the network for git deps).
+    CARGO_HOME: /run/build/macros/cargo
+    CARGO_NET_OFFLINE: 'true'
     CEF_PATH: /run/build/macros/cef-prebuilt
+    # Caps both cargo's own job parallelism AND, transitively, ninja's (the cmake
+    # crate forwards $NUM_JOBS, which cargo derives from this, as ninja's -j) --
+    # confirmed empirically that building this workspace's ~300 crates at full
+    # nproc (24 on the dev machine) alongside a from-scratch CEF wrapper cmake/
+    # ninja build OOM-kills the build (SIGKILL/137) at peak load, right around
+    # when webkit2gtk/tao/the CEF wrapper compile in parallel.
+    CARGO_BUILD_JOBS: '6'
+    # src-tauri/build.rs checks MACROS_PNPM_OFFLINE to decide whether to pass
+    # pnpm --offline/--frozen-lockfile/--trust-lockfile explicitly -- confirmed
+    # empirically that pnpm 11's env-var config (npm_config_offline,
+    # npm_config_trust_lockfile) is NOT honored for these, only the CLI flags
+    # are, and build.rs's `pnpm install` has no other way to receive flags.
+    # Deliberately NOT named FLATPAK: cef-dll-sys's own build script already
+    # keys off that exact name to look for CEF at /usr/lib instead of
+    # $CEF_PATH, which would break the CEF staging in step 1 above.
+    MACROS_PNPM_OFFLINE: '1'
 
 finish-args:
   - --share=ipc
@@ -38,15 +61,18 @@ finish-args:
   # (loopback-only even when enabled, which doesn't require this permission anyway).
   - --socket=wayland
   - --socket=fallback-x11
-  # No plain --socket=x11: fallback-x11 (XWayland) already covers windowing when
-  # Wayland isn't available. Input capture/synthesis goes through evdev/uinput
-  # (see macros-core/src/macros/backend/evdev.rs), not the X11 protocol, so this
-  # app doesn't need unrestricted X11 access (keylogging/screenshotting other apps).
+  # Confirmed empirically (real KDE/Wayland test run) that plain --socket=x11 is
+  # actually required, not just fallback-x11 -- without it, window creation fails
+  # outright (tauri::Error::Runtime(CreateWindow)) before the app gets anywhere
+  # near evdev/uinput. Whatever wry/CEF's windowing path needs on this stack, it
+  # needs more than XWayland's fallback-x11 alone provides.
+  - --socket=x11
   - --socket=pulseaudio # CEF's embedded Chromium renderer wants audio output access.
   - --device=all # /dev/uinput + /dev/input/event* for evdev-based hotkeys & synthetic input.
   - --device=dri
-  # No --talk-name=org.freedesktop.DBus: no dbus/tray/notification crate anywhere
-  # in the workspace: talking to the bus daemon itself needs no explicit permission.
+  # No --talk-name=org.freedesktop.DBus: confirmed empirically the app runs fine
+  # without it -- CEF's internal "Failed to connect to the bus" errors (it wants
+  # the system bus for UPower battery status) are harmless and non-fatal.
   - --filesystem=home # TODO: confirm this is still needed -- rfd's file dialogs go
   # through the portal (no fs permission required) already; only keep this if macro
   # actions can touch arbitrary file paths outside of a picker.
@@ -87,13 +113,31 @@ modules:
         mv "$EXTRACTED_DIR/CREDITS.html" "$DEST/"
         rm -rf "$EXTRACTED_DIR"
         printf '{"type":"minimal","name":"%s","sha1":"%s"}' "$ARCHIVE_NAME" "$SHA1" > "$DEST/archive.json"
-      # ---- 2. Frontend (ui/dist), vendored via node-sources.json (see sources below).
-      # RISK: flatpak-node-generator's pnpm support is less battle-tested than its
-      # npm/yarn modes, and ui/pnpm-lock.yaml is lockfileVersion 9 (pnpm 9+/11.3.0,
-      # see ui/package.json's packageManager field) -- confirm the generator you use
-      # actually understands that lockfile version before trusting this step.
-      - cd ui && pnpm install --offline --frozen-lockfile && pnpm run build && cd ..
-      # ---- 3. The Rust workspace itself, vendored via cargo-sources.json.
+      # ---- 2. Stage pnpm itself. The node20 SDK extension provides node/npm/
+      # corepack but not pnpm, and corepack would need network to fetch it on
+      # first use (unavailable during the sandboxed build) -- so pnpm's own
+      # standalone binary is staged from a pinned source instead, matching
+      # ui/package.json's "packageManager": "pnpm@11.3.0". It has to land on
+      # PATH (see build-options.append-path above), not just be invoked with a
+      # relative path here: src-tauri/build.rs shells out to bare `pnpm` itself
+      # as part of `cargo build` (see step 3) to build ui/dist.
+      - mkdir -p pnpm-bin && tar -xzf pnpm-linux-*.tar.gz -C pnpm-bin
+      # npm_config_store_dir (see build-options.env) is NOT honored by pnpm for
+      # this -- confirmed empirically: pnpm still resolves the store at
+      # ./.pnpm-store relative to wherever pnpm-workspace.yaml is found walking
+      # up from cwd, ignoring the env var entirely. Since ui/ has its own
+      # pnpm-workspace.yaml (its actual workspace root), pnpm never sees the one
+      # node-sources.json's populate step wrote at the build root either. Rather
+      # than fight pnpm's config resolution, put the real store where it's
+      # actually going to look: symlinked so build.rs's bare `pnpm install` (cwd
+      # ui/, walks up to find no closer pnpm-workspace.yaml override) resolves
+      # ./.pnpm-store at the build root to the store populated at
+      # flatpak-node/pnpm-store. Without this it hangs indefinitely instead of
+      # failing fast, since --offline isn't set either (nothing paves the way to
+      # pass it to a hardcoded `Command::new("pnpm")` call).
+      - ln -s flatpak-node/pnpm-store .pnpm-store
+      # ---- 3. The Rust workspace (and, via src-tauri/build.rs, the frontend
+      # too) vendored via cargo-sources.json/node-sources.json.
       - cargo --offline build --release
       # ---- 4. Install the binary plus the CEF runtime payload cef-dll-sys's build.rs
       # drops next to it in target/release (see copy_cef_runtime_files upstream, and
@@ -102,7 +146,26 @@ modules:
       # has to live together in a private libdir, not /usr/bin.
       - install -Dm755 target/release/macros /app/lib/macros/macros
       - mkdir -p /app/bin
-      - ln -s ../lib/macros/macros /app/bin/macros
+      # Not a plain symlink: cef-dll-sys's "sandbox" feature is on by default in
+      # the tauri-runtime-cef fork's own Cargo.toml (default = ["sandbox"]) and
+      # nothing in this repo can override that from downstream -- Cargo unifies
+      # features across the whole build, so src-tauri's `default-features = false`
+      # pin on the tauri-runtime-cef dependency doesn't actually disable it (the
+      # fork's own tauri crate depends on it without disabling defaults either).
+      # That builds chrome-sandbox expecting to be root-owned+setuid (mode 4755),
+      # which Flatpak's export process fundamentally cannot do -- confirmed
+      # empirically it's a hard, fatal crash otherwise ("SUID sandbox helper
+      # binary was found, but is not configured correctly"). Passing --no-sandbox
+      # on the command line is the standard, widely-used workaround for
+      # Chromium/CEF/Electron apps in Flatpak (redundant with it anyway, since
+      # Flatpak's own bwrap sandboxing already isolates the process) -- confirmed
+      # empirically this makes CEF start up and render normally.
+      - |
+        cat > /app/bin/macros <<'EOF'
+        #!/bin/sh
+        exec /app/lib/macros/macros --no-sandbox "$@"
+        EOF
+        chmod +x /app/bin/macros
       - install -Dm755 target/release/libcef.so /app/lib/macros/libcef.so
       - install -Dm755 target/release/libEGL.so /app/lib/macros/libEGL.so
       - install -Dm755 target/release/libGLESv2.so /app/lib/macros/libGLESv2.so
@@ -125,23 +188,36 @@ modules:
       - install -Dm644 res/dev.ethanstokes.Macros.metainfo.xml /app/share/metainfo/dev.ethanstokes.Macros.metainfo.xml
     sources:
       # TODO: pin to a real release tag (or commit) before submitting -- Flathub
-      # requires reproducible sources, not a moving branch. For local iteration you
-      # can swap this for `type: dir, path: ../..` to build from the working tree.
+      # requires reproducible sources, not a moving branch. This was verified end
+      # to end (full build + install + launch, see chat) against a local clone
+      # with Cargo.lock committed and this branch checked out; swap back to
+      # `type: dir, path: ../..` if you need to iterate locally again.
       - type: git
         url: https://github.com/EthanRStokes/Macros.git
-        tag: TODO-pin-a-tag-or-commit
+        branch: tauri-canvas-flat
 
       # Generate with (from repo root, needs Python 3 + flatpak-builder-tools):
       #   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
       # Regenerate whenever Cargo.lock changes. Handles the git-pinned tauri fork
       # dependency fine (flatpak-cargo-generator supports git sources natively).
-      - packaging/flatpak/cargo-sources.json
+      - cargo-sources.json
 
-      # Generate with (check flatpak-builder-tools' node generator README for the
-      # exact current flags -- pnpm support/flag names have shifted between
-      # releases of the tool):
-      #   python3 flatpak-node-generator.py pnpm ui/pnpm-lock.yaml -o packaging/flatpak/node-sources.json
-      - packaging/flatpak/node-sources.json
+      # Generate with (--pnpm-store-version v11 is required to match pnpm
+      # 11.3.0's default store layout -- the generator's own default is the
+      # older v10 layout, which silently produces a store pnpm 11 can't read):
+      #   python3 flatpak-node-generator.py pnpm ui/pnpm-lock.yaml --pnpm-store-version v11 -o packaging/flatpak/node-sources.json
+      - node-sources.json
+
+      # Standalone pnpm binary (see step 2 above) -- pinned to the version in
+      # ui/package.json's "packageManager" field. Update both together.
+      - type: file
+        url: https://github.com/pnpm/pnpm/releases/download/v11.3.0/pnpm-linux-x64.tar.gz
+        sha256: 6eb506b53297eb1186ba0cbff1577bb26d17713835a01a5342dcafae550827ce
+        only-arches: [x86_64]
+      - type: file
+        url: https://github.com/pnpm/pnpm/releases/download/v11.3.0/pnpm-linux-arm64.tar.gz
+        sha256: 383f644f50667e9c1752791173d274ba414117262b09c1b027c2d297bf520662
+        only-arches: [aarch64]
 
       # Pinned CEF prebuilt runtime (matches cef-dll-sys 150.0.0+150.0.10's expected
       # version, resolved against https://cef-builds.spotifycdn.com/index.json).

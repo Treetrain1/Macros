@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.ethanstokes.Macros</id>
+
+  <name>Macros</name>
+  <summary>Visually create and run keyboard and mouse macros</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- TODO: confirm GPL-3.0-only vs GPL-3.0-or-later against any per-file license
+       headers in the repo; LICENSE currently only contains the bare GPLv3 text. -->
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="dev.ethanstokes">
+    <name>Ethan Stokes</name>
+  </developer>
+
+  <launchable type="desktop-id">dev.ethanstokes.Macros.desktop</launchable>
+
+  <description>
+    <p>
+      Macros is a visual editor for building and running keyboard and mouse
+      automation. Record input, assemble sequences of actions in an editor,
+      and bind them to hotkeys to play back later.
+    </p>
+    <p>
+      It runs on Windows, Linux, and macOS.
+    </p>
+  </description>
+
+  <!-- TODO: Flathub requires at least one real, permanently-hosted screenshot
+       before submission. Replace with actual image URLs (e.g. raw.githubusercontent.com
+       links pinned to a tag, or a stable project website) and uncomment. -->
+  <!--
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/EthanRStokes/Macros/main/res/screenshots/main.png</image>
+      <caption>Editing a macro</caption>
+    </screenshot>
+  </screenshots>
+  -->
+
+  <url type="homepage">https://github.com/EthanRStokes/Macros</url>
+  <url type="bugtracker">https://github.com/EthanRStokes/Macros/issues</url>
+  <url type="vcs-browser">https://github.com/EthanRStokes/Macros</url>
+
+  <categories>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>Macro</keyword>
+    <keyword>Automation</keyword>
+    <keyword>Hotkey</keyword>
+    <keyword>Productivity</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <!-- TODO: keep this in sync with workspace.package.version in Cargo.toml on each release. -->
+    <release version="0.3.999" date="2026-07-29">
+      <description>
+        <p>Initial Flathub release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

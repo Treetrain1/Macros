@@ -51,3 +51,12 @@ uninstall:
     sudo rm -f /usr/bin/macros /usr/share/applications/macros.desktop /usr/share/icons/hicolor/256x256/apps/macros.png
 
 replace: build uninstall install
+
+# Regenerate the vendored dependency manifests the Flatpak build needs to build
+# fully offline (Flathub disallows network access during the actual build step).
+# Re-run whenever Cargo.lock or ui/pnpm-lock.yaml changes. Requires Python 3 and
+# https://github.com/flatpak/flatpak-builder-tools checked out somewhere; check
+# that repo's READMEs for current generator flags before running.
+flatpak-sources fbt_path:
+    python3 {{fbt_path}}/cargo/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+    python3 {{fbt_path}}/node/flatpak-node-generator.py pnpm ui/pnpm-lock.yaml -o packaging/flatpak/node-sources.json

@@ -7,81 +7,154 @@ app-id: dev.ethanstokes.Macros
 runtime: org.gnome.Platform
 runtime-version: '50'
 sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node20
 command: macros
 branch: stable
 
+# NOTE ON REPRODUCIBILITY: this manifest is meant to be reviewed/built with
+# flatpak-builder on Linux before it's ever pushed at Flathub -- it has only been
+# assembled by reading cef-dll-sys/download-cef's source and existing CI scripts on
+# a Windows dev box with no flatpak-builder available, so nothing here has actually
+# been through a real sandboxed build yet. Treat every TODO/RISK comment below as
+# something to verify, not something already confirmed working.
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
+  env:
+    # flatpak-cargo-generator's generated-sources.json (see sources below) writes a
+    # .cargo/config.toml into the build tree pointing crates-io at the vendored
+    # crates, so plain `cargo --offline` from the repo root picks it up with no
+    # further CARGO_HOME wiring needed.
+    CEF_PATH: /run/build/macros/cef-prebuilt
+
 finish-args:
   - --share=ipc
-  - --share=network
+  # No --share=network: the "cef" release build (default features, see
+  # src-tauri/Cargo.toml) has no code path that touches the network -- the only
+  # HTTP client in the tree is macros-core::updater, which is #[cfg(windows)] only,
+  # and the axum dev-bridge server is behind the non-default "dev-bridge" feature
+  # (loopback-only even when enabled, which doesn't require this permission anyway).
   - --socket=wayland
   - --socket=fallback-x11
-  - --socket=x11
-  - --socket=pulseaudio
-  - --device=all
+  # No plain --socket=x11: fallback-x11 (XWayland) already covers windowing when
+  # Wayland isn't available. Input capture/synthesis goes through evdev/uinput
+  # (see macros-core/src/macros/backend/evdev.rs), not the X11 protocol, so this
+  # app doesn't need unrestricted X11 access (keylogging/screenshotting other apps).
+  - --socket=pulseaudio # CEF's embedded Chromium renderer wants audio output access.
+  - --device=all # /dev/uinput + /dev/input/event* for evdev-based hotkeys & synthetic input.
   - --device=dri
-  - --talk-name=org.freedesktop.DBus
-  - --filesystem=home
+  # No --talk-name=org.freedesktop.DBus: no dbus/tray/notification crate anywhere
+  # in the workspace: talking to the bus daemon itself needs no explicit permission.
+  - --filesystem=home # TODO: confirm this is still needed -- rfd's file dialogs go
+  # through the portal (no fs permission required) already; only keep this if macro
+  # actions can touch arbitrary file paths outside of a picker.
 
 modules:
   - name: macros
     buildsystem: simple
     build-commands:
-      - install -Dm755 macros /app/lib/macros/macros
+      # ---- 1. Stage CEF where cef-dll-sys's build.rs (see
+      # cef-dll-sys-*/build.rs upstream) expects to find it via $CEF_PATH, so it
+      # never tries to download it itself (the build sandbox has no network).
+      # This reproduces exactly what download-cef's extract_target_archive() does:
+      # https://docs.rs/download-cef -- rename Release/ to the versioned/arch dir,
+      # merge Resources/* into it, move CMakeLists.txt/cmake/include/libcef_dll/
+      # CREDITS.html in, then drop an archive.json that check_archive_json() reads
+      # to confirm the staged version satisfies cef-dll-sys's required version.
+      - |
+        set -e
+        CEF_VERSION="150.0.10"
+        case "$(uname -m)" in
+          x86_64)  CEF_ARCH_DIR=cef_linux_x86_64 ;;
+          aarch64) CEF_ARCH_DIR=cef_linux_aarch64 ;;
+          *) echo "unsupported arch for CEF staging: $(uname -m)" >&2; exit 1 ;;
+        esac
+        ARCHIVE=$(ls cef_binary_*.tar.bz2)
+        ARCHIVE_NAME=$(basename "$ARCHIVE")
+        SHA1=$(sha1sum "$ARCHIVE" | cut -d' ' -f1)
+        EXTRACTED_DIR="${ARCHIVE_NAME%.tar.bz2}"
+        DEST="$CEF_PATH/$CEF_VERSION/$CEF_ARCH_DIR"
+        mkdir -p "$CEF_PATH/$CEF_VERSION"
+        tar -xjf "$ARCHIVE"
+        mv "$EXTRACTED_DIR/Release" "$DEST"
+        mv "$EXTRACTED_DIR"/Resources/* "$DEST/"
+        mv "$EXTRACTED_DIR/CMakeLists.txt" "$DEST/"
+        mv "$EXTRACTED_DIR/cmake" "$DEST/"
+        mv "$EXTRACTED_DIR/include" "$DEST/"
+        mv "$EXTRACTED_DIR/libcef_dll" "$DEST/"
+        mv "$EXTRACTED_DIR/CREDITS.html" "$DEST/"
+        rm -rf "$EXTRACTED_DIR"
+        printf '{"type":"minimal","name":"%s","sha1":"%s"}' "$ARCHIVE_NAME" "$SHA1" > "$DEST/archive.json"
+      # ---- 2. Frontend (ui/dist), vendored via node-sources.json (see sources below).
+      # RISK: flatpak-node-generator's pnpm support is less battle-tested than its
+      # npm/yarn modes, and ui/pnpm-lock.yaml is lockfileVersion 9 (pnpm 9+/11.3.0,
+      # see ui/package.json's packageManager field) -- confirm the generator you use
+      # actually understands that lockfile version before trusting this step.
+      - cd ui && pnpm install --offline --frozen-lockfile && pnpm run build && cd ..
+      # ---- 3. The Rust workspace itself, vendored via cargo-sources.json.
+      - cargo --offline build --release
+      # ---- 4. Install the binary plus the CEF runtime payload cef-dll-sys's build.rs
+      # drops next to it in target/release (see copy_cef_runtime_files upstream, and
+      # the near-identical AppImage/CI steps in .github/workflows/build-artifacts.yml)
+      # -- binary RUNPATH is $ORIGIN (see justfile's `install` recipe), so all of this
+      # has to live together in a private libdir, not /usr/bin.
+      - install -Dm755 target/release/macros /app/lib/macros/macros
       - mkdir -p /app/bin
       - ln -s ../lib/macros/macros /app/bin/macros
-      # CEF resolves its own resources (icudtl.dat, *.pak, locales/, ...) and dlopen's
-      # its GL/Vulkan backends relative to wherever libcef.so lives, so the whole CEF
-      # runtime payload has to stay flat alongside it -- same requirement as the
-      # AppImage build, see .github/workflows/*.yml.
-      - install -Dm755 libcef.so /app/lib/macros/libcef.so
-      - install -Dm755 libEGL.so /app/lib/macros/libEGL.so
-      - install -Dm755 libGLESv2.so /app/lib/macros/libGLESv2.so
-      - install -Dm755 libvk_swiftshader.so /app/lib/macros/libvk_swiftshader.so
-      - install -Dm755 libvulkan.so.1 /app/lib/macros/libvulkan.so.1
-      - install -Dm644 vk_swiftshader_icd.json /app/lib/macros/vk_swiftshader_icd.json
-      - install -Dm755 chrome-sandbox /app/lib/macros/chrome-sandbox
-      - install -Dm644 icudtl.dat /app/lib/macros/icudtl.dat
-      - install -Dm644 v8_context_snapshot.bin /app/lib/macros/v8_context_snapshot.bin
-      - install -Dm644 chrome_100_percent.pak /app/lib/macros/chrome_100_percent.pak
-      - install -Dm644 chrome_200_percent.pak /app/lib/macros/chrome_200_percent.pak
-      - install -Dm644 resources.pak /app/lib/macros/resources.pak
-      - cp -r locales /app/lib/macros/locales
+      - install -Dm755 target/release/libcef.so /app/lib/macros/libcef.so
+      - install -Dm755 target/release/libEGL.so /app/lib/macros/libEGL.so
+      - install -Dm755 target/release/libGLESv2.so /app/lib/macros/libGLESv2.so
+      - install -Dm755 target/release/libvk_swiftshader.so /app/lib/macros/libvk_swiftshader.so
+      - install -Dm755 target/release/libvulkan.so.1 /app/lib/macros/libvulkan.so.1
+      - install -Dm644 target/release/vk_swiftshader_icd.json /app/lib/macros/vk_swiftshader_icd.json
+      - install -Dm755 target/release/chrome-sandbox /app/lib/macros/chrome-sandbox
+      - install -Dm644 target/release/icudtl.dat /app/lib/macros/icudtl.dat
+      - install -Dm644 target/release/v8_context_snapshot.bin /app/lib/macros/v8_context_snapshot.bin
+      - install -Dm644 target/release/chrome_100_percent.pak /app/lib/macros/chrome_100_percent.pak
+      - install -Dm644 target/release/chrome_200_percent.pak /app/lib/macros/chrome_200_percent.pak
+      - install -Dm644 target/release/resources.pak /app/lib/macros/resources.pak
+      - cp -r target/release/locales /app/lib/macros/locales
+      # ---- 5. Desktop file, icon, AppStream metainfo.
       # res/macros.desktop uses Icon=macros, matching the AppImage/system-install
       # icon name; the flatpak export convention requires Icon= to match the app id.
-      - sed 's/^Icon=macros$/Icon=dev.ethanstokes.Macros/' macros.desktop > dev.ethanstokes.Macros.desktop
+      - sed 's/^Icon=macros$/Icon=dev.ethanstokes.Macros/' res/macros.desktop > dev.ethanstokes.Macros.desktop
       - install -Dm644 dev.ethanstokes.Macros.desktop /app/share/applications/dev.ethanstokes.Macros.desktop
-      - install -Dm644 macros.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Macros.png
+      - install -Dm644 res/icons/macros.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Macros.png
+      - install -Dm644 res/dev.ethanstokes.Macros.metainfo.xml /app/share/metainfo/dev.ethanstokes.Macros.metainfo.xml
     sources:
+      # TODO: pin to a real release tag (or commit) before submitting -- Flathub
+      # requires reproducible sources, not a moving branch. For local iteration you
+      # can swap this for `type: dir, path: ../..` to build from the working tree.
+      - type: git
+        url: https://github.com/EthanRStokes/Macros.git
+        tag: TODO-pin-a-tag-or-commit
+
+      # Generate with (from repo root, needs Python 3 + flatpak-builder-tools):
+      #   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+      # Regenerate whenever Cargo.lock changes. Handles the git-pinned tauri fork
+      # dependency fine (flatpak-cargo-generator supports git sources natively).
+      - packaging/flatpak/cargo-sources.json
+
+      # Generate with (check flatpak-builder-tools' node generator README for the
+      # exact current flags -- pnpm support/flag names have shifted between
+      # releases of the tool):
+      #   python3 flatpak-node-generator.py pnpm ui/pnpm-lock.yaml -o packaging/flatpak/node-sources.json
+      - packaging/flatpak/node-sources.json
+
+      # Pinned CEF prebuilt runtime (matches cef-dll-sys 150.0.0+150.0.10's expected
+      # version, resolved against https://cef-builds.spotifycdn.com/index.json).
+      # There is no source-buildable CEF here by design: Flathub permits declaring
+      # a pinned, hash-verified prebuilt binary as a source (same as e.g. Electron
+      # apps bundling Chromium) -- what Flathub disallows is fetching it over the
+      # network during the actual (sandboxed, offline) build step, which is exactly
+      # what step 1 above avoids by staging it from this source instead.
       - type: file
-        path: macros
+        url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linux64_minimal.tar.bz2
+        sha1: 74a1186c566cbbac38c6b0f5298fc0bcfc1b9606
+        only-arches: [x86_64]
       - type: file
-        path: libcef.so
-      - type: file
-        path: libEGL.so
-      - type: file
-        path: libGLESv2.so
-      - type: file
-        path: libvk_swiftshader.so
-      - type: file
-        path: libvulkan.so.1
-      - type: file
-        path: vk_swiftshader_icd.json
-      - type: file
-        path: chrome-sandbox
-      - type: file
-        path: icudtl.dat
-      - type: file
-        path: v8_context_snapshot.bin
-      - type: file
-        path: chrome_100_percent.pak
-      - type: file
-        path: chrome_200_percent.pak
-      - type: file
-        path: resources.pak
-      - type: dir
-        path: locales
-        dest: locales
-      - type: file
-        path: ../../res/macros.desktop
-      - type: file
-        path: ../../res/icons/macros.png
+        url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linuxarm64_minimal.tar.bz2
+        sha1: 03e7a836ee73326280b8a3032e9741898133447e
+        only-arches: [aarch64]

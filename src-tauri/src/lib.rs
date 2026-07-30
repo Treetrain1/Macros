@@ -18,6 +18,7 @@ pub fn run() {
     let _ = tracing_log::LogTracer::init();
 
     tauri::Builder::<Cef>::default()
+        .command_line_args([("--use-mock-keychain", None::<String>)])
         .setup(|app| {
             let settings = config::load_settings();
 

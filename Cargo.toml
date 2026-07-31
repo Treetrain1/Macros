@@ -38,5 +38,5 @@ core-foundation = "0.10.1"
 foreign-types = "0.5"
 tauri-build = { git = "https://github.com/EthanRStokes/tauri", rev = "8e422e5951769be66102e0481351f702f65c55d8", features = [] }
 tauri-runtime-cef = { git = "https://github.com/EthanRStokes/tauri", rev = "8e422e5951769be66102e0481351f702f65c55d8", default-features = false }
-axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.6", features = ["cors"] }
+axum = { version = "0.8.9", features = ["ws"] }
+tower-http = { version = "0.7.0", features = ["cors"] }

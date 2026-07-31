@@ -51,3 +51,35 @@ uninstall:
     sudo rm -f /usr/bin/macros /usr/share/applications/macros.desktop /usr/share/icons/hicolor/256x256/apps/macros.png
 
 replace: build uninstall install
+
+# Regenerate packaging/flatpak/{cargo,node}-sources.json from the current
+# lockfiles (needs org.flatpak.Builder installed: flatpak install flathub
+# org.flatpak.Builder). Re-run whenever Cargo.lock or ui/pnpm-lock.yaml changes.
+flatpak-sources:
+    flatpak run --command=flatpak-cargo-generator org.flatpak.Builder -o packaging/flatpak/cargo-sources.json Cargo.lock
+    flatpak run --command=flatpak-node-generator org.flatpak.Builder pnpm ui/pnpm-lock.yaml --pnpm-store-version v11 -o packaging/flatpak/node-sources.json
+
+# Build the Flatpak entirely from source inside the sandbox (Rust + frontend),
+# into ./flatpak-build, exporting to a local ./flatpak-repo (both gitignored).
+# Building in-sandbox -- rather than reusing a host `cargo build` -- keeps the
+# binary linked against the runtime's own glibc instead of the host's, which
+# matters on rolling-release distros with a newer glibc than the runtime ships.
+# If flatpak-builder errors with "Failed to spawn rofiles-fuse", add
+# --disable-rofiles-fuse (needed in some sandboxed/containerized dev environments
+# where FUSE isn't available).
+flatpak-build *args:
+    flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/{{appid}}.yml {{args}}
+
+# Install the just-built Flatpak from the local repo, adding it as a remote
+# first if needed. Re-run after every flatpak-build to pick up changes.
+flatpak-install:
+    flatpak remote-add --user --if-not-exists --no-gpg-verify macros-local flatpak-repo
+    flatpak install --user -y --reinstall macros-local {{appid}}
+
+# Build, install, and launch in one go -- the normal "does it still work" loop.
+flatpak-test *args: (flatpak-build args) flatpak-install
+    flatpak run {{appid}}
+
+# Remove the local test install (leaves flatpak-repo/flatpak-build in place).
+flatpak-uninstall:
+    flatpak uninstall --user -y {{appid}}

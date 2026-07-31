@@ -9,7 +9,7 @@
 // since this *is* the block: the drag ghost is just a clone of it).
 import { computed, type Component } from 'vue';
 import type { InstructionDto, InstructionType } from '../types';
-import { isHeaderType } from '../types';
+import { isCapType, isHeaderType } from '../types';
 import { paletteInstructions } from '../paletteState';
 import { beginPaletteDrag } from '../canvasDrag';
 import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
@@ -64,7 +64,7 @@ function onPointerDown(e: PointerEvent) {
 <template>
   <div
     class="instruction-row palette-prefab"
-    :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type) }"
+    :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
     @pointerdown="onPointerDown"
   >
     <div class="instruction-shape">

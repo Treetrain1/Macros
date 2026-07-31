@@ -836,7 +836,7 @@
         "type": "shell",
         "commands": [
             "python3 flatpak-node/populate_pnpm_store.py flatpak-node/pnpm-manifest.json flatpak-node/pnpm-tarballs flatpak-node/pnpm-store",
-            "echo \"storeDir: $PWD/flatpak-node/pnpm-store\" >> pnpm-workspace.yaml",
+            "echo \"storeDir=$PWD/flatpak-node/pnpm-store\" >> pnpm-workspace.yaml",
             "bash flatpak-node/setup_sdk_node_headers.sh"
         ]
     }

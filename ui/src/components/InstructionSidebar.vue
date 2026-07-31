@@ -72,8 +72,8 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
         <PaletteCallValueBlock v-for="def in reporterBlocks" :key="def.id" :def="def" />
       </div>
       <div class="sidebar-palette">
-        <PaletteInstructionBlock type="Return" />
         <PaletteCallBlock v-for="def in commandBlocks" :key="def.id" :def="def" />
+        <PaletteInstructionBlock type="Return" />
       </div>
     </div>
     <div class="sidebar-resize-handle" @pointerdown="beginSidebarResize" />

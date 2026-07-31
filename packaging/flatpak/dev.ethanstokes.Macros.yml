@@ -124,9 +124,6 @@ modules:
       - sed 's/^Icon=macros$/Icon=dev.ethanstokes.Macros/' res/macros.desktop > dev.ethanstokes.Macros.desktop
       - install -Dm644 dev.ethanstokes.Macros.desktop /app/share/applications/dev.ethanstokes.Macros.desktop
       - install -Dm644 res/icons/macros.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Macros.png
-      # Metainfo lives in the separate Macros-flathub repo (Flathub-listing
-      # metadata, not something the app needs to build/run).
-      - install -Dm644 flathub-meta/dev.ethanstokes.Macros.metainfo.xml /app/share/metainfo/dev.ethanstokes.Macros.metainfo.xml
     sources:
       # Local checkout including uncommitted changes, for `just flatpak-build`
       # iteration. Before a real Flathub submission, swap for a pinned `type: git`
@@ -134,11 +131,6 @@ modules:
       - type: dir
         path: ../..
         skip: [target, .git, .flatpak-builder, flatpak-build, flatpak-repo, node_modules, ui/node_modules, ui/dist, packaging/flatpak]
-
-      # AppStream metainfo + screenshots, sibling checkout.
-      - type: dir
-        path: ../../../Macros-flathub
-        dest: flathub-meta
 
       # Regenerate with `just flatpak-sources` whenever Cargo.lock changes.
       - cargo-sources.json
@@ -164,9 +156,9 @@ modules:
       # fetching it during the sandboxed build, which step 1 above avoids.
       - type: file
         url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linux64_minimal.tar.bz2
-        sha1: 74a1186c566cbbac38c6b0f5298fc0bcfc1b9606
+        sha256: 6c1d4891ef3886e3ccf65d09288d8304e3f7e3724a47c93293e2bd63e76528e4
         only-arches: [x86_64]
       - type: file
         url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linuxarm64_minimal.tar.bz2
-        sha1: 03e7a836ee73326280b8a3032e9741898133447e
+        sha256: fb95362ac91a1f71ae6a8c8ba4d0641cad08375904c4e7dd1cc3ceebb1a2d875
         only-arches: [aarch64]

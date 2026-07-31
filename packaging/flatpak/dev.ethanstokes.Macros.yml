@@ -11,6 +11,16 @@ sdk-extensions:
 command: macros
 branch: stable
 
+add-extensions:
+  org.freedesktop.Sdk.Extension.rust-stable:
+    directory: sdk/rust-stable
+    version: '25.08'
+    no-autodownload: false
+  org.freedesktop.Sdk.Extension.node20:
+    directory: sdk/node20
+    version: '25.08'
+    no-autodownload: false
+
 # Builds the Rust workspace and pnpm/Vite frontend from source inside the
 # sandbox, fully offline, rather than reusing a host-built binary -- a host
 # build links against the host's glibc, which can be newer than the runtime's

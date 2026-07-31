@@ -94,6 +94,17 @@ jobs:
         if: runner.os != 'macOS'
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Stage CEF runtime files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $releaseDir = "target/${{ matrix.target }}/release"
+          $cefBuildDir = Get-ChildItem "$releaseDir/build" -Directory -Filter "cef-dll-sys-*" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $cefRuntimeDir = Join-Path $cefBuildDir.FullName "out\cef_windows_x86_64"
+          Get-ChildItem $cefRuntimeDir -File | Copy-Item -Destination $releaseDir -Force
+          Copy-Item "$cefRuntimeDir\locales" $releaseDir -Recurse -Force
+
       - name: Rename binary (Linux)
         if: runner.os == 'Linux'
         run: cp target/${{ matrix.target }}/release/macros ${{ matrix.artifact_name }}

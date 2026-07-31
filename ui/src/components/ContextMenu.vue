@@ -8,13 +8,13 @@ import { clientToCanvas } from '../canvasDrag';
 import { ICONS } from '../icons';
 import { openRenameVariableDialog } from '../variableDialogs';
 import { openEditBlockDialog } from '../blockDialogs';
-import { findBlockDef } from '../types';
+import { findBlockDef, nextSiblingPath, resolveInstructionAt } from '../types';
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' });
 
 const strand = computed(() => state.current_macro?.strands.find(s => s.id === contextMenu.strandId) ?? null);
-const instruction = computed(() => strand.value?.instructions[contextMenu.index] ?? null);
+const instruction = computed(() => resolveInstructionAt(strand.value, contextMenu.path));
 const headerBlockId = computed(() => (instruction.value?.type === 'BlockHeader' ? instruction.value.block_id : null));
 const isRecordingTarget = computed(
   () => contextMenu.strandId !== '' && contextMenu.strandId === state.current_macro?.recording_target_strand_id,
@@ -89,26 +89,26 @@ function onDeleteBlock() {
     return;
   }
   const [x, y] = deleteBlockPosition();
-  deleteInstruction(contextMenu.strandId, contextMenu.index, x, y);
+  deleteInstruction(contextMenu.strandId, contextMenu.path, x, y);
   closeContextMenu();
 }
 function onCopyBlock() {
-  if (strand.value) copyBlock(strand.value, contextMenu.index);
+  if (strand.value) copyBlock(strand.value, contextMenu.path);
   closeContextMenu();
 }
 function onCopyAll() {
-  if (strand.value) copyAll(strand.value, contextMenu.index);
+  if (strand.value) copyAll(strand.value, contextMenu.path);
   closeContextMenu();
 }
 function onCutBlock() {
-  if (strand.value) copyBlock(strand.value, contextMenu.index);
+  if (strand.value) copyBlock(strand.value, contextMenu.path);
   const [x, y] = deleteBlockPosition();
-  deleteInstruction(contextMenu.strandId, contextMenu.index, x, y);
+  deleteInstruction(contextMenu.strandId, contextMenu.path, x, y);
   closeContextMenu();
 }
 function onDuplicateBlock() {
   const ins = instruction.value;
-  if (ins) addInstruction(contextMenu.strandId, contextMenu.index + 1, { ...ins });
+  if (ins) addInstruction(contextMenu.strandId, nextSiblingPath(contextMenu.path), { ...ins });
   closeContextMenu();
 }
 function onDeleteAllBlocks() {

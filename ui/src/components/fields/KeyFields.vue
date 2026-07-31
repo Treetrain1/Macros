@@ -3,16 +3,17 @@ import { computed } from 'vue';
 import { state } from '../../store';
 import { editInstruction, startKeyCapture } from '../../tauri';
 import AppDropdown from '../AppDropdown.vue';
-import type { InstructionDto, KeyDirection } from '../../types';
+import { pathsEqual } from '../../types';
+import type { InstrPath, InstructionDto, KeyDirection } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'Key' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Key' }> }>();
 
 const isCapturing = computed(() =>
-  state.key_capture?.kind === 'Strand' && state.key_capture.strand_id === props.strandId && state.key_capture.index === props.index,
+  state.key_capture?.kind === 'Strand' && state.key_capture.strand_id === props.strandId && pathsEqual(state.key_capture.index, props.path),
 );
 
 function onDirectionChange(dir: string) {
-  editInstruction(props.strandId, props.index, { type: 'Key', key: props.instruction.key, direction: dir as KeyDirection });
+  editInstruction(props.strandId, props.path, { type: 'Key', key: props.instruction.key, direction: dir as KeyDirection });
 }
 </script>
 
@@ -21,7 +22,7 @@ function onDirectionChange(dir: string) {
   <button
     class="btn-chip key-capture-btn"
     :class="{ capturing: isCapturing }"
-    @click="startKeyCapture(strandId, index)"
+    @click="startKeyCapture(strandId, path)"
   >{{ isCapturing ? 'Press any key…' : instruction.key }}</button>
   <AppDropdown
     :options="['Click', 'Press', 'Release']"

@@ -5,7 +5,7 @@
 //! emissions over a WebSocket. Binds to 127.0.0.1 only.
 
 use crate::commands;
-use crate::state::{self, BlockPieceDto, HotkeyActionDto, InstructionDto, SharedState, ValueDto, ValueLocationDto};
+use crate::state::{self, BlockPieceDto, HotkeyActionDto, InstructionDto, PathStep, SharedState, ValueDto, ValueLocationDto};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State as AxumState};
 use axum::http::StatusCode;
@@ -75,7 +75,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: BridgeCtx) {
         Err(_) => None,
     };
     if let Some(initial) = initial {
-        if socket.send(Message::Text(initial)).await.is_err() {
+        if socket.send(Message::Text(initial.into())).await.is_err() {
             return;
         }
     }
@@ -86,7 +86,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: BridgeCtx) {
             msg = rx.recv() => {
                 match msg {
                     Ok(payload) => {
-                        if socket.send(Message::Text(payload)).await.is_err() {
+                        if socket.send(Message::Text(payload.into())).await.is_err() {
                             return;
                         }
                     }
@@ -218,12 +218,12 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
         }
         "remove_instruction" => {
             let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::remove_instruction(state, app, strand_id, index))
         }
         "reorder_instruction" => {
             let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let direction: i32 = match field(&body, "direction") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::reorder_instruction(state, app, strand_id, index, direction))
         }
@@ -246,7 +246,7 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
         }
         "split_strand" => {
             let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let x: i32 = match field(&body, "x") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let y: i32 = match field(&body, "y") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::split_strand(state, app, strand_id, index, x, y))
@@ -254,12 +254,12 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
         "merge_strand" => {
             let dragged_id: String = match field(&body, "draggedId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let target_id: String = match field(&body, "targetId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::merge_strand(state, app, dragged_id, target_id, index))
         }
         "delete_instruction" => {
             let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let x: i32 = match field(&body, "x") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             let y: i32 = match field(&body, "y") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::delete_instruction(state, app, strand_id, index, x, y))
@@ -276,7 +276,7 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
         }
         "start_key_capture" => {
             let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
-            let index: usize = match field(&body, "index") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::start_key_capture(state, app, strand_id, index))
         }
         "key_capture_event" => {

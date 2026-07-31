@@ -1,5 +1,5 @@
 import { invoke, listen, getVersion } from './bridge';
-import type { BlockPieceDto, HotkeyActionDto, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
+import type { BlockPieceDto, HotkeyActionDto, InstrPath, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
 
 export function getState(): Promise<StateDto> {
   return invoke('get_state');
@@ -34,10 +34,10 @@ export const editBlock = (blockId: string, pieces: BlockPieceDto[], returnsValue
 export const deleteBlock = (blockId: string) => invoke<void>('delete_block', { blockId });
 
 // ─── Instructions ───────────────────────────────────────────────────────────
-export const addInstruction = (strandId: string, index: number, instruction: InstructionDto) =>
-  invoke<void>('add_instruction', { strandId, index, instruction });
-export const editInstruction = (strandId: string, index: number, instruction: InstructionDto) =>
-  invoke<void>('edit_instruction', { strandId, index, instruction });
+export const addInstruction = (strandId: string, path: InstrPath, instruction: InstructionDto) =>
+  invoke<void>('add_instruction', { strandId, path, instruction });
+export const editInstruction = (strandId: string, path: InstrPath, instruction: InstructionDto) =>
+  invoke<void>('edit_instruction', { strandId, path, instruction });
 export const editValueField = (location: ValueLocationDto, text: string) =>
   invoke<void>('edit_value_field', { location, text });
 export const setValueKind = (location: ValueLocationDto, kind: ValueKind) =>
@@ -53,10 +53,10 @@ export const moveFloatingValue = (floatingId: string, x: number, y: number) =>
   invoke<void>('move_floating_value', { floatingId, x, y });
 export const removeFloatingValue = (floatingId: string) =>
   invoke<void>('remove_floating_value', { floatingId });
-export const removeInstruction = (strandId: string, index: number) =>
-  invoke<void>('remove_instruction', { strandId, index });
-export const reorderInstruction = (strandId: string, index: number, direction: number) =>
-  invoke<void>('reorder_instruction', { strandId, index, direction });
+export const removeInstruction = (strandId: string, path: InstrPath) =>
+  invoke<void>('remove_instruction', { strandId, path });
+export const reorderInstruction = (strandId: string, path: InstrPath, direction: number) =>
+  invoke<void>('reorder_instruction', { strandId, path, direction });
 export const clearInstructions = () => invoke<void>('clear_instructions');
 
 // ─── Undo/redo ──────────────────────────────────────────────────────────────
@@ -69,20 +69,20 @@ export const addStrand = (x: number | null, y: number | null, instruction: Instr
 export const removeStrand = (strandId: string) => invoke<void>('remove_strand', { strandId });
 export const moveStrand = (strandId: string, x: number, y: number) =>
   invoke<void>('move_strand', { strandId, x, y });
-export const splitStrand = (strandId: string, index: number, x: number, y: number) =>
-  invoke<string>('split_strand', { strandId, index, x, y });
-export const mergeStrand = (draggedId: string, targetId: string, index: number) =>
-  invoke<void>('merge_strand', { draggedId, targetId, index });
-export const deleteInstruction = (strandId: string, index: number, x: number, y: number) =>
-  invoke<string | null>('delete_instruction', { strandId, index, x, y });
+export const splitStrand = (strandId: string, path: InstrPath, x: number, y: number) =>
+  invoke<string>('split_strand', { strandId, path, x, y });
+export const mergeStrand = (draggedId: string, targetId: string, path: InstrPath) =>
+  invoke<void>('merge_strand', { draggedId, targetId, path });
+export const deleteInstruction = (strandId: string, path: InstrPath, x: number, y: number) =>
+  invoke<string | null>('delete_instruction', { strandId, path, x, y });
 export const pasteInstructions = (x: number, y: number, instructions: InstructionDto[]) =>
   invoke<string>('paste_instructions', { x, y, instructions });
 export const setRecordingTarget = (strandId: string) =>
   invoke<void>('set_recording_target', { strandId });
 
 // ─── Key capture ────────────────────────────────────────────────────────────
-export const startKeyCapture = (strandId: string, index: number) =>
-  invoke<void>('start_key_capture', { strandId, index });
+export const startKeyCapture = (strandId: string, path: InstrPath) =>
+  invoke<void>('start_key_capture', { strandId, path });
 export const startStandaloneKeyCapture = () => invoke<void>('start_standalone_key_capture');
 export const keyCaptureEvent = (code: string, key: string) =>
   invoke<void>('key_capture_event', { code, key });

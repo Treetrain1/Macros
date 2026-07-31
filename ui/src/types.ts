@@ -12,7 +12,10 @@ export type ScrollAxis = 'Vertical' | 'Horizontal';
 // src-tauri/src/state.rs's ValueDto.
 export type ValueOp =
   | 'Add' | 'Sub' | 'Mul' | 'Div' | 'Mod' | 'Round' | 'Random' | 'Join' | 'NewLine' | 'Tab'
-  | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case';
+  | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case'
+  // Boolean: comparisons, logic, and the two standalone true/false literals
+  // (separate blocks, not a toggle — see valueOps.ts's OPERATOR_KINDS).
+  | 'Eq' | 'Neq' | 'Gt' | 'Lt' | 'Gte' | 'Lte' | 'And' | 'Or' | 'Not' | 'True' | 'False';
 // Join/Join3 both emit op 'Join' (only args.length differs, no 'Join3' on the
 // wire). `Var:<name>`/`Param:<name>` are per-variable/per-input identifiers,
 // not fixed operators. `Call:<blockId>` (a "My Blocks" reporter) has dynamic
@@ -37,6 +40,12 @@ export function textValue(value: string): ValueDto {
   return { kind: 'Text', value };
 }
 
+// Fresh boolean-typed default — there's no bare boolean leaf, so this is a
+// standalone "false" block, same spirit as `numberValue(0)`/`textValue('')`.
+export function falseValue(): ValueDto {
+  return { kind: 'Op', op: 'False', args: [], saved: numberValue(0) };
+}
+
 // Fresh default tree for a value block dragged off the sidebar palette —
 // mirrors src-tauri/src/commands.rs's apply_value_kind, looked up from
 // valueOps.ts's registry so a new operator never needs a new case here.
@@ -53,11 +62,79 @@ export function defaultValueForKind(kind: ValueKind): ValueDto {
   return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
 }
 
+// One step of an InstrPath — `index` into the current instruction list, and
+// (for every step but the last) which nested body of that instruction to
+// descend into next: 0 for an If's body or IfElse's `then_body`, 1 for
+// IfElse's `else_body`. The last step's `slot` is omitted. Mirrors
+// src-tauri/src/state.rs's PathStep.
+export interface PathStep {
+  index: number;
+  slot?: number;
+}
+
+// Addresses one instruction, possibly nested inside If/IfElse bodies —
+// generalizes a flat instruction index the same way a Value's `path:
+// number[]` already addresses a nested value-tree node.
+export type InstrPath = PathStep[];
+
+// The common case: a top-level instruction at `index` in a strand's own
+// instruction list — what every non-nested call site should pass.
+export function topLevelPath(index: number): InstrPath {
+  return [{ index }];
+}
+
+// Resolves `basePath` against a strand to the (possibly nested) instruction
+// list it addresses — a strand's own top-level list for `basePath: []`, or
+// an If/IfElse's body for anything longer. Shared by canvasDrag.ts (DOM-less
+// placement checks), clipboard.ts, and ContextMenu.vue.
+export function resolveInstructionList(strand: StrandDto | null | undefined, basePath: PathStep[]): InstructionDto[] {
+  let list: InstructionDto[] | undefined = strand?.instructions;
+  for (const step of basePath) {
+    const ins = list?.[step.index];
+    if (!ins) return [];
+    if (ins.type === 'If' && step.slot === 0) list = ins.body;
+    else if (ins.type === 'IfElse' && step.slot === 0) list = ins.then_body;
+    else if (ins.type === 'IfElse' && step.slot === 1) list = ins.else_body;
+    else return [];
+  }
+  return list ?? [];
+}
+
+// The single instruction `path` addresses, or `null` if any step along the
+// way doesn't resolve (e.g. stale state mid-edit).
+export function resolveInstructionAt(strand: StrandDto | null | undefined, path: InstrPath): InstructionDto | null {
+  if (path.length === 0) return null;
+  const list = resolveInstructionList(strand, path.slice(0, -1));
+  return list[path[path.length - 1].index] ?? null;
+}
+
+// The path of the instruction immediately after `path`, in the same body
+// list — e.g. for "insert a duplicate right after this block."
+export function nextSiblingPath(path: InstrPath): InstrPath {
+  const steps = [...path];
+  const last = steps[steps.length - 1];
+  steps[steps.length - 1] = { ...last, index: last.index + 1 };
+  return steps;
+}
+
+// The base path for an If/IfElse instruction's own nested body — `path` is
+// that instruction's own address (its last step has no `slot`, since
+// nothing follows it yet); this stamps `slot` onto that last step, so an
+// InstructionList rendering the body can append its own children's indices
+// after it. `slot` is 0 for an If's body or IfElse's `then_body`, 1 for
+// IfElse's `else_body`.
+export function bodyBasePath(path: InstrPath, slot: number): InstrPath {
+  const steps = [...path];
+  const last = steps[steps.length - 1];
+  steps[steps.length - 1] = { ...last, slot };
+  return steps;
+}
+
 // Addresses a single Value node: inside an instruction field (Field) or a
 // floating canvas block (Floating), at `path` within that root. Mirrors
 // src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
 export type ValueLocationDto =
-  | { kind: 'Field'; strand_id: string; index: number; field_id: string; path: number[] }
+  | { kind: 'Field'; strand_id: string; index: InstrPath; field_id: string; path: number[] }
   | { kind: 'Floating'; floating_id: string; path: number[] };
 
 export interface FloatingValueDto {
@@ -68,8 +145,8 @@ export interface FloatingValueDto {
 }
 
 // Root-of-field location for the field components under ui/src/components/fields/.
-export function fieldLocation(strandId: string, index: number, fieldId: string): ValueLocationDto {
-  return { kind: 'Field', strand_id: strandId, index, field_id: fieldId, path: [] };
+export function fieldLocation(strandId: string, instrPath: InstrPath, fieldId: string): ValueLocationDto {
+  return { kind: 'Field', strand_id: strandId, index: instrPath, field_id: fieldId, path: [] };
 }
 
 export type InstructionDto =
@@ -86,7 +163,9 @@ export type InstructionDto =
   | { type: 'ChangeVariable'; name: string; value: ValueDto }
   | { type: 'BlockHeader'; block_id: string }
   | { type: 'CallBlock'; block_id: string; args: ValueDto[] }
-  | { type: 'Return'; value: ValueDto };
+  | { type: 'Return'; value: ValueDto }
+  | { type: 'If'; condition: ValueDto; body: InstructionDto[] }
+  | { type: 'IfElse'; condition: ValueDto; then_body: InstructionDto[]; else_body: InstructionDto[] };
 
 export type InstructionType = InstructionDto['type'];
 
@@ -108,6 +187,8 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'BlockHeader': return { type: 'BlockHeader', block_id: '' };
     case 'CallBlock': return { type: 'CallBlock', block_id: '', args: [] };
     case 'Return': return { type: 'Return', value: numberValue(0) };
+    case 'If': return { type: 'If', condition: falseValue(), body: [] };
+    case 'IfElse': return { type: 'IfElse', condition: falseValue(), then_body: [], else_body: [] };
     default: return { type: 'Comment', comment: '' };
   }
 }
@@ -125,6 +206,19 @@ export const CAP_TYPES = new Set<InstructionDto['type']>(['Return']);
 
 export function isCapType(type: InstructionDto['type']): boolean {
   return CAP_TYPES.has(type);
+}
+
+// "Wrap"/C-blocks encase a nested body (or two, for If-Else) between their
+// own top notch and bottom tab — unlike header/cap, they keep both, since
+// they snap above/below like any ordinary block.
+export const WRAP_TYPES = new Set<InstructionDto['type']>(['If', 'IfElse']);
+
+export function isWrapType(type: InstructionDto['type']): boolean {
+  return WRAP_TYPES.has(type);
+}
+
+export function hasElseSlot(type: InstructionDto['type']): boolean {
+  return type === 'IfElse';
 }
 
 export interface StrandDto {
@@ -182,7 +276,14 @@ export function findBlockDef(macro: MacroDto | null | undefined, blockId: string
 export interface KeyCaptureDto {
   kind: 'Strand' | 'Standalone';
   strand_id: string | null;
-  index: number | null;
+  index: InstrPath | null;
+}
+
+/** Structural equality for two InstrPaths — used wherever a path is
+ * compared instead of a bare index (e.g. "is this the row being captured"). */
+export function pathsEqual(a: InstrPath | null | undefined, b: InstrPath | null | undefined): boolean {
+  if (a == null || b == null) return a === b;
+  return a.length === b.length && a.every((step, i) => step.index === b[i].index && step.slot === b[i].slot);
 }
 
 export type HotkeyActionDto =

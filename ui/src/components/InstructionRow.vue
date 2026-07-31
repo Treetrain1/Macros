@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
-import type { InstructionDto } from '../types';
-import { isCapType, isHeaderType } from '../types';
+import type { InstrPath, InstructionDto } from '../types';
+import { isCapType, isHeaderType, isWrapType } from '../types';
 import { beginPickup } from '../canvasDrag';
 import { state } from '../store';
 import { openBlockMenu } from '../contextMenu';
@@ -20,8 +20,10 @@ import ChangeVariableFields from './fields/ChangeVariableFields.vue';
 import BlockHeaderFields from './fields/BlockHeaderFields.vue';
 import CallBlockFields from './fields/CallBlockFields.vue';
 import ReturnFields from './fields/ReturnFields.vue';
+import IfFields from './fields/IfFields.vue';
+import IfElseFields from './fields/IfElseFields.vue';
 
-const props = defineProps<{ strandId: string; index: number; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
 const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   WhenRan: WhenRanFields,
@@ -38,11 +40,14 @@ const FIELD_COMPONENTS: Record<InstructionDto['type'], Component> = {
   BlockHeader: BlockHeaderFields,
   CallBlock: CallBlockFields,
   Return: ReturnFields,
+  If: IfFields,
+  IfElse: IfElseFields,
 };
 
 const fieldComponent = computed(() => FIELD_COMPONENTS[props.instruction.type]);
 const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.instruction.type]]);
 const showIcon = computed(() => !isHeaderType(props.instruction.type));
+const index = computed(() => props.path[props.path.length - 1]?.index ?? 0);
 
 const isRecordingTarget = computed(
   () => props.isFirst && props.strandId === state.current_macro?.recording_target_strand_id,
@@ -52,18 +57,18 @@ function onRowPointerDown(e: PointerEvent) {
   const target = e.target as Element | null;
   if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
   if (target instanceof HTMLElement && target.isContentEditable) return;
-  beginPickup(e, props.strandId, props.index);
+  beginPickup(e, props.strandId, props.path);
 }
 
 function onRowContextMenu(e: MouseEvent) {
-  openBlockMenu(e, props.strandId, props.index);
+  openBlockMenu(e, props.strandId, props.path);
 }
 </script>
 
 <template>
   <div
     class="instruction-row"
-    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type), 'instruction-row-wrap': isWrapType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"
@@ -72,7 +77,7 @@ function onRowContextMenu(e: MouseEvent) {
       <span v-if="isRecordingTarget" class="recording-target-dot" title="Recording target" />
       <component :is="typeIcon" v-if="showIcon" class="instruction-type-icon" />
       <div class="instruction-content">
-        <component :is="fieldComponent" :strand-id="strandId" :index="index" :instruction="instruction" />
+        <component :is="fieldComponent" :strand-id="strandId" :path="path" :instruction="instruction" />
       </div>
     </div>
   </div>

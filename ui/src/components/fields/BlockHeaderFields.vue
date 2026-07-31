@@ -11,9 +11,9 @@ import { Blocks } from 'lucide-vue-next';
 import { state } from '../../store';
 import { findBlockDef } from '../../types';
 import PaletteValueBlock from '../PaletteValueBlock.vue';
-import type { InstructionDto, ValueKind } from '../../types';
+import type { InstrPath, InstructionDto, ValueKind } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'BlockHeader' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'BlockHeader' }> }>();
 
 const def = computed(() => findBlockDef(state.current_macro, props.instruction.block_id));
 

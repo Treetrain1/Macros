@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import ValueBlock from '../ValueBlock.vue';
 import { fieldLocation } from '../../types';
-import type { InstructionDto } from '../../types';
+import type { InstrPath, InstructionDto } from '../../types';
 
-defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'Wait' }> }>();
+defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Wait' }> }>();
 </script>
 
 <template>
   <span class="instruction-label">Wait (ms):</span>
-  <ValueBlock :location="fieldLocation(strandId, index, 'WaitDuration')" :value="instruction.duration" />
+  <ValueBlock :location="fieldLocation(strandId, path, 'WaitDuration')" :value="instruction.duration" />
 </template>

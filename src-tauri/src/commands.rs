@@ -9,7 +9,8 @@ use crate::macros_thread;
 use crate::state::{
     build_state_dto, dto_to_block_piece, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
     value_to_dto, BlockPieceDto, ComboCapture, FieldId, HotkeyActionDto, InstructionDto, KeyCaptureTarget, MacroSnapshot,
-    Page, RecordingPhase, SharedState, StateDto, TextEditSession, UpdateCheckState, ValueDto, ValueLocation, ValueLocationDto,
+    Page, PathStep, RecordingPhase, SharedState, StateDto, TextEditSession, UpdateCheckState, ValueDto, ValueLocation,
+    ValueLocationDto,
 };
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -492,38 +493,70 @@ pub(crate) fn add_instruction<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
     strand_id: String,
-    index: usize,
+    path: Vec<PathStep>,
     instruction: InstructionDto,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
     if let Some(mac) = &s.current_macro {
         if let Some(strand) = mac.strand(&strand_id) {
-            let idx = index.min(strand.instructions.len());
-            check_when_ran_attachment(strand, idx, &ins)?;
-            check_return_placement(mac, strand, &ins)?;
+            if let Some((list, idx)) = resolve_body(&strand.instructions, &path) {
+                let idx = idx.min(list.len());
+                check_when_ran_attachment(list, idx, &ins, path.len() == 1)?;
+                check_return_placement(mac, strand, &ins)?;
+            }
         }
     }
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
         if let Some(strand) = mac.strand_mut(&strand_id) {
-            let idx = index.min(strand.instructions.len());
-            strand.instructions.insert(idx, ins);
-            s.invalid_field_buffers.clear();
-            auto_save(&s);
+            if let Some((list, idx)) = resolve_body_mut(&mut strand.instructions, &path) {
+                let idx = idx.min(list.len());
+                list.insert(idx, ins);
+                s.invalid_field_buffers.clear();
+                auto_save(&s);
+            }
         }
     }
     emit_state_updated(&app, &s);
     Ok(())
 }
 
+/// Resolves an `InstrPath` to `(parent_list, local_index)` — read-only
+/// counterpart to `resolve_body_mut`, for placement checks that only need to
+/// look, not mutate.
+fn resolve_body<'a>(instructions: &'a [Instruction], path: &[PathStep]) -> Option<(&'a [Instruction], usize)> {
+    let (first, rest) = path.split_first()?;
+    if rest.is_empty() {
+        return Some((instructions, first.index));
+    }
+    let body = instructions.get(first.index)?.body(first.slot?)?;
+    resolve_body(body, rest)
+}
+
+/// Resolves an `InstrPath` to `(parent_list, local_index)` — every
+/// instruction command does its actual `Vec` op (`insert`/`remove`/`swap`/
+/// `split_off`/indexing) on the returned list at the returned index, exactly
+/// as it did directly on `strand.instructions` before nesting existed.
+fn resolve_body_mut<'a>(instructions: &'a mut Vec<Instruction>, path: &[PathStep]) -> Option<(&'a mut Vec<Instruction>, usize)> {
+    let (first, rest) = path.split_first()?;
+    if rest.is_empty() {
+        return Some((instructions, first.index));
+    }
+    let body = instructions.get_mut(first.index)?.body_mut(first.slot?)?;
+    resolve_body_mut(body, rest)
+}
+
 /// A header block ("When Ran"/`BlockHeader`) must always be first in its
-/// strand — nothing may attach above or in front of one.
-fn check_when_ran_attachment(strand: &Strand, index: usize, ins: &Instruction) -> Result<(), String> {
-    if index == 0 && strand.starts_with_when_ran() {
+/// strand — nothing may attach above or in front of one, and a header can
+/// only ever live at a strand's own top level, never nested inside an
+/// `If`/`IfElse` body.
+fn check_when_ran_attachment(list: &[Instruction], index: usize, ins: &Instruction, is_top_level: bool) -> Result<(), String> {
+    let starts_with_header = list.first().map_or(false, Instruction::is_header);
+    if index == 0 && starts_with_header {
         return Err("Can't attach a block above a When Ran/Block Definition block".to_string());
     }
-    if ins.is_header() && index != 0 {
+    if ins.is_header() && (!is_top_level || index != 0) {
         return Err("A When Ran/Block Definition block can only be the first block in a strand".to_string());
     }
     Ok(())
@@ -550,7 +583,7 @@ pub(crate) fn edit_instruction<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
     strand_id: String,
-    index: usize,
+    path: Vec<PathStep>,
     instruction: InstructionDto,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -558,16 +591,18 @@ pub(crate) fn edit_instruction<R: Runtime>(
     // Freeform text fields coalesce keystrokes into one undo group, like
     // `edit_value_field`; every other kind gets its own undo step.
     let session = matches!(ins, Instruction::Command(_) | Instruction::Comment(_))
-        .then(|| TextEditSession::Instruction { strand_id: strand_id.clone(), index });
+        .then(|| TextEditSession::Instruction { strand_id: strand_id.clone(), index: path.clone() });
     if s.text_edit_session != session || session.is_none() {
         push_undo(&mut s);
     }
     s.text_edit_session = session;
     if let Some(mac) = &mut s.current_macro {
         if let Some(strand) = mac.strand_mut(&strand_id) {
-            if index < strand.instructions.len() {
-                strand.instructions[index] = ins;
-                auto_save(&s);
+            if let Some((list, idx)) = resolve_body_mut(&mut strand.instructions, &path) {
+                if idx < list.len() {
+                    list[idx] = ins;
+                    auto_save(&s);
+                }
             }
         }
     }
@@ -587,6 +622,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::Return(v), FieldId::ReturnValue) => Some(v),
         (Instruction::CallBlock { args, .. }, FieldId::CallArg(i)) => args.get_mut(i),
         (Instruction::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
+        (Instruction::If { condition, .. }, FieldId::Condition) => Some(condition),
+        (Instruction::IfElse { condition, .. }, FieldId::Condition) => Some(condition),
         _ => None,
     }
 }
@@ -597,7 +634,8 @@ fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Opt
     match location {
         ValueLocation::Field { strand_id, index, field_id, path } => {
             let strand = mac.strand_mut(strand_id)?;
-            let ins = strand.instructions.get_mut(*index)?;
+            let (list, idx) = resolve_body_mut(&mut strand.instructions, index)?;
+            let ins = list.get_mut(idx)?;
             value_slot_mut(ins, *field_id)?.get_mut(path)
         }
         ValueLocation::Floating { floating_id, path } => mac.floating_value_mut(floating_id)?.value.get_mut(path),
@@ -633,6 +671,7 @@ fn apply_value_kind(node: &mut Value, kind: &str, env: &HashMap<String, Evaluate
             let text = match node.resolve_vars(env).eval() {
                 Ok(Evaluated::Text(s)) => s,
                 Ok(Evaluated::Number(n)) => n.to_string(),
+                Ok(Evaluated::Bool(b)) => b.to_string(),
                 Err(_) => String::new(),
             };
             *node = Value::Text { value: text };
@@ -873,16 +912,19 @@ pub(crate) fn remove_floating_value<R: Runtime>(
 }
 
 #[tauri::command]
-pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize) -> Result<(), String> {
+pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, path: Vec<PathStep>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let should_remove = s.current_macro.as_ref()
         .and_then(|mac| mac.strand(&strand_id))
-        .is_some_and(|strand| !strand.instructions.is_empty() && index < strand.instructions.len());
+        .and_then(|strand| resolve_body(&strand.instructions, &path))
+        .is_some_and(|(list, idx)| idx < list.len());
     if should_remove {
         push_undo(&mut s);
         if let Some(mac) = &mut s.current_macro {
             if let Some(strand) = mac.strand_mut(&strand_id) {
-                strand.instructions.remove(index);
+                if let Some((list, idx)) = resolve_body_mut(&mut strand.instructions, &path) {
+                    list.remove(idx);
+                }
             }
             s.invalid_field_buffers.clear();
             auto_save(&s);
@@ -892,22 +934,24 @@ pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tau
     Ok(())
 }
 
-/// Deletes the instruction at `index`, splitting anything below it off into
-/// a new strand at `(x, y)` — atomic with the removal, so it's one undo
-/// step. Returns the new strand's id, or `None` if nothing was split off.
+/// Deletes the instruction at `path`, splitting anything below it (in the
+/// same body list) off into a new top-level strand at `(x, y)` — atomic
+/// with the removal, so it's one undo step. Returns the new strand's id, or
+/// `None` if nothing was split off.
 #[tauri::command]
 pub(crate) fn delete_instruction<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
     strand_id: String,
-    index: usize,
+    path: Vec<PathStep>,
     x: i32,
     y: i32,
 ) -> Result<Option<String>, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let in_range = s.current_macro.as_ref()
         .and_then(|mac| mac.strand(&strand_id))
-        .is_some_and(|strand| index < strand.instructions.len());
+        .and_then(|strand| resolve_body(&strand.instructions, &path))
+        .is_some_and(|(list, idx)| idx < list.len());
     if !in_range {
         emit_state_updated(&app, &s);
         return Ok(None);
@@ -915,8 +959,9 @@ pub(crate) fn delete_instruction<R: Runtime>(
     push_undo(&mut s);
     let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
     let strand = mac.strand_mut(&strand_id).ok_or("Unknown strand")?;
-    strand.instructions.remove(index);
-    let tail = strand.instructions.split_off(index.min(strand.instructions.len()));
+    let (list, idx) = resolve_body_mut(&mut strand.instructions, &path).ok_or("Unknown instruction path")?;
+    list.remove(idx);
+    let tail = list.split_off(idx.min(list.len()));
     let now_empty = strand.instructions.is_empty();
     let new_id = if !tail.is_empty() {
         let new_id = uuid::Uuid::new_v4().simple().to_string();
@@ -937,12 +982,13 @@ pub(crate) fn delete_instruction<R: Runtime>(
 }
 
 #[tauri::command]
-pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize, direction: i32) -> Result<(), String> {
+pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, path: Vec<PathStep>, direction: i32) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     if let Some(mac) = &s.current_macro {
         if let Some(strand) = mac.strand(&strand_id) {
-            let len = strand.instructions.len();
-            if len > 1 && index < len {
+            if let Some((list, index)) = resolve_body(&strand.instructions, &path) {
+              let len = list.len();
+              if len > 1 && index < len {
                 let new_index = if direction < 0 {
                     if index > 0 { index - 1 } else { index }
                 } else if index < len - 1 {
@@ -951,18 +997,23 @@ pub(crate) fn reorder_instruction<R: Runtime>(state: State<SharedState>, app: ta
                     index
                 };
                 // Swapping either end into position 0 would move a When Ran
-                // block out of (or something else into) the head slot.
-                let touches_when_ran_slot = (index == 0 || new_index == 0) && strand.starts_with_when_ran();
+                // block out of (or something else into) the head slot — only
+                // relevant at a strand's own top level, never a nested body.
+                let starts_with_header = list.first().map_or(false, Instruction::is_header);
+                let touches_when_ran_slot = path.len() == 1 && (index == 0 || new_index == 0) && starts_with_header;
                 if new_index != index && !touches_when_ran_slot {
                     push_undo(&mut s);
                     if let Some(mac) = &mut s.current_macro {
                         if let Some(strand) = mac.strand_mut(&strand_id) {
-                            strand.instructions.swap(index, new_index);
+                            if let Some((list, index)) = resolve_body_mut(&mut strand.instructions, &path) {
+                                list.swap(index, new_index);
+                            }
                         }
                         s.invalid_field_buffers.clear();
                         auto_save(&s);
                     }
                 }
+            }
             }
         }
     }
@@ -1138,15 +1189,16 @@ pub(crate) fn move_strand<R: Runtime>(state: State<SharedState>, app: tauri::App
     Ok(())
 }
 
-/// Detaches the instructions at and after `index` into a new strand at
-/// `(x, y)`, returning its id. This is how the frontend "picks up" a
-/// block: split first, then drop as a stray strand or re-merge elsewhere.
+/// Detaches the instructions at and after `path` (within the same body list)
+/// into a new top-level strand at `(x, y)`, returning its id. This is how
+/// the frontend "picks up" a block: split first, then drop as a stray strand
+/// or re-merge elsewhere.
 #[tauri::command]
 pub(crate) fn split_strand<R: Runtime>(
     state: State<SharedState>,
     app: tauri::AppHandle<R>,
     strand_id: String,
-    index: usize,
+    path: Vec<PathStep>,
     x: i32,
     y: i32,
 ) -> Result<String, String> {
@@ -1154,10 +1206,11 @@ pub(crate) fn split_strand<R: Runtime>(
     push_undo(&mut s);
     let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
     let strand = mac.strand_mut(&strand_id).ok_or("Unknown strand")?;
-    if index >= strand.instructions.len() {
+    let (list, idx) = resolve_body_mut(&mut strand.instructions, &path).ok_or("Unknown instruction path")?;
+    if idx >= list.len() {
         return Err("Split index out of range".to_string());
     }
-    let tail = strand.instructions.split_off(index);
+    let tail = list.split_off(idx);
     let new_id = uuid::Uuid::new_v4().simple().to_string();
     mac.strands.push(Strand { id: new_id.clone(), x, y, instructions: tail });
     s.invalid_field_buffers.clear();
@@ -1166,7 +1219,7 @@ pub(crate) fn split_strand<R: Runtime>(
     Ok(new_id)
 }
 
-/// Splices `dragged_id`'s instructions into `target_id` at `index` and
+/// Splices `dragged_id`'s instructions into `target_id` at `path` and
 /// deletes the (now empty) dragged strand — how two stacks snap together.
 /// A "When Ran" strand can only be a merge target, never the dragged side.
 #[tauri::command]
@@ -1175,7 +1228,7 @@ pub(crate) fn merge_strand<R: Runtime>(
     app: tauri::AppHandle<R>,
     dragged_id: String,
     target_id: String,
-    index: usize,
+    path: Vec<PathStep>,
 ) -> Result<(), String> {
     if dragged_id == target_id {
         return Err("Can't merge a strand into itself".to_string());
@@ -1187,25 +1240,29 @@ pub(crate) fn merge_strand<R: Runtime>(
         return Err("A When Ran strand can't be merged into another strand".to_string());
     }
     if let Some(target_ref) = mac_ref.strand(&target_id) {
-        if index == 0 && target_ref.starts_with_when_ran() {
-            return Err("Can't attach a strand above a When Ran block".to_string());
+        if let Some((list, idx)) = resolve_body(&target_ref.instructions, &path) {
+            let starts_with_header = list.first().map_or(false, Instruction::is_header);
+            if path.len() == 1 && idx == 0 && starts_with_header {
+                return Err("Can't attach a strand above a When Ran block".to_string());
+            }
         }
     }
     push_undo(&mut s);
     let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
     let dragged_pos = mac.strands.iter().position(|s| s.id == dragged_id).ok_or("Unknown dragged strand")?;
     let dragged = mac.strands.remove(dragged_pos);
-    let target = match mac.strand_mut(&target_id) {
-        Some(t) => t,
-        None => {
-            // Target vanished (e.g. concurrent edit) — put the dragged
-            // strand back rather than silently dropping its instructions.
-            mac.strands.push(dragged);
-            return Err("Unknown target strand".to_string());
-        }
+    let Some(target) = mac.strand_mut(&target_id) else {
+        // Target vanished (e.g. concurrent edit) — put the dragged
+        // strand back rather than silently dropping its instructions.
+        mac.strands.push(dragged);
+        return Err("Unknown target strand".to_string());
     };
-    let idx = index.min(target.instructions.len());
-    target.instructions.splice(idx..idx, dragged.instructions);
+    let Some((list, idx)) = resolve_body_mut(&mut target.instructions, &path) else {
+        mac.strands.push(dragged);
+        return Err("Unknown target instruction path".to_string());
+    };
+    let idx = idx.min(list.len());
+    list.splice(idx..idx, dragged.instructions);
     s.invalid_field_buffers.retain(|loc, _| loc.strand_id() != Some(dragged_id.as_str()));
     auto_save(&s);
     emit_state_updated(&app, &s);
@@ -1256,9 +1313,9 @@ pub(crate) fn set_recording_target<R: Runtime>(state: State<SharedState>, app: t
 // ─── Key capture ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, index: usize) -> Result<(), String> {
+pub(crate) fn start_key_capture<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, path: Vec<PathStep>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.key_capture = Some(KeyCaptureTarget::Strand(strand_id, index));
+    s.key_capture = Some(KeyCaptureTarget::Strand(strand_id, path));
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -1289,12 +1346,14 @@ pub(crate) fn key_capture_event<R: Runtime>(
 
     if let Some(mk) = captured_key {
         match target {
-            KeyCaptureTarget::Strand(strand_id, index) => {
+            KeyCaptureTarget::Strand(strand_id, path) => {
                 if let Some(mac) = &mut s.current_macro {
                     if let Some(strand) = mac.strand_mut(&strand_id) {
-                        if let Some(Instruction::Token(InputToken::Key(_, dir))) = strand.instructions.get(index).cloned() {
-                            strand.instructions[index] = Instruction::Token(InputToken::Key(mk, dir));
-                            auto_save(&s);
+                        if let Some((list, idx)) = resolve_body_mut(&mut strand.instructions, &path) {
+                            if let Some(Instruction::Token(InputToken::Key(_, dir))) = list.get(idx).cloned() {
+                                list[idx] = Instruction::Token(InputToken::Key(mk, dir));
+                                auto_save(&s);
+                            }
                         }
                     }
                 }
@@ -1936,6 +1995,12 @@ mod value_location_tests {
     use macros_core::input::types::Coordinate;
     use macros_core::input::value::Op;
 
+    /// A flat, non-nested `InstrPath` — the shape every location was
+    /// addressed by before nested `If`/`IfElse` bodies existed.
+    fn top(index: usize) -> Vec<PathStep> {
+        vec![PathStep { index, slot: None }]
+    }
+
     fn test_macro() -> Macro {
         Macro {
             id: "m".into(),
@@ -1961,7 +2026,7 @@ mod value_location_tests {
     #[test]
     fn resolves_field_location() {
         let mut mac = test_macro();
-        let loc = ValueLocation::Field { strand_id: "s1".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![] };
+        let loc = ValueLocation::Field { strand_id: "s1".into(), index: top(1), field_id: FieldId::WaitDuration, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(1000.0)));
     }
 
@@ -1975,7 +2040,7 @@ mod value_location_tests {
     #[test]
     fn missing_location_resolves_to_none() {
         let mut mac = test_macro();
-        let bad_field = ValueLocation::Field { strand_id: "nope".into(), index: 0, field_id: FieldId::WaitDuration, path: vec![] };
+        let bad_field = ValueLocation::Field { strand_id: "nope".into(), index: top(0), field_id: FieldId::WaitDuration, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &bad_field), None);
         let bad_floating = ValueLocation::Floating { floating_id: "nope".into(), path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &bad_floating), None);
@@ -2150,22 +2215,22 @@ mod value_location_tests {
     #[test]
     fn prune_value_buffers_drops_only_descendants_of_changed_path() {
         let mut buffers: HashMap<ValueLocation, String> = HashMap::new();
-        let field = |path: Vec<u8>| ValueLocation::Field { strand_id: "s1".into(), index: 1, field_id: FieldId::WaitDuration, path };
+        let field = |path: Vec<u8>| ValueLocation::Field { strand_id: "s1".into(), index: top(1), field_id: FieldId::WaitDuration, path };
         buffers.insert(field(vec![0]), "kept-sibling-subtree-root".into());
         buffers.insert(field(vec![1]), "dropped-descendant".into());
         buffers.insert(field(vec![1, 0]), "dropped-nested-descendant".into());
-        buffers.insert(ValueLocation::Field { strand_id: "s2".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![1] }, "kept-different-strand".into());
+        buffers.insert(ValueLocation::Field { strand_id: "s2".into(), index: top(1), field_id: FieldId::WaitDuration, path: vec![1] }, "kept-different-strand".into());
 
         prune_value_buffers(&mut buffers, &field(vec![1]));
 
         assert_eq!(buffers.len(), 2);
         assert!(buffers.contains_key(&field(vec![0])));
-        assert!(buffers.contains_key(&ValueLocation::Field { strand_id: "s2".into(), index: 1, field_id: FieldId::WaitDuration, path: vec![1] }));
+        assert!(buffers.contains_key(&ValueLocation::Field { strand_id: "s2".into(), index: top(1), field_id: FieldId::WaitDuration, path: vec![1] }));
     }
 
     #[test]
     fn location_requires_integer_only_for_pixel_fields() {
-        let field = |field_id| ValueLocation::Field { strand_id: "s".into(), index: 0, field_id, path: vec![] };
+        let field = |field_id| ValueLocation::Field { strand_id: "s".into(), index: top(0), field_id, path: vec![] };
         assert!(location_requires_integer(&field(FieldId::MoveMouseX)));
         assert!(location_requires_integer(&field(FieldId::ScrollAmount)));
         assert!(!location_requires_integer(&field(FieldId::WaitDuration)));
@@ -2218,7 +2283,7 @@ mod value_location_tests {
             variables: vec![],
             block_defs: vec![],
         };
-        let loc = ValueLocation::Field { strand_id: "s1".into(), index: 0, field_id: FieldId::MoveMouseY, path: vec![] };
+        let loc = ValueLocation::Field { strand_id: "s1".into(), index: top(0), field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));
     }
 

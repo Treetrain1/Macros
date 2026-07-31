@@ -9,7 +9,7 @@
 // since this *is* the block: the drag ghost is just a clone of it).
 import { computed, type Component } from 'vue';
 import type { InstructionDto, InstructionType } from '../types';
-import { isCapType, isHeaderType } from '../types';
+import { isCapType, isHeaderType, isWrapType } from '../types';
 import { paletteInstructions } from '../paletteState';
 import { beginPaletteDrag } from '../canvasDrag';
 import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
@@ -25,6 +25,8 @@ import PaletteCommentFields from './fields/palette/PaletteCommentFields.vue';
 import PaletteSetVariableFields from './fields/palette/PaletteSetVariableFields.vue';
 import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableFields.vue';
 import PaletteReturnFields from './fields/palette/PaletteReturnFields.vue';
+import PaletteIfFields from './fields/palette/PaletteIfFields.vue';
+import PaletteIfElseFields from './fields/palette/PaletteIfElseFields.vue';
 
 // `BlockHeader`/`CallBlock` are excluded — a header is never dragged from
 // the sidebar at all (only ever created via the "Make a Block" dialog), and
@@ -46,6 +48,8 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | '
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
   Return: PaletteReturnFields,
+  If: PaletteIfFields,
+  IfElse: PaletteIfElseFields,
 };
 
 const instruction = computed(() => paletteInstructions[props.type]);
@@ -64,7 +68,7 @@ function onPointerDown(e: PointerEvent) {
 <template>
   <div
     class="instruction-row palette-prefab"
-    :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
+    :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type), 'instruction-row-wrap': isWrapType(type) }"
     @pointerdown="onPointerDown"
   >
     <div class="instruction-shape">

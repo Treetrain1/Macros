@@ -733,6 +733,61 @@ body.sidebar-resizing {
   );
 }
 
+/* "Wrap"/C-blocks (If, If-Else) keep the ordinary notch/tab silhouette
+   unmodified — they snap above/below like any other block — but stack their
+   content vertically instead of the usual single inline-flex row, since
+   they hold a header line ("if <cond> then") plus one or two indented
+   nested instruction lists. The notch/tab clip-path geometry is anchored to
+   the shape's own top/bottom edges independent of height, so a taller
+   (multi-line) shape still renders the connector correctly with no changes
+   to the polygons themselves — only the flex direction changes. */
+.instruction-row-wrap .instruction-shape {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.instruction-row-wrap .instruction-content {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 6px;
+}
+.instruction-row-wrap .instruction-type-icon {
+  /* Column content has no single vertical center to align to — pin near the
+     header line instead of the whole (now variable-height) shape. */
+  top: 21px;
+}
+.wrap-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* The nested instruction list's "encasement" — an indent plus a left bar,
+   the visual cue that everything inside belongs to this block's branch. */
+.wrap-slot {
+  padding-left: 14px;
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  min-height: 12px;
+}
+.wrap-slot .instruction-list.strand-body {
+  padding: 4px 0;
+}
+.wrap-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -2px;
+}
+/* Sidebar prefab's inert body-slot placeholder — never a real drop target
+   (see PaletteIfFields.vue/PaletteIfElseFields.vue), just a hint of shape. */
+.palette-wrap-slot {
+  min-height: 18px;
+  border-style: dashed;
+  opacity: 0.6;
+}
+
 .strand-empty-hint {
   padding: var(--spacing-sm) var(--spacing);
   font-size: 12px;
@@ -1012,11 +1067,33 @@ body.sidebar-resizing {
 }
 .value-card-shape:hover { border-color: var(--accent); }
 .value-card-shape:active { cursor: grabbing; }
-.value-card-shape .value-card-shape {
+.value-card-shape .value-card-shape,
+.value-card-shape .value-card-shape-bool,
+.value-card-shape-bool .value-card-shape,
+.value-card-shape-bool .value-card-shape-bool {
   /* Nested operators read as distinct blocks without stacking up full-size
      chrome several levels deep. */
   padding: 1px 4px;
 }
+
+/* Boolean-producing blocks (comparisons, and/or/not, true/false) get a
+   pointed hexagon instead of the rounded capsule — Scratch's visual
+   language for "this slot expects a boolean," so a condition slot is
+   recognizable at a glance. Extra horizontal padding keeps the pointed
+   corners from eating into the label text. */
+.value-card-shape-bool {
+  position: relative;
+  gap: 2px;
+  padding: 2px 12px;
+  border-color: var(--glass-border);
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top), var(--shadow-sm);
+  cursor: grab;
+  touch-action: none;
+  clip-path: polygon(8px 0%, calc(100% - 8px) 0%, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0% 50%);
+}
+.value-card-shape-bool:hover { border-color: var(--accent); }
+.value-card-shape-bool:active { cursor: grabbing; }
 .value-op {
   font-weight: 600;
   color: var(--text-dim);
@@ -1030,7 +1107,8 @@ body.sidebar-resizing {
 .value-drop-target {
   border-color: var(--accent);
 }
-.value-drop-target.value-card-shape {
+.value-drop-target.value-card-shape,
+.value-drop-target.value-card-shape-bool {
   box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
 }
 

@@ -15,7 +15,10 @@ export interface OperatorKindSpec {
   arity: number;
   /** One entry per arg, in order — lets an operator mix types (e.g.
    * LetterOf's number-then-text pair). */
-  argTypes: ('number' | 'text')[];
+  argTypes: ('number' | 'text' | 'bool')[];
+  /** What this operator's result "is" — drives shape (booleans render as a
+   * hexagon, see ValueBlock.vue). */
+  resultType: 'number' | 'text' | 'bool';
   /** Rendered before the first arg (word-phrase operators like Random/Join). */
   prefix?: string;
   /** Rendered between each consecutive pair of args, symbol or word alike. */
@@ -31,23 +34,36 @@ const CASE_OPTIONS = [
 ];
 
 export const OPERATOR_KINDS: OperatorKindSpec[] = [
-  { kind: 'Add', op: 'Add', arity: 2, argTypes: ['number', 'number'], infix: '+' },
-  { kind: 'Sub', op: 'Sub', arity: 2, argTypes: ['number', 'number'], infix: '−' },
-  { kind: 'Mul', op: 'Mul', arity: 2, argTypes: ['number', 'number'], infix: '×' },
-  { kind: 'Div', op: 'Div', arity: 2, argTypes: ['number', 'number'], infix: '/' },
-  { kind: 'Mod', op: 'Mod', arity: 2, argTypes: ['number', 'number'], infix: 'mod' },
-  { kind: 'Round', op: 'Round', arity: 1, argTypes: ['number'], prefix: 'round' },
-  { kind: 'Random', op: 'Random', arity: 2, argTypes: ['number', 'number'], prefix: 'pick random from', infix: 'to' },
-  { kind: 'Join', op: 'Join', arity: 2, argTypes: ['text', 'text'], prefix: 'join' },
-  { kind: 'Join3', op: 'Join', arity: 3, argTypes: ['text', 'text', 'text'], prefix: 'join' },
+  { kind: 'Add', op: 'Add', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '+' },
+  { kind: 'Sub', op: 'Sub', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '−' },
+  { kind: 'Mul', op: 'Mul', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '×' },
+  { kind: 'Div', op: 'Div', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '/' },
+  { kind: 'Mod', op: 'Mod', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: 'mod' },
+  { kind: 'Round', op: 'Round', arity: 1, argTypes: ['number'], resultType: 'number', prefix: 'round' },
+  { kind: 'Random', op: 'Random', arity: 2, argTypes: ['number', 'number'], resultType: 'number', prefix: 'pick random from', infix: 'to' },
+  { kind: 'Join', op: 'Join', arity: 2, argTypes: ['text', 'text'], resultType: 'text', prefix: 'join' },
+  { kind: 'Join3', op: 'Join', arity: 3, argTypes: ['text', 'text', 'text'], resultType: 'text', prefix: 'join' },
   // Zero-arity text constants — argTypes is unused (no args to render).
-  { kind: 'NewLine', op: 'NewLine', arity: 0, argTypes: [], prefix: 'new line' },
-  { kind: 'Tab', op: 'Tab', arity: 0, argTypes: [], prefix: 'tab character' },
-  { kind: 'IndexOf', op: 'IndexOf', arity: 2, argTypes: ['text', 'text'], prefix: 'index of', infix: 'in' },
-  { kind: 'LastIndexOf', op: 'LastIndexOf', arity: 2, argTypes: ['text', 'text'], prefix: 'last index of', infix: 'in' },
-  { kind: 'LetterOf', op: 'LetterOf', arity: 2, argTypes: ['number', 'text'], prefix: 'letter', infix: 'of' },
-  { kind: 'Length', op: 'Length', arity: 1, argTypes: ['text'], prefix: 'length of' },
-  { kind: 'Case', op: 'Case', arity: 2, argTypes: ['text', 'text'], infix: 'to', enumArg: { index: 1, options: CASE_OPTIONS } },
+  { kind: 'NewLine', op: 'NewLine', arity: 0, argTypes: [], resultType: 'text', prefix: 'new line' },
+  { kind: 'Tab', op: 'Tab', arity: 0, argTypes: [], resultType: 'text', prefix: 'tab character' },
+  { kind: 'IndexOf', op: 'IndexOf', arity: 2, argTypes: ['text', 'text'], resultType: 'number', prefix: 'index of', infix: 'in' },
+  { kind: 'LastIndexOf', op: 'LastIndexOf', arity: 2, argTypes: ['text', 'text'], resultType: 'number', prefix: 'last index of', infix: 'in' },
+  { kind: 'LetterOf', op: 'LetterOf', arity: 2, argTypes: ['number', 'text'], resultType: 'text', prefix: 'letter', infix: 'of' },
+  { kind: 'Length', op: 'Length', arity: 1, argTypes: ['text'], resultType: 'number', prefix: 'length of' },
+  { kind: 'Case', op: 'Case', arity: 2, argTypes: ['text', 'text'], resultType: 'text', infix: 'to', enumArg: { index: 1, options: CASE_OPTIONS } },
+  // Boolean: comparisons, logic, and two standalone true/false literal
+  // blocks (separate blocks per design, not a toggle).
+  { kind: 'Eq', op: 'Eq', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '=' },
+  { kind: 'Neq', op: 'Neq', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '≠' },
+  { kind: 'Gt', op: 'Gt', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '>' },
+  { kind: 'Lt', op: 'Lt', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '<' },
+  { kind: 'Gte', op: 'Gte', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '≥' },
+  { kind: 'Lte', op: 'Lte', arity: 2, argTypes: ['number', 'number'], resultType: 'bool', infix: '≤' },
+  { kind: 'And', op: 'And', arity: 2, argTypes: ['bool', 'bool'], resultType: 'bool', infix: 'and' },
+  { kind: 'Or', op: 'Or', arity: 2, argTypes: ['bool', 'bool'], resultType: 'bool', infix: 'or' },
+  { kind: 'Not', op: 'Not', arity: 1, argTypes: ['bool'], resultType: 'bool', prefix: 'not' },
+  { kind: 'True', op: 'True', arity: 0, argTypes: [], resultType: 'bool', prefix: 'true' },
+  { kind: 'False', op: 'False', arity: 0, argTypes: [], resultType: 'bool', prefix: 'false' },
 ];
 
 export function specForKind(kind: ValueKind): OperatorKindSpec | undefined {
@@ -67,5 +83,6 @@ export function labelForOp(op: ValueOp): Pick<OperatorKindSpec, 'prefix' | 'infi
 
 export function defaultArgFor(spec: OperatorKindSpec, index: number): ValueDto {
   if (spec.enumArg?.index === index) return { kind: 'Text', value: spec.enumArg.options[0].value };
+  if (spec.argTypes[index] === 'bool') return { kind: 'Op', op: 'False', args: [], saved: { kind: 'Number', value: 0 } };
   return spec.argTypes[index] === 'text' ? { kind: 'Text', value: '' } : { kind: 'Number', value: 0 };
 }

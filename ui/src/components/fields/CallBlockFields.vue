@@ -7,9 +7,9 @@ import { computed } from 'vue';
 import { state } from '../../store';
 import { fieldLocation, findBlockDef } from '../../types';
 import ValueBlock from '../ValueBlock.vue';
-import type { InstructionDto } from '../../types';
+import type { InstrPath, InstructionDto } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'CallBlock' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'CallBlock' }> }>();
 
 const def = computed(() => findBlockDef(state.current_macro, props.instruction.block_id));
 
@@ -28,7 +28,7 @@ const pieces = computed(() => {
     <span v-if="item.piece.kind === 'Label'" class="instruction-label">{{ item.piece.text }}</span>
     <ValueBlock
       v-else
-      :location="fieldLocation(strandId, index, `CallArg:${item.argIndex}`)"
+      :location="fieldLocation(strandId, path, `CallArg:${item.argIndex}`)"
       :value="instruction.args[item.argIndex] ?? { kind: 'Number', value: 0 }"
     />
   </template>

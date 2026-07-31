@@ -10,7 +10,7 @@ import type { OperatorKindSpec, OperatorValueKind } from './valueOps';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
   'WhenRan', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'Comment',
-  'SetVariable', 'ChangeVariable', 'Return',
+  'SetVariable', 'ChangeVariable', 'Return', 'If', 'IfElse',
 ];
 
 export const paletteInstructions: Record<InstructionType, InstructionDto> = reactive(
@@ -53,7 +53,14 @@ export function paletteValueFor(kind: ValueKind): ValueDto {
   return {
     kind: 'Op',
     op: spec.op,
-    args: args.map((v, i) => (spec.argTypes[i] === 'text' ? textValue(String(v)) : numberValue(Number(v)))),
+    args: args.map((v, i) => {
+      const argType = spec.argTypes[i];
+      if (argType === 'text') return textValue(String(v));
+      // No editable palette leaf for booleans — a fresh "false", same as
+      // defaultArgFor's fallback for a bool-typed slot.
+      if (argType === 'bool') return { kind: 'Op', op: 'False', args: [], saved: numberValue(0) };
+      return numberValue(Number(v));
+    }),
     saved: numberValue(0),
   };
 }

@@ -11,6 +11,22 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) type SharedState = Arc<Mutex<AppState>>;
 
+/// One step of an [`InstrPath`] — `index` into the current instruction list,
+/// and (for every step but the last) which nested body of that instruction
+/// to descend into next: `0` for `If`'s body or `IfElse`'s `then_body`, `1`
+/// for `IfElse`'s `else_body`. The last step's `slot` is always `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct PathStep {
+    pub(crate) index: usize,
+    pub(crate) slot: Option<u8>,
+}
+
+/// Addresses one instruction, possibly nested inside `If`/`IfElse` bodies —
+/// generalizes the old flat `index: usize` the same way `Value`'s `path:
+/// Vec<u8>` already addresses a nested value-tree node. Resolved by
+/// `commands::resolve_body_mut`.
+pub(crate) type InstrPath = Vec<PathStep>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum FieldId {
     WaitDuration,
@@ -24,6 +40,8 @@ pub(crate) enum FieldId {
     /// One of `CallBlock`'s N argument slots, indexed positionally since a
     /// call's arity is dynamic.
     CallArg(usize),
+    /// `If`/`IfElse`'s boolean condition.
+    Condition,
 }
 
 impl std::fmt::Display for FieldId {
@@ -38,6 +56,7 @@ impl std::fmt::Display for FieldId {
             FieldId::ChangeVariableValue => write!(f, "ChangeVariableValue"),
             FieldId::ReturnValue => write!(f, "ReturnValue"),
             FieldId::CallArg(i) => write!(f, "CallArg:{i}"),
+            FieldId::Condition => write!(f, "Condition"),
         }
     }
 }
@@ -54,6 +73,7 @@ impl std::str::FromStr for FieldId {
             "SetVariableValue" => Ok(FieldId::SetVariableValue),
             "ChangeVariableValue" => Ok(FieldId::ChangeVariableValue),
             "ReturnValue" => Ok(FieldId::ReturnValue),
+            "Condition" => Ok(FieldId::Condition),
             _ if s.starts_with("CallArg:") => s["CallArg:".len()..]
                 .parse::<usize>()
                 .map(FieldId::CallArg)
@@ -98,7 +118,7 @@ pub(crate) enum ComboCapture {
 /// `AppState::pending_standalone_key` instead.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KeyCaptureTarget {
-    Strand(String, usize),
+    Strand(String, InstrPath),
     Standalone,
 }
 
@@ -249,7 +269,7 @@ pub(crate) struct StrandDto {
 pub(crate) struct KeyCaptureDto {
     pub(crate) kind: String,
     pub(crate) strand_id: Option<String>,
-    pub(crate) index: Option<usize>,
+    pub(crate) index: Option<InstrPath>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -276,7 +296,7 @@ pub(crate) struct FloatingValueDto {
 /// within that root. Resolved against a `Macro` by `commands::resolve_location_mut`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ValueLocation {
-    Field { strand_id: String, index: usize, field_id: FieldId, path: Vec<u8> },
+    Field { strand_id: String, index: InstrPath, field_id: FieldId, path: Vec<u8> },
     Floating { floating_id: String, path: Vec<u8> },
 }
 
@@ -318,7 +338,7 @@ impl ValueLocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TextEditSession {
     Value(ValueLocation),
-    Instruction { strand_id: String, index: usize },
+    Instruction { strand_id: String, index: InstrPath },
 }
 
 /// Wire shape for `ValueLocation`, used for both incoming command params and
@@ -326,7 +346,7 @@ pub(crate) enum TextEditSession {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind")]
 pub(crate) enum ValueLocationDto {
-    Field { strand_id: String, index: usize, field_id: String, path: Vec<u8> },
+    Field { strand_id: String, index: InstrPath, field_id: String, path: Vec<u8> },
     Floating { floating_id: String, path: Vec<u8> },
 }
 
@@ -335,7 +355,7 @@ impl ValueLocationDto {
         Ok(match self {
             ValueLocationDto::Field { strand_id, index, field_id, path } => ValueLocation::Field {
                 strand_id: strand_id.clone(),
-                index: *index,
+                index: index.clone(),
                 field_id: field_id.parse()?,
                 path: path.clone(),
             },
@@ -350,7 +370,7 @@ pub(crate) fn location_to_dto(loc: &ValueLocation) -> ValueLocationDto {
     match loc {
         ValueLocation::Field { strand_id, index, field_id, path } => ValueLocationDto::Field {
             strand_id: strand_id.clone(),
-            index: *index,
+            index: index.clone(),
             field_id: field_id.to_string(),
             path: path.clone(),
         },
@@ -377,6 +397,8 @@ pub(crate) enum InstructionDto {
     BlockHeader { block_id: String },
     CallBlock { block_id: String, args: Vec<ValueDto> },
     Return { value: ValueDto },
+    If { condition: ValueDto, body: Vec<InstructionDto> },
+    IfElse { condition: ValueDto, then_body: Vec<InstructionDto>, else_body: Vec<InstructionDto> },
 }
 
 #[derive(Serialize, Clone)]
@@ -528,6 +550,14 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
             InstructionDto::CallBlock { block_id: block_id.clone(), args: args.iter().map(value_to_dto).collect() }
         }
         Instruction::Return(value) => InstructionDto::Return { value: value_to_dto(value) },
+        Instruction::If { condition, body } => {
+            InstructionDto::If { condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
+        }
+        Instruction::IfElse { condition, then_body, else_body } => InstructionDto::IfElse {
+            condition: value_to_dto(condition),
+            then_body: then_body.iter().map(instruction_to_dto).collect(),
+            else_body: else_body.iter().map(instruction_to_dto).collect(),
+        },
         Instruction::Token(token) => match token {
             InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
@@ -582,6 +612,15 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
             Instruction::CallBlock { block_id: block_id.clone(), args: args.iter().map(dto_to_value).collect() }
         }
         InstructionDto::Return { value } => Instruction::Return(dto_to_value(value)),
+        InstructionDto::If { condition, body } => Instruction::If {
+            condition: dto_to_value(condition),
+            body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
+        },
+        InstructionDto::IfElse { condition, then_body, else_body } => Instruction::IfElse {
+            condition: dto_to_value(condition),
+            then_body: then_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
+            else_body: else_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
+        },
     })
 }
 
@@ -711,7 +750,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         KeyCaptureTarget::Strand(strand_id, index) => KeyCaptureDto {
             kind: "Strand".to_string(),
             strand_id: Some(strand_id.clone()),
-            index: Some(*index),
+            index: Some(index.clone()),
         },
         KeyCaptureTarget::Standalone => KeyCaptureDto {
             kind: "Standalone".to_string(),

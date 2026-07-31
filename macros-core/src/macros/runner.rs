@@ -74,8 +74,7 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
         // passthrough rather than a hard error keeps this function total.
         Value::Var { name } => Ok(Value::Var { name: name.clone() }),
         Value::Param { name } => Ok(match ctx.param_env.get(name) {
-            Some(Evaluated::Number(n)) => Value::Number { value: *n },
-            Some(Evaluated::Text(s)) => Value::Text { value: s.clone() },
+            Some(e) => e.clone().into_value(),
             None => Value::number(0.0),
         }),
         Value::Op { op, args, saved } => {
@@ -91,8 +90,7 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
                 evaluated_args.push(resolved.eval()?);
             }
             match call_block(block_id, evaluated_args, ctx, depth + 1)? {
-                Some(Evaluated::Number(n)) => Ok(Value::number(n)),
-                Some(Evaluated::Text(s)) => Ok(Value::Text { value: s }),
+                Some(e) => Ok(e.into_value()),
                 None => Err(format!("custom block '{block_id}' didn't return a value")),
             }
         }
@@ -313,6 +311,29 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                 // `Return`; if one sneaks in, it just ends the call early.
                 let _ = call_block(block_id, evaluated_args, ctx, depth + 1)?;
             }
+            Instruction::If { condition, body } => {
+                match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
+                    Ok(cond) => {
+                        if cond.as_bool() {
+                            if let Some(v) = run_block(body, ctx, depth)? {
+                                return Ok(Some(v));
+                            }
+                        }
+                    }
+                    Err(e) => warn!("Skipping If: condition {}", e),
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
+                    Ok(cond) => {
+                        let branch = if cond.as_bool() { then_body } else { else_body };
+                        if let Some(v) = run_block(branch, ctx, depth)? {
+                            return Ok(Some(v));
+                        }
+                    }
+                    Err(e) => warn!("Skipping IfElse: condition {}", e),
+                }
+            }
             Instruction::Wait(duration) => {
                 let duration = match ctx.resolve(duration, depth).and_then(|v| v.eval_number()) {
                     Ok(v) => v,
@@ -513,8 +534,8 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                 Err(e) => warn!("Skipping Set Variable: {}", e),
             },
             Instruction::ChangeVariable(name, value) => match ctx.resolve(value, depth).and_then(|v| v.eval()) {
-                // The delta must be numeric — text is a deliberate no-op.
-                Ok(Evaluated::Text(_)) => {}
+                // The delta must be numeric — text/bool are a deliberate no-op.
+                Ok(Evaluated::Text(_) | Evaluated::Bool(_)) => {}
                 Ok(Evaluated::Number(delta)) => {
                     if let Ok(mut vars) = ctx.variables.lock() {
                         // Non-numeric (or missing) current value coerces
@@ -955,5 +976,133 @@ mod tests {
         };
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(6.0)));
+    }
+
+    fn true_cond() -> Value {
+        Value::Op { op: crate::input::value::Op::True, args: vec![], saved: Box::new(Value::number(0.0)) }
+    }
+    fn false_cond() -> Value {
+        Value::Op { op: crate::input::value::Op::False, args: vec![], saved: Box::new(Value::number(0.0)) }
+    }
+
+    #[test]
+    fn if_runs_body_when_condition_true() {
+        let vars = empty_vars();
+        run_instructions(
+            vec![Instruction::If { condition: true_cond(), body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))] }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
+    }
+
+    #[test]
+    fn if_skips_body_when_condition_false() {
+        let vars = empty_vars();
+        run_instructions(
+            vec![Instruction::If { condition: false_cond(), body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))] }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), None);
+    }
+
+    #[test]
+    fn if_else_runs_the_matching_branch() {
+        let vars = empty_vars();
+        run_instructions(
+            vec![Instruction::IfElse {
+                condition: true_cond(),
+                then_body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+                else_body: vec![Instruction::SetVariable("x".to_string(), Value::number(2.0))],
+            }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
+
+        let vars2 = empty_vars();
+        run_instructions(
+            vec![Instruction::IfElse {
+                condition: false_cond(),
+                then_body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+                else_body: vec![Instruction::SetVariable("x".to_string(), Value::number(2.0))],
+            }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars2),
+        );
+        assert_eq!(vars2.lock().unwrap().get("x"), Some(&Evaluated::Number(2.0)));
+    }
+
+    #[test]
+    fn nested_if_inside_if_runs_only_when_both_true() {
+        let vars = empty_vars();
+        run_instructions(
+            vec![Instruction::If {
+                condition: true_cond(),
+                body: vec![Instruction::If {
+                    condition: true_cond(),
+                    body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+                }],
+            }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars),
+        );
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
+
+        let vars2 = empty_vars();
+        run_instructions(
+            vec![Instruction::If {
+                condition: true_cond(),
+                body: vec![Instruction::If {
+                    condition: false_cond(),
+                    body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+                }],
+            }],
+            noop_emulator(), None, 1.0, Arc::clone(&vars2),
+        );
+        assert_eq!(vars2.lock().unwrap().get("x"), None);
+    }
+
+    /// A `Return` inside an `If` branch, within a custom block called via
+    /// `Value::Call`, should halt the block's body and hand its value back
+    /// to the caller — proving `run_block`'s `Ok(Some(_))` bubbles up
+    /// through nested `If` the same way it already does through `CallBlock`.
+    #[test]
+    fn return_inside_if_branch_bubbles_up_through_reporter_block() {
+        let vars = empty_vars();
+        let block_id = "cond_return".to_string();
+        let mac = Macro {
+            id: "m".into(),
+            name: "CondReturn".into(),
+            description: "".into(),
+            strands: vec![
+                Strand {
+                    id: "caller".into(),
+                    x: 0,
+                    y: 0,
+                    instructions: vec![
+                        Instruction::WhenRan,
+                        Instruction::SetVariable(
+                            "x".to_string(),
+                            Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
+                        ),
+                    ],
+                },
+                Strand {
+                    id: "body".into(),
+                    x: 0,
+                    y: 0,
+                    instructions: vec![
+                        Instruction::BlockHeader(block_id.clone()),
+                        Instruction::If { condition: true_cond(), body: vec![Instruction::Return(Value::number(42.0))] },
+                        // Never reached if the branch's Return correctly halted the body.
+                        Instruction::Return(Value::number(0.0)),
+                    ],
+                },
+            ],
+            recording_target: None,
+            speed_multiplier: 1.0,
+            floating_values: vec![],
+            variables: vec![],
+            block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
+        };
+        mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
+        assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(42.0)));
     }
 }

@@ -87,6 +87,11 @@ const boxed = computed(() =>
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
+// Boolean-producing operators (comparisons, and/or/not, true/false) render
+// as a hexagon instead of the ordinary rounded capsule — Scratch's visual
+// language for "this slot expects a boolean."
+const isBool = computed(() => displayValue.value.kind === 'Op' && specForOp(displayValue.value.op)?.resultType === 'bool');
+
 function childLocation(step: number): ValueLocationDto {
   return { ...props.location, path: [...props.location.path, step] } as ValueLocationDto;
 }
@@ -111,7 +116,7 @@ function onPointerDown(e: PointerEvent) {
   <span
     ref="rootEl"
     class="value-block"
-    :class="{ 'value-card-shape': boxed }"
+    :class="{ 'value-card-shape': boxed && !isBool, 'value-card-shape-bool': boxed && isBool }"
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
   >

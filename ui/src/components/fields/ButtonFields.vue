@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { editInstruction } from '../../tauri';
 import AppDropdown from '../AppDropdown.vue';
-import type { InstructionDto, KeyDirection, MouseButton } from '../../types';
+import type { InstrPath, InstructionDto, KeyDirection, MouseButton } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'Button' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Button' }> }>();
 
 function onButtonChange(v: string) {
-  editInstruction(props.strandId, props.index, { type: 'Button', button: v as MouseButton, direction: props.instruction.direction });
+  editInstruction(props.strandId, props.path, { type: 'Button', button: v as MouseButton, direction: props.instruction.direction });
 }
 function onDirectionChange(dir: string) {
-  editInstruction(props.strandId, props.index, { type: 'Button', button: props.instruction.button, direction: dir as KeyDirection });
+  editInstruction(props.strandId, props.path, { type: 'Button', button: props.instruction.button, direction: dir as KeyDirection });
 }
 </script>
 

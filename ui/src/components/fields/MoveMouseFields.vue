@@ -3,12 +3,12 @@ import { editInstruction } from '../../tauri';
 import ValueBlock from '../ValueBlock.vue';
 import AppDropdown from '../AppDropdown.vue';
 import { fieldLocation } from '../../types';
-import type { Coordinate, InstructionDto } from '../../types';
+import type { Coordinate, InstrPath, InstructionDto } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'MoveMouse' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'MoveMouse' }> }>();
 
 function onCoordinateChange(v: string) {
-  editInstruction(props.strandId, props.index, {
+  editInstruction(props.strandId, props.path, {
     type: 'MoveMouse', x: props.instruction.x, y: props.instruction.y, coordinate: v as Coordinate,
   });
 }
@@ -16,8 +16,8 @@ function onCoordinateChange(v: string) {
 
 <template>
   <span class="instruction-label">Move mouse:</span>
-  <ValueBlock :location="fieldLocation(strandId, index, 'MoveMouseX')" :value="instruction.x" placeholder="X" />
-  <ValueBlock :location="fieldLocation(strandId, index, 'MoveMouseY')" :value="instruction.y" placeholder="Y" />
+  <ValueBlock :location="fieldLocation(strandId, path, 'MoveMouseX')" :value="instruction.x" placeholder="X" />
+  <ValueBlock :location="fieldLocation(strandId, path, 'MoveMouseY')" :value="instruction.y" placeholder="Y" />
   <AppDropdown
     :options="['Absolute', 'Relative']"
     :model-value="instruction.coordinate"

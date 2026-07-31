@@ -5,6 +5,7 @@
 import { reactive } from 'vue';
 import { registerOpen, unregisterOpen } from './dropdownRegistry';
 import { clientToCanvas } from './canvasDrag';
+import type { InstrPath } from './types';
 
 export type ContextMenuType = 'block' | 'canvas' | 'variable' | 'myBlock';
 
@@ -14,7 +15,7 @@ interface ContextMenuState {
   y: number;
   type: ContextMenuType;
   strandId: string;
-  index: number;
+  path: InstrPath;
   canvasX: number;
   canvasY: number;
   variableName: string;
@@ -27,7 +28,7 @@ export const contextMenu = reactive<ContextMenuState>({
   y: 0,
   type: 'block',
   strandId: '',
-  index: 0,
+  path: [],
   canvasX: 0,
   canvasY: 0,
   variableName: '',
@@ -41,11 +42,11 @@ function openAt(e: MouseEvent) {
   contextMenu.y = e.clientY;
 }
 
-export function openBlockMenu(e: MouseEvent, strandId: string, index: number): void {
+export function openBlockMenu(e: MouseEvent, strandId: string, path: InstrPath): void {
   openAt(e);
   contextMenu.type = 'block';
   contextMenu.strandId = strandId;
-  contextMenu.index = index;
+  contextMenu.path = path;
 }
 
 export function openCanvasMenu(e: MouseEvent): void {

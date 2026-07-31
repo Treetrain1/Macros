@@ -39,6 +39,29 @@ pub enum Op {
     /// a plain `Value::Text` leaf, but driven by an in-place dropdown rather
     /// than the drag/drop machinery.
     Case,
+    /// `args[0] == args[1]` — numeric if both sides parse as a number,
+    /// otherwise a text comparison (mirrors Scratch's loose `=`).
+    Eq,
+    /// Negation of [`Op::Eq`].
+    Neq,
+    /// `args[0] > args[1]`, numeric (same coercion as the arithmetic ops).
+    Gt,
+    /// `args[0] < args[1]`.
+    Lt,
+    /// `args[0] >= args[1]`.
+    Gte,
+    /// `args[0] <= args[1]`.
+    Lte,
+    /// `args[0] && args[1]`, short-circuiting.
+    And,
+    /// `args[0] || args[1]`, short-circuiting.
+    Or,
+    /// `!args[0]`.
+    Not,
+    /// Zero-arity `true` literal — a standalone block, not a toggle.
+    True,
+    /// Zero-arity `false` literal — a standalone block, not a toggle.
+    False,
 }
 
 /// Recursive expression tree backing a numeric/text instruction field — a
@@ -75,6 +98,7 @@ pub enum Value {
 pub enum Evaluated {
     Number(f64),
     Text(String),
+    Bool(bool),
 }
 
 /// Manual impl mirroring `Value`'s own — `f64` isn't `Hash`, so its bit
@@ -90,6 +114,10 @@ impl std::hash::Hash for Evaluated {
                 1u8.hash(state);
                 s.hash(state);
             }
+            Evaluated::Bool(b) => {
+                2u8.hash(state);
+                b.hash(state);
+            }
         }
     }
 }
@@ -101,6 +129,42 @@ impl Evaluated {
         match self {
             Evaluated::Number(n) => Ok(*n),
             Evaluated::Text(s) => s.trim().parse::<f64>().map_err(|_| format!("\"{s}\" is not a number")),
+            Evaluated::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        }
+    }
+
+    /// Coerces to a boolean — always succeeds, same "loose" spirit as
+    /// `as_number`: a nonzero number or a nonempty, non-`"false"` string
+    /// counts as true.
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Evaluated::Bool(b) => *b,
+            Evaluated::Number(n) => *n != 0.0,
+            Evaluated::Text(s) => !s.is_empty() && s != "false",
+        }
+    }
+
+    /// Stringifies for display/comparison — like `eval_text`, but from an
+    /// already-evaluated result (no re-evaluation).
+    fn as_text(&self) -> String {
+        match self {
+            Evaluated::Text(s) => s.clone(),
+            Evaluated::Number(n) => n.to_string(),
+            Evaluated::Bool(b) => b.to_string(),
+        }
+    }
+
+    /// Rebuilds a `Value` leaf holding this result — `Bool` becomes a
+    /// `True`/`False` op node, since there's no bare boolean `Value` leaf.
+    pub fn into_value(self) -> Value {
+        match self {
+            Evaluated::Number(value) => Value::Number { value },
+            Evaluated::Text(value) => Value::Text { value },
+            Evaluated::Bool(b) => Value::Op {
+                op: if b { Op::True } else { Op::False },
+                args: vec![],
+                saved: Box::new(Value::number(0.0)),
+            },
         }
     }
 }
@@ -120,6 +184,12 @@ pub struct OperatorKindSpec {
 
 fn text_default() -> Value {
     Value::Text { value: String::new() }
+}
+
+/// Default for a boolean-typed operand slot — there's no bare boolean leaf,
+/// so this is a fresh `false` block, same spirit as `text_default`.
+fn bool_default() -> Value {
+    Value::Op { op: Op::False, args: vec![], saved: Box::new(Value::number(0.0)) }
 }
 
 pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
@@ -147,6 +217,18 @@ pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
         arity: 2,
         default_args: || vec![text_default(), Value::Text { value: "Upper".to_string() }],
     },
+    OperatorKindSpec { kind: "Eq", op: Op::Eq, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Neq", op: Op::Neq, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Gt", op: Op::Gt, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Lt", op: Op::Lt, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Gte", op: Op::Gte, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "Lte", op: Op::Lte, arity: 2, default_args: || vec![Value::number(0.0), Value::number(0.0)] },
+    OperatorKindSpec { kind: "And", op: Op::And, arity: 2, default_args: || vec![bool_default(), bool_default()] },
+    OperatorKindSpec { kind: "Or", op: Op::Or, arity: 2, default_args: || vec![bool_default(), bool_default()] },
+    OperatorKindSpec { kind: "Not", op: Op::Not, arity: 1, default_args: || vec![bool_default()] },
+    // Zero-arity, like NewLine/Tab — a standalone "true"/"false" block, not a toggle.
+    OperatorKindSpec { kind: "True", op: Op::True, arity: 0, default_args: Vec::new },
+    OperatorKindSpec { kind: "False", op: Op::False, arity: 0, default_args: Vec::new },
 ];
 
 /// 1-based char index of the first occurrence of `needle` in `haystack`, or
@@ -168,6 +250,15 @@ fn char_last_index_of(haystack: &str, needle: &str) -> usize {
         return 0;
     }
     (0..=h.len() - n.len()).rev().find(|&i| h[i..i + n.len()] == n[..]).map_or(0, |i| i + 1)
+}
+
+/// `Op::Eq`'s comparison rule: numeric if both sides parse as a number,
+/// otherwise a text comparison (mirrors Scratch's loose `=`).
+fn values_equal(l: &Evaluated, r: &Evaluated) -> bool {
+    match (l.as_number(), r.as_number()) {
+        (Ok(ln), Ok(rn)) => ln == rn,
+        _ => l.as_text() == r.as_text(),
+    }
 }
 
 impl Value {
@@ -225,6 +316,17 @@ impl Value {
                 Ok(Evaluated::Text(if upper { text.to_uppercase() } else { text.to_lowercase() }))
             }
             Value::Op { op: Op::Round, args, .. } => Ok(Evaluated::Number(args[0].eval_number()?.round())),
+            Value::Op { op: Op::True, .. } => Ok(Evaluated::Bool(true)),
+            Value::Op { op: Op::False, .. } => Ok(Evaluated::Bool(false)),
+            Value::Op { op: Op::Not, args, .. } => Ok(Evaluated::Bool(!args[0].eval()?.as_bool())),
+            Value::Op { op: Op::And, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() && args[1].eval()?.as_bool())),
+            Value::Op { op: Op::Or, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() || args[1].eval()?.as_bool())),
+            Value::Op { op: Op::Eq, args, .. } => Ok(Evaluated::Bool(values_equal(&args[0].eval()?, &args[1].eval()?))),
+            Value::Op { op: Op::Neq, args, .. } => Ok(Evaluated::Bool(!values_equal(&args[0].eval()?, &args[1].eval()?))),
+            Value::Op { op: Op::Gt, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_number()? > args[1].eval()?.as_number()?)),
+            Value::Op { op: Op::Lt, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_number()? < args[1].eval()?.as_number()?)),
+            Value::Op { op: Op::Gte, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_number()? >= args[1].eval()?.as_number()?)),
+            Value::Op { op: Op::Lte, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_number()? <= args[1].eval()?.as_number()?)),
             Value::Op { op, args, .. } => {
                 let l = args[0].eval()?.as_number()?;
                 let r = args[1].eval()?.as_number()?;
@@ -253,7 +355,8 @@ impl Value {
                         }
                     }
                     Op::Join | Op::NewLine | Op::Tab | Op::Length | Op::IndexOf | Op::LastIndexOf | Op::LetterOf | Op::Case
-                    | Op::Round => unreachable!("matched above"),
+                    | Op::Round | Op::True | Op::False | Op::Not | Op::And | Op::Or | Op::Eq | Op::Neq | Op::Gt | Op::Lt
+                    | Op::Gte | Op::Lte => unreachable!("matched above"),
                 };
                 Ok(Evaluated::Number(result))
             }
@@ -273,6 +376,7 @@ impl Value {
         Ok(match self.eval()? {
             Evaluated::Text(s) => s,
             Evaluated::Number(n) => n.to_string(),
+            Evaluated::Bool(b) => b.to_string(),
         })
     }
 
@@ -388,8 +492,7 @@ impl Value {
                 saved: Box::new(saved.resolve_vars(env)),
             },
             Value::Var { name } => match env.get(name) {
-                Some(Evaluated::Number(n)) => Value::Number { value: *n },
-                Some(Evaluated::Text(s)) => Value::Text { value: s.clone() },
+                Some(e) => e.clone().into_value(),
                 None => Value::number(0.0),
             },
             // Left untouched — `Param`/`Call` need execution capability this
@@ -868,5 +971,75 @@ mod tests {
             }
             _ => panic!("expected Op"),
         }
+    }
+
+    fn bool_op(op: Op, args: Vec<Value>) -> Value {
+        Value::Op { op, args, saved: Box::new(Value::number(0.0)) }
+    }
+
+    #[test]
+    fn eval_true_and_false_are_fixed_constants() {
+        assert_eq!(bool_op(Op::True, vec![]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::False, vec![]).eval(), Ok(Evaluated::Bool(false)));
+    }
+
+    #[test]
+    fn eval_not_negates() {
+        assert_eq!(bool_op(Op::Not, vec![bool_op(Op::True, vec![])]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Not, vec![bool_op(Op::False, vec![])]).eval(), Ok(Evaluated::Bool(true)));
+    }
+
+    #[test]
+    fn eval_and_or_combine_operands() {
+        let t = || bool_op(Op::True, vec![]);
+        let f = || bool_op(Op::False, vec![]);
+        assert_eq!(bool_op(Op::And, vec![t(), t()]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::And, vec![t(), f()]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Or, vec![f(), f()]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Or, vec![f(), t()]).eval(), Ok(Evaluated::Bool(true)));
+    }
+
+    #[test]
+    fn eval_not_coerces_non_boolean_operand() {
+        // A nonzero number is truthy, so `not 5` is false.
+        assert_eq!(bool_op(Op::Not, vec![Value::number(5.0)]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Not, vec![Value::number(0.0)]).eval(), Ok(Evaluated::Bool(true)));
+    }
+
+    #[test]
+    fn eval_comparisons_are_numeric() {
+        assert_eq!(bool_op(Op::Gt, vec![Value::number(5.0), Value::number(3.0)]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::Lt, vec![Value::number(5.0), Value::number(3.0)]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Gte, vec![Value::number(3.0), Value::number(3.0)]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::Lte, vec![Value::number(3.0), Value::number(3.0)]).eval(), Ok(Evaluated::Bool(true)));
+    }
+
+    #[test]
+    fn eval_eq_compares_numerically_when_both_sides_are_numeric() {
+        // "5" and 5.0 are numerically equal even though one is text.
+        assert_eq!(bool_op(Op::Eq, vec![text("5"), Value::number(5.0)]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::Neq, vec![text("5"), Value::number(5.0)]).eval(), Ok(Evaluated::Bool(false)));
+    }
+
+    #[test]
+    fn eval_eq_falls_back_to_text_comparison_for_non_numeric_text() {
+        assert_eq!(bool_op(Op::Eq, vec![text("hello"), text("hello")]).eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(bool_op(Op::Eq, vec![text("hello"), text("world")]).eval(), Ok(Evaluated::Bool(false)));
+        assert_eq!(bool_op(Op::Eq, vec![text("hello"), Value::number(5.0)]).eval(), Ok(Evaluated::Bool(false)));
+    }
+
+    #[test]
+    fn as_bool_coerces_loosely() {
+        assert!(Evaluated::Number(1.0).as_bool());
+        assert!(!Evaluated::Number(0.0).as_bool());
+        assert!(Evaluated::Text("hi".to_string()).as_bool());
+        assert!(!Evaluated::Text(String::new()).as_bool());
+        assert!(!Evaluated::Text("false".to_string()).as_bool());
+    }
+
+    #[test]
+    fn into_value_rebuilds_bool_as_true_false_op() {
+        assert_eq!(Evaluated::Bool(true).into_value().eval(), Ok(Evaluated::Bool(true)));
+        assert_eq!(Evaluated::Bool(false).into_value().eval(), Ok(Evaluated::Bool(false)));
     }
 }

@@ -3,16 +3,16 @@ import { computed } from 'vue';
 import { state } from '../../store';
 import { editInstruction } from '../../tauri';
 import { fieldLocation, sortedVariableNames } from '../../types';
-import type { InstructionDto } from '../../types';
+import type { InstrPath, InstructionDto } from '../../types';
 import AppDropdown from '../AppDropdown.vue';
 import ValueBlock from '../ValueBlock.vue';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'SetVariable' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'SetVariable' }> }>();
 
 const variableNames = computed(() => sortedVariableNames(state.current_macro));
 
 function onNameChange(name: string) {
-  editInstruction(props.strandId, props.index, { type: 'SetVariable', name, value: props.instruction.value });
+  editInstruction(props.strandId, props.path, { type: 'SetVariable', name, value: props.instruction.value });
 }
 </script>
 
@@ -26,5 +26,5 @@ function onNameChange(name: string) {
     @update:model-value="onNameChange"
   />
   <span class="instruction-label">to</span>
-  <ValueBlock :location="fieldLocation(strandId, index, 'SetVariableValue')" :value="instruction.value" />
+  <ValueBlock :location="fieldLocation(strandId, path, 'SetVariableValue')" :value="instruction.value" />
 </template>

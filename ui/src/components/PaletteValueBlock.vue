@@ -20,6 +20,7 @@ import AppDropdown from './AppDropdown.vue';
 const props = defineProps<{ kind: ValueKind }>();
 
 const spec = computed(() => specForKind(props.kind));
+const isBool = computed(() => spec.value?.resultType === 'bool');
 const args = computed(() => (spec.value ? paletteOperatorArgs[spec.value.kind] : []));
 
 // Set only when this exact prefab was last clicked (not dragged) — see
@@ -64,7 +65,12 @@ function onArgInput(index: number, v: string) {
 </script>
 
 <template>
-  <span class="value-block value-card-shape palette-prefab" @pointerdown="onPointerDown" @contextmenu="onContextMenu">
+  <span
+    class="value-block palette-prefab"
+    :class="isBool ? 'value-card-shape-bool' : 'value-card-shape'"
+    @pointerdown="onPointerDown"
+    @contextmenu="onContextMenu"
+  >
     <template v-if="kind === 'Number'">
       <AutosizeInput :model-value="String(paletteNumber.value)" :min-chars="2" @update:model-value="onNumberInput" />
     </template>
@@ -88,6 +94,9 @@ function onArgInput(index: number, v: string) {
           class-name="dd-compact"
           @update:model-value="v => onArgInput(i, v)"
         />
+        <!-- Boolean slots have no editable palette leaf (there's no bare
+             boolean literal) — show a static placeholder instead. -->
+        <span v-else-if="spec.argTypes[i] === 'bool'" class="value-block value-card-shape-bool value-op">false</span>
         <AutosizeInput
           v-else
           :model-value="String(arg)"

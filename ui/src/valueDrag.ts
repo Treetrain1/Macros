@@ -361,7 +361,7 @@ function onPointerUp(e: PointerEvent) {
         // own floating card instead of silently absorbing it. An unboxed
         // (typed-in) target keeps plain put_value behavior. Read the class off
         // the live element since it already reflects ValueBlock.vue's `boxed`.
-        if (!isFloatingRoot && targetEl.classList.contains('value-card-shape')) {
+        if (!isFloatingRoot && (targetEl.classList.contains('value-card-shape') || targetEl.classList.contains('value-card-shape-bool'))) {
           const r = targetEl.getBoundingClientRect();
           const [x, y] = clientToCanvas(r.right + 16, r.top);
           const displaced = await takeValue(targetLoc);

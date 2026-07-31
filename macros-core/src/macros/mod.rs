@@ -145,6 +145,18 @@ impl Instruction {
                     a.rename_var(old, new);
                 }
             }
+            Instruction::If { condition, body } => {
+                condition.rename_var(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_var(old, new);
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                condition.rename_var(old, new);
+                for ins in then_body.iter_mut().chain(else_body.iter_mut()) {
+                    ins.rename_var(old, new);
+                }
+            }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
         }
     }
@@ -159,6 +171,18 @@ impl Instruction {
             Instruction::CallBlock { args, .. } => {
                 for a in args.iter_mut() {
                     a.rename_param(old, new);
+                }
+            }
+            Instruction::If { condition, body } => {
+                condition.rename_param(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_param(old, new);
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                condition.rename_param(old, new);
+                for ins in then_body.iter_mut().chain(else_body.iter_mut()) {
+                    ins.rename_param(old, new);
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
@@ -183,6 +207,18 @@ impl Instruction {
                     a.for_each_call_args_mut(block_id, f);
                 }
             }
+            Instruction::If { condition, body } => {
+                condition.for_each_call_args_mut(block_id, f);
+                for ins in body.iter_mut() {
+                    ins.for_each_call_args_mut(block_id, f);
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                condition.for_each_call_args_mut(block_id, f);
+                for ins in then_body.iter_mut().chain(else_body.iter_mut()) {
+                    ins.for_each_call_args_mut(block_id, f);
+                }
+            }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
         }
     }
@@ -200,7 +236,42 @@ impl Instruction {
                     a.scrub_block_calls(block_id);
                 }
             }
+            Instruction::If { condition, body } => {
+                condition.scrub_block_calls(block_id);
+                for ins in body.iter_mut() {
+                    ins.scrub_block_calls(block_id);
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                condition.scrub_block_calls(block_id);
+                for ins in then_body.iter_mut().chain(else_body.iter_mut()) {
+                    ins.scrub_block_calls(block_id);
+                }
+            }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+        }
+    }
+
+    /// Read-only counterpart to `body_mut`.
+    pub fn body(&self, slot: u8) -> Option<&Vec<Instruction>> {
+        match (self, slot) {
+            (Instruction::If { body, .. }, 0) => Some(body),
+            (Instruction::IfElse { then_body, .. }, 0) => Some(then_body),
+            (Instruction::IfElse { else_body, .. }, 1) => Some(else_body),
+            _ => None,
+        }
+    }
+
+    /// The nested instruction list for compound-instruction `slot` — `If`'s
+    /// single body (`slot == 0`), or `IfElse`'s `then_body`/`else_body`
+    /// (`slot == 0`/`1`). `None` for anything else (including an out-of-range
+    /// slot). The one primitive nested-instruction addressing builds on.
+    pub fn body_mut(&mut self, slot: u8) -> Option<&mut Vec<Instruction>> {
+        match (self, slot) {
+            (Instruction::If { body, .. }, 0) => Some(body),
+            (Instruction::IfElse { then_body, .. }, 0) => Some(then_body),
+            (Instruction::IfElse { else_body, .. }, 1) => Some(else_body),
+            _ => None,
         }
     }
 }
@@ -486,6 +557,11 @@ pub enum Instruction {
     /// evaluates `Value` and halts execution, returning the result to the
     /// caller.
     Return(Value),
+    /// `if <condition> then { body }` — runs `body` inline (same strand,
+    /// same depth) when `condition` evaluates truthy.
+    If { condition: Value, body: Vec<Instruction> },
+    /// `if <condition> then { then_body } else { else_body }`.
+    IfElse { condition: Value, then_body: Vec<Instruction>, else_body: Vec<Instruction> },
 }
 
 impl std::hash::Hash for Macro {
@@ -515,6 +591,13 @@ impl std::hash::Hash for Instruction {
             Self::BlockHeader(id) => { 7u8.hash(state); id.hash(state); }
             Self::CallBlock { block_id, args } => { 8u8.hash(state); block_id.hash(state); args.hash(state); }
             Self::Return(v) => { 9u8.hash(state); v.hash(state); }
+            Self::If { condition, body } => { 10u8.hash(state); condition.hash(state); body.hash(state); }
+            Self::IfElse { condition, then_body, else_body } => {
+                11u8.hash(state);
+                condition.hash(state);
+                then_body.hash(state);
+                else_body.hash(state);
+            }
         }
     }
 }
@@ -531,6 +614,8 @@ enum InstructionDe {
     BlockHeader(String),
     CallBlock { block_id: String, args: Vec<Value> },
     Return(Value),
+    If { condition: Value, body: Vec<Instruction> },
+    IfElse { condition: Value, then_body: Vec<Instruction>, else_body: Vec<Instruction> },
 }
 
 #[derive(Deserialize)]
@@ -579,6 +664,8 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::BlockHeader(id) => Instruction::BlockHeader(id),
             InstructionDe::CallBlock { block_id, args } => Instruction::CallBlock { block_id, args },
             InstructionDe::Return(v) => Instruction::Return(v),
+            InstructionDe::If { condition, body } => Instruction::If { condition, body },
+            InstructionDe::IfElse { condition, then_body, else_body } => Instruction::IfElse { condition, then_body, else_body },
         }
     }
 }
@@ -700,5 +787,72 @@ mod tests {
         let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::Token(InputToken::Text(Value::Var { name: "x".to_string() }))]);
         mac.rename_variable("x", "y");
         assert_eq!(mac.strands[0].instructions[1], Instruction::Token(InputToken::Text(Value::Var { name: "x".to_string() })));
+    }
+
+    #[test]
+    fn rename_var_reaches_into_if_body_and_condition() {
+        let mut ins = Instruction::If {
+            condition: Value::Var { name: "x".to_string() },
+            body: vec![Instruction::SetVariable("x".to_string(), Value::Var { name: "x".to_string() })],
+        };
+        ins.rename_var("x", "y");
+        match &ins {
+            Instruction::If { condition, body } => {
+                assert_eq!(*condition, Value::Var { name: "y".to_string() });
+                assert_eq!(body[0], Instruction::SetVariable("y".to_string(), Value::Var { name: "y".to_string() }));
+            }
+            _ => panic!("expected If"),
+        }
+    }
+
+    #[test]
+    fn rename_var_reaches_into_if_else_both_branches() {
+        let mut ins = Instruction::IfElse {
+            condition: Value::Var { name: "x".to_string() },
+            then_body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+            else_body: vec![Instruction::SetVariable("x".to_string(), Value::number(2.0))],
+        };
+        ins.rename_var("x", "y");
+        match &ins {
+            Instruction::IfElse { then_body, else_body, .. } => {
+                assert_eq!(then_body[0], Instruction::SetVariable("y".to_string(), Value::number(1.0)));
+                assert_eq!(else_body[0], Instruction::SetVariable("y".to_string(), Value::number(2.0)));
+            }
+            _ => panic!("expected IfElse"),
+        }
+    }
+
+    #[test]
+    fn scrub_block_calls_reaches_into_nested_if_body() {
+        let mut ins = Instruction::If {
+            condition: Value::number(1.0),
+            body: vec![Instruction::SetVariable(
+                "x".to_string(),
+                Value::Call { block_id: "gone".to_string(), args: vec![], saved: Box::new(Value::number(0.0)) },
+            )],
+        };
+        ins.scrub_block_calls("gone");
+        match &ins {
+            Instruction::If { body, .. } => {
+                assert_eq!(body[0], Instruction::SetVariable("x".to_string(), Value::number(0.0)));
+            }
+            _ => panic!("expected If"),
+        }
+    }
+
+    #[test]
+    fn body_mut_addresses_if_and_if_else_slots() {
+        let mut if_ins = Instruction::If { condition: Value::number(1.0), body: vec![Instruction::Comment("a".into())] };
+        assert_eq!(if_ins.body_mut(0), Some(&mut vec![Instruction::Comment("a".into())]));
+        assert_eq!(if_ins.body_mut(1), None);
+
+        let mut if_else = Instruction::IfElse {
+            condition: Value::number(1.0),
+            then_body: vec![Instruction::Comment("then".into())],
+            else_body: vec![Instruction::Comment("else".into())],
+        };
+        assert_eq!(if_else.body_mut(0), Some(&mut vec![Instruction::Comment("then".into())]));
+        assert_eq!(if_else.body_mut(1), Some(&mut vec![Instruction::Comment("else".into())]));
+        assert_eq!(if_else.body_mut(2), None);
     }
 }

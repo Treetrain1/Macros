@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { editInstruction } from '../../tauri';
 import AutosizeInput from '../AutosizeInput.vue';
-import type { InstructionDto } from '../../types';
+import type { InstrPath, InstructionDto } from '../../types';
 
-const props = defineProps<{ strandId: string; index: number; instruction: Extract<InstructionDto, { type: 'Comment' }> }>();
+const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Comment' }> }>();
 
 function onChange(v: string) {
-  editInstruction(props.strandId, props.index, { type: 'Comment', comment: v });
+  editInstruction(props.strandId, props.path, { type: 'Comment', comment: v });
 }
 </script>
 

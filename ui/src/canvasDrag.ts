@@ -6,8 +6,36 @@ import { state } from './store';
 import { addInstruction, addStrand, deleteBlock, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import { clonePaletteInstruction } from './paletteState';
 import { paletteCallInstructionFor } from './blockDefs';
-import type { InstructionDto, MacroDto } from './types';
-import { isCapType, isHeaderType } from './types';
+import type { InstrPath, InstructionDto, MacroDto, PathStep } from './types';
+import { isCapType, isHeaderType, resolveInstructionList } from './types';
+
+// Structural equality for two path *prefixes* (a basePath, not necessarily a
+// full instruction address) — `slot` is normalized so an omitted/undefined
+// slot compares equal to itself regardless of which side omitted it.
+function pathPrefixEqual(a: PathStep[], b: PathStep[]): boolean {
+  return a.length === b.length && a.every((s, i) => s.index === b[i].index && (s.slot ?? null) === (b[i].slot ?? null));
+}
+
+function parseBasePath(el: HTMLElement): PathStep[] | null {
+  try {
+    return JSON.parse(el.dataset.path ?? '[]');
+  } catch {
+    return null;
+  }
+}
+
+/** Finds the `.instruction-list` DOM container addressed by `basePath` — a
+ * strand's own top-level list (`basePath: []`) or a nested If/IfElse body. */
+function findListContainer(strandId: string, basePath: PathStep[]): HTMLElement | null {
+  const containers = document.querySelectorAll<HTMLElement>('.instruction-list');
+  for (const el of containers) {
+    if (el.dataset.strandId !== strandId) continue;
+    const parsed = parseBasePath(el);
+    if (parsed && pathPrefixEqual(parsed, basePath)) return el;
+  }
+  return null;
+}
+
 
 // Strand x/y can go negative; canvas-inner is sized to the strands' bounding
 // box each render, padded so cards never touch the edge.
@@ -236,7 +264,7 @@ export function setSidebarArmed(armed: boolean) {
 // ── Drag pickup (grip / whole-strand) ───────────────────────────────────────
 interface DragCandidate {
   strandId: string;
-  index: number;
+  path: InstrPath;
   pointerId: number;
   startX: number;
   startY: number;
@@ -250,7 +278,7 @@ interface DragState {
   ghostEl: HTMLElement;
   resolvedId: string | null;
   resolvingPromise: Promise<string | void> | null;
-  snap: { targetId: string; index: number } | null;
+  snap: { targetId: string; path: InstrPath } | null;
   overTrash?: boolean;
   // Set for a whole-strand grab of a BlockHeader strand — its custom block's
   // id, so trashing it deletes the block definition (deleteBlock) instead of
@@ -287,16 +315,16 @@ interface PaletteDragState {
   offsetX: number;
   offsetY: number;
   ghostEl: HTMLElement;
-  snap: { targetId: string; index: number } | null;
+  snap: { targetId: string; path: InstrPath } | null;
 }
 let paletteDrag: PaletteDragState | null = null;
 
-export function beginPickup(e: PointerEvent, strandId: string, index: number) {
+export function beginPickup(e: PointerEvent, strandId: string, path: InstrPath) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
   e.preventDefault();
   capturePointer(e);
-  dragCandidate = { strandId, index, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
+  dragCandidate = { strandId, path, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
 }
 
 // Dragging a palette entry previews the actual instruction block it creates
@@ -351,53 +379,64 @@ const SNAP_THRESHOLD = 36;
 
 // Shared by strand-drags and palette-drags; writes the result onto
 // `target.snap` and updates the shared snap preview.
-interface SnapCandidate { targetId: string; index: number; dist: number; y: number; left: number; width: number }
+interface SnapCandidate { targetId: string; path: InstrPath; dist: number; y: number; left: number; width: number }
 
-function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; index: number } | null }, excludeId: string | null | undefined, ghostEl?: HTMLElement) {
+// Scans every `.instruction-list` container on the canvas (a strand's own
+// top level, or a nested If/IfElse body) independently — each contributes
+// its own boundary set from only its *direct* child rows, so a nested
+// body's rows never leak into an ancestor's boundaries and vice versa — then
+// picks the single globally closest boundary across all of them.
+function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; path: InstrPath } | null }, excludeId: string | null | undefined, ghostEl?: HTMLElement) {
   const ghostRect = ghostEl?.getBoundingClientRect();
-  const cards = Array.from(document.querySelectorAll<HTMLElement>('.strand-card'));
+  const containers = Array.from(document.querySelectorAll<HTMLElement>('.instruction-list'));
   let best: SnapCandidate | null = null;
-  for (const card of cards) {
-    const id = card.dataset.strandId;
+  for (const container of containers) {
+    const id = container.dataset.strandId;
     if (!id || id === excludeId) continue;
-    const cardRect = card.getBoundingClientRect();
+    const cardEl = container.closest<HTMLElement>('.strand-card');
+    if (!cardEl) continue;
+    const cardRect = cardEl.getBoundingClientRect();
 
     // Judge horizontal proximity against the strand's actual attach point
     // (left edge), not a loose bounding-box overlap.
     const refX = ghostRect ? ghostRect.left : e.clientX;
     if (Math.abs(refX - cardRect.left) > SNAP_THRESHOLD) continue;
 
-    const body = card.querySelector('.strand-body');
-    const rows = Array.from(card.querySelectorAll('.instruction-row'));
+    const basePath = parseBasePath(container);
+    if (!basePath) continue;
+
+    const rows = Array.from(container.children).filter((el): el is HTMLElement => el.classList.contains('instruction-row'));
+    const containerRect = container.getBoundingClientRect();
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
-    boundaries.push(rows.length
-      ? rows[rows.length - 1].getBoundingClientRect().bottom
-      : (body?.getBoundingClientRect().top ?? cardRect.top) + 8);
-    // Index 0 would attach above the strand's first block — never allowed
-    // when that's a "When Ran" (nothing may end up above it).
-    const strandInstructions = findStrand(id)?.instructions ?? [];
-    const headIsWhenRan = strandInstructions[0] && isHeaderType(strandInstructions[0].type);
+    boundaries.push(rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : containerRect.top + 8);
+
+    // Index 0 would attach above this list's first block — never allowed
+    // when that's a "When Ran"/BlockHeader (nothing may end up above it);
+    // only possible at a strand's own top level (basePath: []), since a
+    // header can never live nested inside an If/IfElse body.
+    const listInstructions = resolveInstructionList(findStrand(id), basePath);
+    const headIsWhenRan = basePath.length === 0 && listInstructions[0] && isHeaderType(listInstructions[0].type);
     for (let idx = 0; idx < boundaries.length; idx++) {
       if (idx === 0 && headIsWhenRan) continue;
       // A boundary below a cap block (Return) would attach something
-      // underneath it — never allowed, since it ends the strand's flow.
-      if (idx > 0 && isCapType(strandInstructions[idx - 1].type)) continue;
+      // underneath it — never allowed, since it ends this list's flow.
+      if (idx > 0 && isCapType(listInstructions[idx - 1].type)) continue;
       const y = boundaries[idx];
       const refY = ghostRect ? ghostRect.top : e.clientY;
       const dist = Math.abs(refY - y);
-      if (dist <= SNAP_THRESHOLD && (best === null || dist < (best as SnapCandidate).dist)) {
+      if (dist <= SNAP_THRESHOLD && (best === null || dist < best.dist)) {
         // The last row's margin-bottom: -6px means the next item starts 6px
         // above its border-box bottom. That's a canvas-space constant, but
         // `y` is a zoomed screen coordinate — scale the offset too.
         const insY = idx === rows.length ? y - 6 * canvasZoom : y;
-        best = { targetId: id, index: idx, dist, y: insY, left: cardRect.left, width: cardRect.width };
+        best = { targetId: id, path: [...basePath, { index: idx }], dist, y: insY, left: cardRect.left, width: cardRect.width };
       }
     }
   }
-  target.snap = best !== null ? { targetId: (best as SnapCandidate).targetId, index: (best as SnapCandidate).index } : null;
+  target.snap = best !== null ? { targetId: best.targetId, path: best.path } : null;
 
   if (best !== null) {
-    showSnapPreview(best as SnapCandidate, ghostEl);
+    showSnapPreview(best, ghostEl);
   } else {
     clearSnapPreview();
   }
@@ -451,12 +490,17 @@ export function clientToCanvas(clientX: number, clientY: number): [number, numbe
 // The ghost is the real `.strand-card`/`.instruction-row` node(s), physically
 // moved into it — the block dragged is literally the strand itself.
 function startDrag(e: PointerEvent, candidate: DragCandidate) {
-  const { strandId, index, pointerId } = candidate;
+  const { strandId, path, pointerId } = candidate;
   const strand = findStrand(strandId);
   if (!strand) return;
 
   const cardEl = document.querySelector<HTMLElement>(`.strand-card[data-strand-id="${cssEscape(strandId)}"]`);
-  const wholeStrandGrab = index === 0;
+  // Only a true top-level index-0 grab picks up the whole strand card as a
+  // unit — anything nested inside an If/IfElse body, or a non-zero
+  // top-level index, always goes through the split-off-a-tail path below
+  // (splitStrand generalizes to a nested body the same way it always has
+  // for a top-level one, see commands.rs's resolve_body_mut).
+  const wholeStrandGrab = path.length === 1 && path[0].index === 0;
 
   const ghost = document.createElement('div');
   ghost.className = 'strand-drag-ghost';
@@ -475,7 +519,12 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
       ghost.appendChild(cardEl);
     }
   } else {
-    const rowEls = cardEl ? Array.from(cardEl.querySelectorAll<HTMLElement>('.instruction-row')).slice(index) : [];
+    const basePath = path.slice(0, -1);
+    const localIndex = path[path.length - 1].index;
+    const container = findListContainer(strandId, basePath);
+    const rowEls = container
+      ? Array.from(container.children).filter((el): el is HTMLElement => el.classList.contains('instruction-row')).slice(localIndex)
+      : [];
     if (rowEls[0]) anchorRect = rowEls[0].getBoundingClientRect();
     const ghostCard = document.createElement('div');
     ghostCard.className = 'strand-card';
@@ -515,7 +564,7 @@ function startDrag(e: PointerEvent, candidate: DragCandidate) {
   if (wholeStrandGrab) {
     newDrag.resolvedId = strandId;
   } else {
-    newDrag.resolvingPromise = splitStrand(strandId, index, strand.x + 24, strand.y + 24)
+    newDrag.resolvingPromise = splitStrand(strandId, path, strand.x + 24, strand.y + 24)
       .then(newId => {
         newDrag.resolvedId = newId;
         return newId;
@@ -610,7 +659,7 @@ function onPointerUp(e: PointerEvent) {
       void (async () => {
         try {
           if (finished.snap) {
-            await addInstruction(finished.snap.targetId, finished.snap.index, ins);
+            await addInstruction(finished.snap.targetId, finished.snap.path, ins);
           } else {
             const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
             await addStrand(x, y, ins);
@@ -658,7 +707,7 @@ function onPointerUp(e: PointerEvent) {
         await removeStrand(id);
       }
     } else if (finished.snap) {
-      await mergeStrand(id, finished.snap.targetId, finished.snap.index);
+      await mergeStrand(id, finished.snap.targetId, finished.snap.path);
     } else {
       const [x, y] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
       // Optimistic: apply locally so the card renders at the drop point

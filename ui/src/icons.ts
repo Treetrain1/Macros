@@ -42,6 +42,8 @@ import {
   Equal,
   TrendingUp,
   Blocks,
+  GitBranch,
+  GitFork,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -86,6 +88,8 @@ export const ICONS = {
   equal: Equal,
   'trending-up': TrendingUp,
   blocks: Blocks,
+  'git-branch': GitBranch,
+  'git-fork': GitFork,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -108,6 +112,8 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   // invoked rather than defined.
   CallBlock: 'blocks',
   Return: 'corner-up-left',
+  If: 'git-branch',
+  IfElse: 'git-fork',
 };
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
@@ -125,4 +131,6 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   BlockHeader: 'Block Definition',
   CallBlock: 'Call Block',
   Return: 'Return',
+  If: 'If',
+  IfElse: 'If-Else',
 };

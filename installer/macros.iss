@@ -3,9 +3,18 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
 #endif
+#ifndef TargetTriple
+  #define TargetTriple "x86_64-pc-windows-msvc"
+#endif
+#ifndef InstallerArch
+  #define InstallerArch "x64compatible"
+#endif
+#ifndef OutputBaseFilename
+  #define OutputBaseFilename "macros-windows-x86_64-setup"
+#endif
 #define MyAppPublisher "Ethan Stokes"
 #define MyAppURL "https://github.com/EthanRStokes/macros"
-#define CEFDir "..\target\x86_64-pc-windows-msvc\release"
+#define CEFDir "..\target\" + TargetTriple + "\release"
 
 [Setup]
 AppId={{5C076DD5-93F2-457D-855D-BCC8AEFBBA43}
@@ -25,14 +34,14 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=yes
 OutputDir=..\dist
-OutputBaseFilename=macros-windows-x86_64-setup
+OutputBaseFilename={#OutputBaseFilename}
 SetupIconFile=..\res\icons\macros.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#InstallerArch}
+ArchitecturesInstallIn64BitMode={#InstallerArch}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

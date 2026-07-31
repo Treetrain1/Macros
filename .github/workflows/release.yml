@@ -30,7 +30,17 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: macros-windows-x86_64.exe
+            cef_windows_dir: cef_windows_x86_64
+            installer_arch: x64compatible
             experimental: false
+
+          - name: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact_name: macros-windows-arm64.exe
+            cef_windows_dir: cef_windows_aarch64
+            installer_arch: arm64
+            experimental: true
 
           - name: linux-x86_64
             runner: ubuntu-latest
@@ -113,7 +123,7 @@ jobs:
           $releaseDir = "target/${{ matrix.target }}/release"
           $cefBuildDir = Get-ChildItem "$releaseDir/build" -Directory -Filter "cef-dll-sys-*" |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $cefRuntimeDir = Join-Path $cefBuildDir.FullName "out\cef_windows_x86_64"
+          $cefRuntimeDir = Join-Path $cefBuildDir.FullName "out\${{ matrix.cef_windows_dir }}"
           Get-ChildItem $cefRuntimeDir -File | Copy-Item -Destination $releaseDir -Force
           Copy-Item "$cefRuntimeDir\locales" $releaseDir -Recurse -Force
 
@@ -233,7 +243,7 @@ jobs:
           retention-days: 90
 
       - name: Locate or install Inno Setup
-        if: matrix.name == 'windows-x86_64'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -242,7 +252,7 @@ jobs:
           }
 
       - name: Determine installer version
-        if: matrix.name == 'windows-x86_64'
+        if: runner.os == 'Windows'
         id: installer_version
         shell: pwsh
         run: |
@@ -251,18 +261,18 @@ jobs:
           echo "value=$version" >> $env:GITHUB_OUTPUT
 
       - name: Build installer (Inno Setup)
-        if: matrix.name == 'windows-x86_64'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DMyAppVersion=${{ steps.installer_version.outputs.value }}" installer\macros.iss
+          & $iscc "/DMyAppVersion=${{ steps.installer_version.outputs.value }}" "/DTargetTriple=${{ matrix.target }}" "/DInstallerArch=${{ matrix.installer_arch }}" "/DOutputBaseFilename=macros-${{ matrix.name }}-setup" installer\macros.iss
 
       - name: Upload installer artifact
-        if: matrix.name == 'windows-x86_64'
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: macros-windows-x86_64-setup.exe
-          path: dist/macros-windows-x86_64-setup.exe
+          name: macros-${{ matrix.name }}-setup.exe
+          path: dist/macros-${{ matrix.name }}-setup.exe
           if-no-files-found: error
           retention-days: 90
 
@@ -318,6 +328,8 @@ jobs:
             |---|---|
             | Windows x86_64 (installer) | `macros-windows-x86_64-setup.exe` |
             | Windows x86_64 (portable exe) | `macros-windows-x86_64.exe` |
+            | Windows arm64 (installer) | `macros-windows-arm64-setup.exe` |
+            | Windows arm64 (portable exe) | `macros-windows-arm64.exe` |
             | Linux x86_64 (AppImage) | `macros-linux-x86_64.AppImage` |
             | Linux x86_64 (Flatpak) | `macros-linux-x86_64.flatpak` |
             | Linux arm64 (AppImage) | `macros-linux-arm64.AppImage` |

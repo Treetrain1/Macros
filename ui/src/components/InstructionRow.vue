@@ -27,8 +27,8 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Inst
 
 // Every ordinary (non-wrap) instruction type renders as one puzzle-piece row
 // with this field component filling `.instruction-content`. If/IfElse are
-// wrap/C-blocks — a single hollow-bracket shape (see style.css's
-// .instruction-row-wrap), rendered separately below.
+// wrap/C-blocks — a stack of independently-shaped bars around hollow mice
+// (see style.css's .instruction-row-wrap), rendered separately below.
 const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'If' | 'IfElse'>, Component> = {
   WhenRan: WhenRanFields,
   Wait: WaitFields,
@@ -80,10 +80,9 @@ function onRowContextMenu(e: MouseEvent) {
       <IfFields v-if="instruction.type === 'If'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
       <IfElseFields v-else-if="instruction.type === 'IfElse'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
     </div>
-    <div class="wrap-mouth">
-      <IfFields v-if="instruction.type === 'If'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
-      <IfElseFields v-else-if="instruction.type === 'IfElse'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
-    </div>
+    <IfFields v-if="instruction.type === 'If'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+    <IfElseFields v-else-if="instruction.type === 'IfElse'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+    <div class="wrap-foot-bar" />
   </div>
   <div
     v-else

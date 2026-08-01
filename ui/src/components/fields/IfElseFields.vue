@@ -25,8 +25,12 @@ const elsePath = computed(() => bodyBasePath(props.path, 1));
     <span class="instruction-label">then</span>
   </template>
   <template v-else>
-    <InstructionList :strand-id="strandId" :base-path="thenPath" :instructions="instruction.then_body" />
-    <div class="wrap-divider"><span class="instruction-label">else</span></div>
-    <InstructionList :strand-id="strandId" :base-path="elsePath" :instructions="instruction.else_body" />
+    <div class="wrap-mouth">
+      <InstructionList :strand-id="strandId" :base-path="thenPath" :instructions="instruction.then_body" />
+    </div>
+    <div class="wrap-mid-bar"><span class="instruction-label">else</span></div>
+    <div class="wrap-mouth">
+      <InstructionList :strand-id="strandId" :base-path="elsePath" :instructions="instruction.else_body" />
+    </div>
   </template>
 </template>

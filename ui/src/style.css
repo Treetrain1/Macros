@@ -733,139 +733,92 @@ body.sidebar-resizing {
   );
 }
 
-/* "Wrap"/C-blocks (If, If-Else) render as ONE single hollow-bracket shape —
-   not several separately-shadowed pieces glued together. The shape itself
-   (background/blur/border, one `clip-path` tracing the whole bracket
-   outline) lives entirely on `::before`, a `pointer-events: none` layer
-   behind everything else — NOT on `.instruction-row-wrap` itself. This
-   split matters: `clip-path` clips a *subtree*, not just its own element's
-   background — putting it directly on the row would visually clip away the
-   real nested blocks rendered inside the mouth (verified: they vanished
-   entirely). Keeping the shape on a separate pseudo-element behind normal,
-   unclipped content lets the mouth's nested rows render and stay
-   independently interactive, while the shape still reads as one seamless
-   bracket: a head bar across the top ("if <cond> then", with the ordinary
-   outer top notch so it snaps above like any block), a thin spine down the
-   left, and a foot bar across the bottom (with the ordinary outer bottom
-   tab so the next block snaps below it) — with a matching notch/tab pair
-   carved into the *inside* of the bracket where the nested body's own
-   first/last row connect, exactly like two ordinary rows interlocking.
+/* "Wrap"/C-blocks (If, If-Else) render as a handful of independently-shaped
+   *bars* — a head bar ("if <cond> then"), an optional mid bar ("else", only
+   for If-Else), and a foot bar — plus one hollow, unshaped "mouth" per arm
+   (one for If, two for If-Else) sandwiched between them. This replaced an
+   earlier single-`clip-path` design that tried to trace the *entire*
+   bracket (head+mouth+foot) as one polygon on the row's own `::before`: that
+   only worked because there was exactly one mouth, so its top/bottom edges
+   could be anchored purely to the two ends of the row's own box (`0%` and
+   `100%`) with nothing dynamic in between. If-Else breaks that assumption —
+   a `clip-path`'s percentages are always relative to the *whole* element's
+   box, and there's no way to express "wherever the first, variable-height
+   mouth happens to end" as a percentage without measuring it in JS. Giving
+   every bar its *own* small fixed-height box sidesteps the problem entirely:
+   each bar's polygon only ever needs `0%`/`100%` of *itself*, and any number
+   of hollow, arbitrarily-tall mouths can sit between bars for free since
+   they carry no shape of their own.
+
+   Each bar is a real element (not a shared pseudo-layer): `.wrap-head-line`,
+   `.wrap-mid-bar`, `.wrap-foot-bar`, stacked by the row's own `flex-direction:
+   column` alongside one `.wrap-mouth` per arm. A bar's *fill* (background,
+   border, the notch/tab shape) lives on its own `::before` — kept off the
+   bar element itself for the same reason the old single shape avoided the
+   row: `clip-path` on an ancestor would clip away real content painted
+   inside it (`.wrap-head-line`'s icon/condition/label, `.wrap-mid-bar`'s
+   "else" text). A bar's tab (where it feeds into the mouth below) pokes
+   `--connector-notch-depth` *past* its own bottom edge — done by extending
+   just the `::before` layer down via `inset`, not the bar's real box, so the
+   overhang never disturbs the bar's own flex height or its content's
+   padding/centering. A bar's notch (where it receives the mouth *above* it)
+   is carved *into* its own top edge instead and needs no overhang. Every
+   bar's notch/tab that meets a mouth is shifted right by `--wrap-spine-w`
+   to land under the mouth's own indent; the head bar's top notch and the
+   foot bar's bottom tab are the two true outer corners of the whole block
+   (unshifted, chamfered like an ordinary row's) — everywhere else is a
+   plain internal seam (no chamfer).
+
+   The spine (the thin strip down the mouth's left edge) belongs to
+   `.wrap-mouth` itself, not the bars — a plain, unshaped rectangle
+   (`::before`, `left: -spine-w`) the full height of its own mouth, which is
+   why the spine breaks at each mid bar instead of running the full height
+   of an If-Else block: matches a real C-block, where the "else" bar spans
+   the full width, not just to the right of a continuing spine.
 
    Only `.wrap-head-line` is pickup-draggable/right-clickable (see
-   InstructionRow.vue) — the spine and foot are purely visual. The mouth
-   (everything below the head line) has no listener of its own either (see
-   `.wrap-mouth`'s comment) — between the two, nowhere in the hollow
-   interior can trigger picking up the whole block, matching a real
-   C-block's hit area being its outline, not its bounding box.
+   InstructionRow.vue) — mid bar, foot bar, and spine are purely visual. Each
+   mouth has no listener of its own either (see `.wrap-mouth`'s comment) — so
+   nowhere in the hollow interior can trigger picking up the whole block,
+   matching a real C-block's hit area being its outline, not its bounding
+   box.
 
-   The two fixed-height bars (`--wrap-head-h`/`--wrap-foot-h`) are safe as
-   *constants* even though condition expressions vary in complexity, because
-   `.wrap-head-line` never wraps to a second line (`flex-wrap: nowrap`,
-   matching every ordinary row's `.instruction-content`) — a long condition
-   just extends the row horizontally, never vertically. Only the mouth's
-   height is truly dynamic, and the polygon tracks it for free via `100%`/
-   `calc(100% - ...)`, recomputed by the browser on every layout regardless
-   of how many blocks are nested inside. */
+   All bars share one fill via CSS custom properties (`--wrap-fill`/
+   `--wrap-outline`) set once on `.instruction-row-wrap`, so hovering the
+   (real, unclipped) head line can re-theme every bar and the spine at once
+   with a single `:has()` rule instead of repeating it per bar. */
 .instruction-row.instruction-row-wrap {
   --wrap-head-h: 60px;
+  --wrap-mid-h: 36px;
   --wrap-foot-h: 32px;
   --wrap-spine-w: 44px;
+  --wrap-fill: linear-gradient(160deg, var(--bg3), var(--bg2));
+  --wrap-outline: var(--glass-border);
   display: flex;
   flex-direction: column;
   position: relative;
-  min-height: calc(var(--wrap-head-h) + var(--wrap-foot-h));
   cursor: default;
 }
-.instruction-row.instruction-row-wrap::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  /* A solid, opaque gradient — not the translucent `--glass-bg-strong` +
-     `backdrop-filter: blur()` combo ordinary rows use. `backdrop-filter` on
-     an absolutely-positioned, negative-`z-index` pseudo-element like this
-     one is a known cross-engine trouble spot for respecting `clip-path`
-     (confirmed: it was rendering as an uncipped rectangle underneath a
-     correctly-clipped border in testing) — solid `background` doesn't have
-     that failure mode, since a plain color/gradient fill is reliably
-     clipped everywhere. */
-  background: linear-gradient(160deg, var(--bg3), var(--bg2));
-  box-shadow: inset 0 0 0 1.5px var(--glass-border), var(--shadow-sm);
-  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
-  clip-path: polygon(
-    /* outer top notch (identical to an ordinary row's) */
-    4px 0, 7.5px 0, 10.5px 2px, 13.5px 6px, 16.5px 8px, 25.5px 8px, 28.5px 6px, 31.5px 2px, 34.5px 0,
-    calc(100% - 4px) 0, 100% 4px,
-    /* down the right edge to the bottom of the head bar */
-    100% var(--wrap-head-h),
-    /* inward tab at the mouth's top — the first nested row docks into this,
-       right-to-left, same trapezoid as an outer tab, relocated */
-    calc(var(--wrap-spine-w) + 34.5px) var(--wrap-head-h),
-    calc(var(--wrap-spine-w) + 31.5px) calc(var(--wrap-head-h) + 2px),
-    calc(var(--wrap-spine-w) + 28.5px) calc(var(--wrap-head-h) + 6px),
-    calc(var(--wrap-spine-w) + 25.5px) calc(var(--wrap-head-h) + var(--connector-notch-depth)),
-    calc(var(--wrap-spine-w) + 16.5px) calc(var(--wrap-head-h) + var(--connector-notch-depth)),
-    calc(var(--wrap-spine-w) + 13.5px) calc(var(--wrap-head-h) + 6px),
-    calc(var(--wrap-spine-w) + 10.5px) calc(var(--wrap-head-h) + 2px),
-    calc(var(--wrap-spine-w) + 7.5px) var(--wrap-head-h),
-    var(--wrap-spine-w) var(--wrap-head-h),
-    /* down the spine's inner edge to the top of the foot bar */
-    var(--wrap-spine-w) calc(100% - var(--wrap-foot-h)),
-    /* inward notch at the mouth's bottom — receives the last nested row's
-       own tab, left-to-right, same shape as an outer top notch, relocated */
-    calc(var(--wrap-spine-w) + 4px) calc(100% - var(--wrap-foot-h)),
-    calc(var(--wrap-spine-w) + 7.5px) calc(100% - var(--wrap-foot-h)),
-    calc(var(--wrap-spine-w) + 10.5px) calc(100% - var(--wrap-foot-h) + 2px),
-    calc(var(--wrap-spine-w) + 13.5px) calc(100% - var(--wrap-foot-h) + 6px),
-    calc(var(--wrap-spine-w) + 16.5px) calc(100% - var(--wrap-foot-h) + var(--connector-notch-depth)),
-    calc(var(--wrap-spine-w) + 25.5px) calc(100% - var(--wrap-foot-h) + var(--connector-notch-depth)),
-    calc(var(--wrap-spine-w) + 28.5px) calc(100% - var(--wrap-foot-h) + 6px),
-    calc(var(--wrap-spine-w) + 31.5px) calc(100% - var(--wrap-foot-h) + 2px),
-    calc(var(--wrap-spine-w) + 34.5px) calc(100% - var(--wrap-foot-h)),
-    /* right to the mouth's right edge, down to the outer tab */
-    100% calc(100% - var(--wrap-foot-h)),
-    100% calc(100% - var(--connector-notch-depth) - 4px),
-    /* outer bottom tab (identical to an ordinary row's) */
-    calc(100% - 4px) calc(100% - var(--connector-notch-depth)),
-    34.5px calc(100% - var(--connector-notch-depth)),
-    31.5px calc(100% - var(--connector-notch-depth) + 2px),
-    28.5px calc(100% - var(--connector-notch-depth) + 6px),
-    25.5px 100%, 16.5px 100%,
-    13.5px calc(100% - var(--connector-notch-depth) + 6px),
-    10.5px calc(100% - var(--connector-notch-depth) + 2px),
-    7.5px calc(100% - var(--connector-notch-depth)),
-    4px calc(100% - var(--connector-notch-depth)),
-    /* bottom-left corner, up the left edge */
-    0 calc(100% - var(--connector-notch-depth) - 4px), 0 4px
-  );
-}
-/* The base `.instruction-row::after` rule (the ordinary puzzle-piece bg2
-   backer) still matches `.instruction-row.instruction-row-wrap` too, since
-   this element only overrides `::before` above and `::after` is a separate
-   pseudo-element the wrap rules never touch. Left alone, that backer paints
-   an ordinary notch/tab-shaped (not bracket-shaped) opaque rectangle at
-   z-index -1 — the same z-index as the bracket `::before` above — and
-   `::after` wins the tie by tree order, painting on top and covering the
-   hollow mouth entirely (verified: the bracket outline showed through only
-   as a thin sliver at the very edges, everything else read as a solid
-   rectangle). The wrap shape has no use for that backer at all — its own
-   `::before` already paints an opaque fill — so drop it. */
+/* The base `.instruction-row::before`/`::after` rules (the ordinary
+   puzzle-piece fill/backer) would otherwise still apply here too, since this
+   element only adds new rules rather than overriding those — left alone,
+   they'd paint an ordinary notch/tab-shaped (not bracket-shaped) opaque
+   layer right across all the bars and mice. The wrap block's own bars each
+   paint their own fill, so both are dropped. */
+.instruction-row.instruction-row-wrap::before,
 .instruction-row.instruction-row-wrap::after {
   content: none;
 }
-/* `:has()` lets hovering the (real, unclipped) head line still highlight the
-   whole shared background shape, so the highlight reads as "this block",
-   not just "this line" — modern-webview-only, matching this app's baseline. */
-.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover)::before {
-  background: var(--bg3);
-  box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-sm);
+.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover) {
+  --wrap-fill: var(--bg3);
+  --wrap-outline: var(--accent);
 }
 
 .wrap-head-line {
   flex-shrink: 0;
   height: var(--wrap-head-h);
   box-sizing: border-box;
+  position: relative;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -875,46 +828,188 @@ body.sidebar-resizing {
   touch-action: none;
 }
 .wrap-head-line:active { cursor: grabbing; }
+.wrap-head-line::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  /* outer top notch (identical to an ordinary row's) */
+  clip-path: polygon(
+    4px 0, 7.5px 0, 10.5px 2px, 13.5px 6px, 16.5px 8px, 25.5px 8px, 28.5px 6px, 31.5px 2px, 34.5px 0,
+    calc(100% - 4px) 0, 100% 4px,
+    /* down the right edge to this bar's own bottom */
+    100% var(--wrap-head-h),
+    /* tab overhanging into the mouth below — the first nested row's own top
+       notch docks into this, right-to-left, same trapezoid as an outer tab,
+       relocated and shifted under the mouth's indent */
+    calc(var(--wrap-spine-w) + 34.5px) var(--wrap-head-h),
+    calc(var(--wrap-spine-w) + 31.5px) calc(var(--wrap-head-h) + 2px),
+    calc(var(--wrap-spine-w) + 28.5px) calc(var(--wrap-head-h) + 6px),
+    calc(var(--wrap-spine-w) + 25.5px) calc(var(--wrap-head-h) + var(--connector-notch-depth)),
+    calc(var(--wrap-spine-w) + 16.5px) calc(var(--wrap-head-h) + var(--connector-notch-depth)),
+    calc(var(--wrap-spine-w) + 13.5px) calc(var(--wrap-head-h) + 6px),
+    calc(var(--wrap-spine-w) + 10.5px) calc(var(--wrap-head-h) + 2px),
+    calc(var(--wrap-spine-w) + 7.5px) var(--wrap-head-h),
+    0 var(--wrap-head-h), 0 4px
+  );
+}
 .instruction-type-icon-inline {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
   color: var(--text-dim);
 }
-/* The mouth: everything below the head line, indented past the spine. Its
-   own natural content height (however many nested rows there are) plus the
-   reserved `--wrap-foot-h` at the bottom is exactly what the clip-path's
-   `calc(100% - var(--wrap-foot-h))` boundary assumes. No background of its
-   own — it's genuinely empty space wherever there's no nested block.
+
+/* The "else" bar of an If-Else block — the mid bar sitting between the two
+   mice. Same overhanging-`::before` technique as the head/foot bars, but
+   both its notch (top) and tab (bottom) are shifted under the mouths'
+   indent, since neither of its edges is a true outer corner of the block —
+   unlike the head bar's top or the foot bar's bottom, nothing ever chamfers
+   here. */
+.wrap-mid-bar {
+  flex-shrink: 0;
+  height: var(--wrap-mid-h);
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wrap-mid-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  clip-path: polygon(
+    /* inward notch at this bar's own top, receiving the tab of the mouth
+       above (same shape as an outer top notch, relocated) */
+    0 0,
+    calc(var(--wrap-spine-w) + 4px) 0,
+    calc(var(--wrap-spine-w) + 7.5px) 2px,
+    calc(var(--wrap-spine-w) + 10.5px) 6px,
+    calc(var(--wrap-spine-w) + 13.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 25.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 28.5px) 6px,
+    calc(var(--wrap-spine-w) + 31.5px) 2px,
+    calc(var(--wrap-spine-w) + 34.5px) 0,
+    100% 0,
+    /* down the right edge to this bar's own bottom */
+    100% var(--wrap-mid-h),
+    /* tab overhanging into the mouth below */
+    calc(var(--wrap-spine-w) + 34.5px) var(--wrap-mid-h),
+    calc(var(--wrap-spine-w) + 31.5px) calc(var(--wrap-mid-h) + 2px),
+    calc(var(--wrap-spine-w) + 28.5px) calc(var(--wrap-mid-h) + 6px),
+    calc(var(--wrap-spine-w) + 25.5px) calc(var(--wrap-mid-h) + var(--connector-notch-depth)),
+    calc(var(--wrap-spine-w) + 16.5px) calc(var(--wrap-mid-h) + var(--connector-notch-depth)),
+    calc(var(--wrap-spine-w) + 13.5px) calc(var(--wrap-mid-h) + 6px),
+    calc(var(--wrap-spine-w) + 10.5px) calc(var(--wrap-mid-h) + 2px),
+    calc(var(--wrap-spine-w) + 7.5px) var(--wrap-mid-h),
+    0 var(--wrap-mid-h)
+  );
+}
+
+/* The closing cap below the last mouth — purely decorative (no content, no
+   listeners), just the inward notch that receives the last mouth's last row
+   and the ordinary outer bottom tab so the next block snaps on below, same
+   as any lone row's. */
+.wrap-foot-bar {
+  flex-shrink: 0;
+  height: var(--wrap-foot-h);
+  box-sizing: border-box;
+  position: relative;
+}
+.wrap-foot-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  clip-path: polygon(
+    /* inward notch at this bar's own top, receiving the tab of the mouth
+       above */
+    0 0,
+    calc(var(--wrap-spine-w) + 4px) 0,
+    calc(var(--wrap-spine-w) + 7.5px) 2px,
+    calc(var(--wrap-spine-w) + 10.5px) 6px,
+    calc(var(--wrap-spine-w) + 13.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 25.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 28.5px) 6px,
+    calc(var(--wrap-spine-w) + 31.5px) 2px,
+    calc(var(--wrap-spine-w) + 34.5px) 0,
+    100% 0,
+    /* down the right edge to this bar's own bottom */
+    100% calc(var(--wrap-foot-h) - 4px),
+    /* outer bottom tab (identical to an ordinary row's, unshifted — this is
+       the block's own true bottom-outer corner) */
+    calc(100% - 4px) var(--wrap-foot-h),
+    34.5px var(--wrap-foot-h),
+    31.5px calc(var(--wrap-foot-h) + 2px),
+    28.5px calc(var(--wrap-foot-h) + 6px),
+    25.5px calc(var(--wrap-foot-h) + var(--connector-notch-depth)),
+    16.5px calc(var(--wrap-foot-h) + var(--connector-notch-depth)),
+    13.5px calc(var(--wrap-foot-h) + 6px),
+    10.5px calc(var(--wrap-foot-h) + 2px),
+    4px var(--wrap-foot-h),
+    0 calc(var(--wrap-foot-h) - 4px)
+  );
+}
+
+/* One hollow arm — If has one, If-Else has two (then/else), separated by a
+   `.wrap-mid-bar`. Indented past the spine. No background of its own — it's
+   genuinely empty space wherever there's no nested block — except the
+   spine strip painted separately below.
+
+   `min-height` guarantees a visibly hollow gap even with zero nested rows:
+   without it, an empty mouth collapses to 0 height, which puts the bar
+   above's tab (overhanging `--connector-notch-depth` past its own bottom)
+   and the bar below's notch (carved into its own top) at the exact same
+   position — a degenerate, self-intersecting pair that reads as a solid
+   block with no interior at all (verified).
 
    `pointer-events: none` here (inherited by every descendant that doesn't
-   opt back in) is what actually makes that empty space non-interactive —
-   `clip-path` alone only excludes the *outer* `.instruction-row-wrap` box
-   from hit-testing, but `.wrap-mouth`'s own children (the nested
-   `.instruction-list`s) are separate elements layered on top of it, and a
-   flex column's default `align-items: stretch` makes each one span the
-   *entire* mouth width regardless of how narrow its actual rows are — so
+   opt back in) is what actually makes that empty space non-interactive — a
+   flex column's default `align-items: stretch` makes this container span
+   the *entire* mouth width regardless of how narrow its actual rows are, so
    without this, a click in what looks like empty space to the right of a
-   short nested block would still land on that stretched container and
+   short nested block would still land on this stretched container and
    bubble up to the wrap row's own pointerdown handler. Every real
    `.instruction-row` inside opts back into `auto` below, so nested blocks
    (and the sidebar drag/drop they support) stay fully interactive. */
 .wrap-mouth {
+  position: relative;
   margin-left: var(--wrap-spine-w);
-  padding-bottom: var(--wrap-foot-h);
   padding-right: var(--spacing);
+  min-height: 20px;
   display: flex;
   flex-direction: column;
   pointer-events: none;
 }
+.wrap-mouth::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--wrap-spine-w));
+  width: var(--wrap-spine-w);
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  box-shadow: inset 0 0 0 1.5px var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
 .wrap-mouth .instruction-row {
   pointer-events: auto;
-}
-.wrap-divider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 0;
 }
 
 .strand-empty-hint {

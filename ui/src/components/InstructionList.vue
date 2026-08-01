@@ -23,17 +23,20 @@ function childPath(index: number): InstrPath {
 }
 
 function onEmptyHintPointerDown(e: PointerEvent) {
-  // Only the strand's own top-level empty hint is really "grab this to
-  // reposition the (empty) strand" — a nested If/IfElse body's empty hint is
-  // purely a drop-target visual (there's no independent strand to move).
-  if (props.basePath.length > 0) return;
   beginPickup(e, props.strandId, childPath(0));
 }
+
+// Only a strand's own top-level empty hint gets the "Empty — drag..." text
+// (and is grabbable, to reposition the empty strand) — an empty If/IfElse
+// body is just blank space inside the bracket, matching Scratch/PenguinMod;
+// it's still a real drop target (updateSnapTarget falls back to this
+// container's own rect when it has no rows), just with no placeholder copy.
+const isTopLevel = props.basePath.length === 0;
 </script>
 
 <template>
   <div class="strand-body instruction-list" :data-strand-id="strandId" :data-path="JSON.stringify(basePath)">
-    <div v-if="instructions.length === 0" class="strand-empty-hint" @pointerdown="onEmptyHintPointerDown">
+    <div v-if="instructions.length === 0 && isTopLevel" class="strand-empty-hint" @pointerdown="onEmptyHintPointerDown">
       Empty — drag an instruction here from the sidebar.
     </div>
     <InstructionRow

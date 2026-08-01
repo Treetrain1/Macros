@@ -27,8 +27,8 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Inst
 
 // Every ordinary (non-wrap) instruction type renders as one puzzle-piece row
 // with this field component filling `.instruction-content`. If/IfElse are
-// wrap/C-blocks — handled separately below, since their shape is a hollow
-// bracket (head/spine/foot), not a single filled row.
+// wrap/C-blocks — a single hollow-bracket shape (see style.css's
+// .instruction-row-wrap), rendered separately below.
 const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'If' | 'IfElse'>, Component> = {
   WhenRan: WhenRanFields,
   Wait: WaitFields,
@@ -53,12 +53,9 @@ const showIcon = computed(() => !isHeaderType(props.instruction.type));
 const index = computed(() => props.path[props.path.length - 1]?.index ?? 0);
 
 const isRecordingTarget = computed(
-  () => props.isFirst && props.strandId === state.current_macro?.recording_target_strand_id,
+  () => props.isFirst && props.path.length === 1 && props.strandId === state.current_macro?.recording_target_strand_id,
 );
 
-// Attached to whichever piece is actually "the block" for pickup purposes —
-// the whole outer row for an ordinary block, or the head/spine/foot bars
-// individually for a wrap block (see the big CSS comment on .wrap-head).
 function onRowPointerDown(e: PointerEvent) {
   const target = e.target as Element | null;
   if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
@@ -78,24 +75,14 @@ function onRowContextMenu(e: MouseEvent) {
     :class="{ 'row-first': isFirst, 'row-last': isLast }"
     :data-index="index"
   >
-    <div class="instruction-row wrap-head" @pointerdown="onRowPointerDown" @contextmenu.prevent.stop="onRowContextMenu">
-      <div class="instruction-shape">
-        <component :is="typeIcon" class="instruction-type-icon" />
-        <div class="instruction-content">
-          <IfFields v-if="instruction.type === 'If'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
-          <IfElseFields v-else-if="instruction.type === 'IfElse'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
-        </div>
-      </div>
+    <div class="wrap-head-line" @pointerdown="onRowPointerDown" @contextmenu.prevent.stop="onRowContextMenu">
+      <component :is="typeIcon" class="instruction-type-icon-inline" />
+      <IfFields v-if="instruction.type === 'If'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
+      <IfElseFields v-else-if="instruction.type === 'IfElse'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
     </div>
-    <div class="wrap-body">
-      <div class="wrap-spine" @pointerdown="onRowPointerDown" @contextmenu.prevent.stop="onRowContextMenu"></div>
-      <div class="wrap-slots">
-        <IfFields v-if="instruction.type === 'If'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
-        <IfElseFields v-else-if="instruction.type === 'IfElse'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
-      </div>
-    </div>
-    <div class="instruction-row wrap-foot" @pointerdown="onRowPointerDown" @contextmenu.prevent.stop="onRowContextMenu">
-      <div class="instruction-shape"></div>
+    <div class="wrap-mouth">
+      <IfFields v-if="instruction.type === 'If'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+      <IfElseFields v-else-if="instruction.type === 'IfElse'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
     </div>
   </div>
   <div

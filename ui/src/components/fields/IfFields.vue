@@ -10,8 +10,9 @@ const props = defineProps<{
   path: InstrPath;
   instruction: Extract<InstructionDto, { type: 'If' }>;
   // Rendered separately by InstructionRow.vue into the wrap block's head
-  // bar vs. its body/slot area — see the big comment on .wrap-head in
-  // style.css for why an If isn't one single filled row.
+  // line vs. its mouth (nested body) — see the big comment on
+  // .instruction-row-wrap in style.css for why an If is one single hollow
+  // bracket shape, not one filled row.
   part: 'head' | 'body';
 }>();
 
@@ -24,7 +25,5 @@ const bodyPath = computed(() => bodyBasePath(props.path, 0));
     <ValueBlock :location="fieldLocation(strandId, path, 'Condition')" :value="instruction.condition" />
     <span class="instruction-label">then</span>
   </template>
-  <div v-else class="wrap-slot">
-    <InstructionList :strand-id="strandId" :base-path="bodyPath" :instructions="instruction.body" />
-  </div>
+  <InstructionList v-else :strand-id="strandId" :base-path="bodyPath" :instructions="instruction.body" />
 </template>

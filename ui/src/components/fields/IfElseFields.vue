@@ -10,7 +10,7 @@ const props = defineProps<{
   path: InstrPath;
   instruction: Extract<InstructionDto, { type: 'IfElse' }>;
   // See IfFields.vue's header comment — rendered separately for the wrap
-  // block's head bar vs. its body/slot area.
+  // block's head line vs. its mouth (nested body).
   part: 'head' | 'body';
 }>();
 
@@ -25,14 +25,8 @@ const elsePath = computed(() => bodyBasePath(props.path, 1));
     <span class="instruction-label">then</span>
   </template>
   <template v-else>
-    <div class="wrap-slot">
-      <InstructionList :strand-id="strandId" :base-path="thenPath" :instructions="instruction.then_body" />
-    </div>
-    <div class="wrap-divider">
-      <span class="instruction-label">else</span>
-    </div>
-    <div class="wrap-slot">
-      <InstructionList :strand-id="strandId" :base-path="elsePath" :instructions="instruction.else_body" />
-    </div>
+    <InstructionList :strand-id="strandId" :base-path="thenPath" :instructions="instruction.then_body" />
+    <div class="wrap-divider"><span class="instruction-label">else</span></div>
+    <InstructionList :strand-id="strandId" :base-path="elsePath" :instructions="instruction.else_body" />
   </template>
 </template>

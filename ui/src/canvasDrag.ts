@@ -395,18 +395,21 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; p
     if (!id || id === excludeId) continue;
     const cardEl = container.closest<HTMLElement>('.strand-card');
     if (!cardEl) continue;
-    const cardRect = cardEl.getBoundingClientRect();
+    // This container's own left edge — not the outer strand card's. For a
+    // nested If/IfElse body, the actual attach point sits well to the right
+    // of the card's edge (past the spine's indent), so checking against
+    // cardRect.left here would make nested targets nearly unreachable.
+    const containerRect = container.getBoundingClientRect();
 
-    // Judge horizontal proximity against the strand's actual attach point
+    // Judge horizontal proximity against the list's actual attach point
     // (left edge), not a loose bounding-box overlap.
     const refX = ghostRect ? ghostRect.left : e.clientX;
-    if (Math.abs(refX - cardRect.left) > SNAP_THRESHOLD) continue;
+    if (Math.abs(refX - containerRect.left) > SNAP_THRESHOLD) continue;
 
     const basePath = parseBasePath(container);
     if (!basePath) continue;
 
     const rows = Array.from(container.children).filter((el): el is HTMLElement => el.classList.contains('instruction-row'));
-    const containerRect = container.getBoundingClientRect();
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
     boundaries.push(rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : containerRect.top + 8);
 
@@ -429,7 +432,7 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; p
         // above its border-box bottom. That's a canvas-space constant, but
         // `y` is a zoomed screen coordinate — scale the offset too.
         const insY = idx === rows.length ? y - 6 * canvasZoom : y;
-        best = { targetId: id, path: [...basePath, { index: idx }], dist, y: insY, left: cardRect.left, width: cardRect.width };
+        best = { targetId: id, path: [...basePath, { index: idx }], dist, y: insY, left: containerRect.left, width: containerRect.width };
       }
     }
   }

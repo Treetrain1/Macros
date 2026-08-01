@@ -45,7 +45,7 @@ pub(crate) async fn run(app: tauri::AppHandle<Cef>) {
     let ctx = BridgeCtx { app, state_tx };
 
     let router = Router::new()
-        .route("/invoke/:cmd", post(invoke_handler))
+        .route("/invoke/{cmd}", post(invoke_handler))
         .route("/events", get(ws_handler))
         .layer(CorsLayer::permissive())
         .with_state(ctx);

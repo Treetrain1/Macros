@@ -21,7 +21,7 @@
 // dragging) an operator block samples-evaluates just that node and shows the
 // result in a small tooltip — see `preview` below and valueDrag.ts's
 // onPointerUp/previewClickedOperator.
-import { computed, ref } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 import { editValueField } from '../tauri';
 import { getInvalidText, locationsEqual } from '../invalidField';
 import { beginValuePickup, dragReveal, evalPreview, isCapsuleLocation } from '../valueDrag';
@@ -92,6 +92,23 @@ const boxed = computed(() =>
 // language for "this slot expects a boolean."
 const isBool = computed(() => displayValue.value.kind === 'Op' && specForOp(displayValue.value.op)?.resultType === 'bool');
 
+// The hexagon's point angle (style.css's `--notch`) is a fixed ratio of
+// this block's own height, so it stays constant whether the block is a
+// single short line or grown tall by a nested arg — CSS alone can't read
+// an element's own height for a property on that same element, so this
+// mirrors it into a custom property instead. Only tracked while boxed as
+// a hexagon; every other shape ignores `--bh` entirely.
+const blockHeight = ref(25);
+watchEffect(onCleanup => {
+  if (!isBool.value || !rootEl.value) return;
+  const el = rootEl.value;
+  const observer = new ResizeObserver(() => {
+    blockHeight.value = el.offsetHeight;
+  });
+  observer.observe(el);
+  onCleanup(() => observer.disconnect());
+});
+
 function childLocation(step: number): ValueLocationDto {
   return { ...props.location, path: [...props.location.path, step] } as ValueLocationDto;
 }
@@ -117,6 +134,7 @@ function onPointerDown(e: PointerEvent) {
     ref="rootEl"
     class="value-block"
     :class="{ 'value-card-shape': boxed && !isBool, 'value-card-shape-bool': boxed && isBool }"
+    :style="isBool ? { '--bh': blockHeight + 'px' } : undefined"
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
   >

@@ -1569,19 +1569,99 @@ body.sidebar-resizing {
    pointed hexagon instead of the rounded capsule — Scratch's visual
    language for "this slot expects a boolean," so a condition slot is
    recognizable at a glance. Extra horizontal padding keeps the pointed
-   corners from eating into the label text. */
+   corners from eating into the label text.
+
+   The point's angle has to stay the same no matter how tall the block
+   gets (e.g. one holding a nested multi-line arg) — a fixed-px run made a
+   short block's point look right and a tall block's point blunt, since
+   the *rise* (half the block's own height) grew while the run didn't.
+   `--bh` is the block's actual measured height, kept in sync by a
+   `ResizeObserver` in ValueBlock.vue (only while `isBool` — see its
+   `watchEffect`), and `--notch` is that height scaled by a fixed ratio, so
+   run and rise grow together and the angle never changes — the point
+   itself stays a single vertex (no straight edge down the middle), it
+   just lands further from center on a taller block. `min(…, 50%)` only
+   guards the case of a block narrower than it is tall, so the two points
+   can never cross.
+
+   A real `border` doesn't follow a `clip-path` cut (same issue
+   `.instruction-row`'s big comment above works around) — a rectangular
+   border clipped to this shape leaves the pointed corners bare, reading as
+   "cut off." So instead of `border` + `clip-path` on one element, the
+   hexagon is two stacked layers: `::before` is the full-size,
+   border-colored silhouette; `::after` is the gradient fill, mitered
+   inward a uniform 1px along every edge's own normal (derived below, not
+   eyeballed) so a ~1px ring of `::before` shows all the way around, point
+   included. The block's own children (label spans, nested `ValueBlock`s,
+   the eval-preview tooltip) are ordinary in-flow content, which paints
+   above negative-`z-index` pseudo-elements regardless — and critically,
+   `clip-path` now lives only on `::before`/`::after`, not on this element
+   itself, so the tooltip (positioned outside this box, above it) no
+   longer gets silently clipped away by a `clip-path` it was never meant
+   to be inside of.
+
+   Deliberately no elevation shadow here (`.value-card-shape` has one via
+   `box-shadow`). `box-shadow` doesn't survive a `clip-path` cut any better
+   than `border` does, so it's always rendered as invisible on this shape;
+   a `filter: drop-shadow` replacement does survive the cut, but renders
+   right along the same edge as the border ring above, and the two
+   together read as one noticeably darker outline — not what this shape
+   has ever actually looked like. Left off rather than fixing a shadow
+   nobody could previously see.
+
+   `isolation: isolate` is load-bearing, not decorative: `position:
+   relative` alone does NOT give an element its own stacking context (only
+   `position` + a real `z-index` does), so without it these `z-index: -2`/
+   `-1` layers escape to the nearest ANCESTOR that does have one — usually
+   `.instruction-row`, which uses this exact same `-2`/`-1` scheme for its
+   own notch/tab border. Both elements' negative-`z-index` layers would
+   then land in the *same* shared bucket, ordered by DOM position rather
+   than which element they belong to — this hexagon's border/fill landing
+   behind the row's own opaque fill is exactly the "outline reads as dark"
+   symptom this was added to fix. `isolation: isolate` opts into a local
+   stacking context the same way a `z-index` would, without any of a
+   `z-index`'s side effects on this element's actual paint order relative
+   to its siblings. */
 .value-card-shape-bool {
   position: relative;
+  isolation: isolate;
   gap: 2px;
   padding: 2px 12px;
-  border-color: var(--glass-border);
-  background: linear-gradient(160deg, var(--bg3), var(--bg2));
-  box-shadow: var(--bevel-top), var(--shadow-sm);
   cursor: grab;
   touch-action: none;
-  clip-path: polygon(8px 0%, calc(100% - 8px) 0%, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0% 50%);
+  --notch: min(calc(var(--bh, 25px) * 0.32), 50%);
 }
-.value-card-shape-bool:hover { border-color: var(--accent); }
+.value-card-shape-bool::before,
+.value-card-shape-bool::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.value-card-shape-bool::before {
+  z-index: -2;
+  background: var(--glass-border);
+  clip-path: polygon(var(--notch) 0%, calc(100% - var(--notch)) 0%, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0% 50%);
+}
+/* Mitered 1px inward from `::before`'s polygon above. The flat top/bottom
+   edges just move down/up 1px, same as any border; the two diagonals (run
+   `--notch`, rise half the block's height, always the same 0.64 ratio —
+   see above) push their meeting point in by `1.187px` (= 1px·√(1+0.64²))
+   and nudge the flat-edge corners out by `0.547px` (= 1.187px − 1px·0.64)
+   — both constants derived from that fixed ratio, so they hold at every
+   height, not just the one they were checked against. */
+.value-card-shape-bool::after {
+  z-index: -1;
+  background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  box-shadow: var(--bevel-top);
+  clip-path: polygon(
+    calc(var(--notch) + 0.547px) 1px, calc(100% - var(--notch) - 0.547px) 1px,
+    calc(100% - 1.187px) 50%,
+    calc(100% - var(--notch) - 0.547px) calc(100% - 1px), calc(var(--notch) + 0.547px) calc(100% - 1px),
+    1.187px 50%
+  );
+}
+.value-card-shape-bool:hover::before { background: var(--accent); }
 .value-card-shape-bool:active { cursor: grabbing; }
 .value-op {
   font-weight: 600;
@@ -1592,13 +1672,18 @@ body.sidebar-resizing {
 /* Wins over .value-card-shape's resting border/shadow by cascade order
    (same specificity, declared later) rather than !important. Applies to
    bare inputs too (border-color alone), but the extra glow is reserved for
-   boxed blocks. */
+   boxed blocks. The hexagon variant has no `border`/`box-shadow` of its own
+   to win over (see `.value-card-shape-bool` above — both live on its
+   `::before`/`::after` layers instead), so it gets its own rule right
+   below, same idea as that shape's `:hover::before`. */
 .value-drop-target {
   border-color: var(--accent);
 }
-.value-drop-target.value-card-shape,
-.value-drop-target.value-card-shape-bool {
+.value-drop-target.value-card-shape {
   box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
+}
+.value-drop-target.value-card-shape-bool::before {
+  background: var(--accent);
 }
 
 /* Click-to-sample-evaluate tooltip (ValueBlock.vue's `preview`, driven by

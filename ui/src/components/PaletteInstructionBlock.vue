@@ -9,7 +9,7 @@
 // since this *is* the block: the drag ghost is just a clone of it).
 import { computed, type Component } from 'vue';
 import type { InstructionDto, InstructionType } from '../types';
-import { isCapType, isHeaderType } from '../types';
+import { isCapType, isHeaderType, isWrapType } from '../types';
 import { paletteInstructions } from '../paletteState';
 import { beginPaletteDrag } from '../canvasDrag';
 import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
@@ -35,7 +35,10 @@ import PaletteIfElseFields from './fields/palette/PaletteIfElseFields.vue';
 // could render.
 const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'CallBlock'> }>();
 
-const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | 'CallBlock'>, Component> = {
+// If/IfElse are wrap/C-blocks, rendered separately below (mirrors
+// InstructionRow.vue's own real-canvas split) — a flattened single-line
+// `.instruction-content` can't show a bracket shape.
+const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse'>, Component> = {
   WhenRan: PaletteWhenRanFields,
   Wait: PaletteWaitFields,
   Text: PaletteTextFields,
@@ -48,12 +51,13 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | '
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
   Return: PaletteReturnFields,
-  If: PaletteIfFields,
-  IfElse: PaletteIfElseFields,
 };
 
 const instruction = computed(() => paletteInstructions[props.type]);
-const fieldComponent = computed(() => FIELD_COMPONENTS[props.type]);
+const isWrap = computed(() => isWrapType(props.type));
+const fieldComponent = computed(() =>
+  isWrap.value ? null : FIELD_COMPONENTS[props.type as Exclude<InstructionType, 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse'>],
+);
 const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.type]]);
 
 function onPointerDown(e: PointerEvent) {
@@ -66,7 +70,18 @@ function onPointerDown(e: PointerEvent) {
 </script>
 
 <template>
+  <div v-if="isWrap" class="instruction-row instruction-row-wrap palette-prefab" @pointerdown="onPointerDown">
+    <div class="wrap-head-line">
+      <component :is="typeIcon" class="instruction-type-icon-inline" />
+      <PaletteIfFields v-if="type === 'If'" :instruction="(instruction as Extract<InstructionDto, { type: 'If' }>)" part="head" />
+      <PaletteIfElseFields v-else-if="type === 'IfElse'" :instruction="(instruction as Extract<InstructionDto, { type: 'IfElse' }>)" part="head" />
+    </div>
+    <PaletteIfFields v-if="type === 'If'" :instruction="(instruction as Extract<InstructionDto, { type: 'If' }>)" part="body" />
+    <PaletteIfElseFields v-else-if="type === 'IfElse'" :instruction="(instruction as Extract<InstructionDto, { type: 'IfElse' }>)" part="body" />
+    <div class="wrap-foot-bar" />
+  </div>
   <div
+    v-else
     class="instruction-row palette-prefab"
     :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
     @pointerdown="onPointerDown"

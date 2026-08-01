@@ -811,13 +811,32 @@ body.sidebar-resizing {
    All bars share one fill via CSS custom properties (`--wrap-fill`/
    `--wrap-outline`) set once on `.instruction-row-wrap`, so hovering the
    (real, unclipped) head line can re-theme every bar and the spine at once
-   with a single `:has()` rule instead of repeating it per bar. */
+   with a single `:has()` rule instead of repeating it per bar.
+
+   `--wrap-fill` reintroduces the gradient look without reintroducing the
+   seams a *diagonal* gradient caused: each bar/spine paints this background
+   relative to *its own* box, not the whole block's, so any gradient whose
+   color depends on the box's *height* (a diagonal, or a vertical one) hits
+   a different point in a 60px head bar than in a 20px mouth spine, and the
+   seam between them shows up as a visible hard color break (confirmed —
+   this is what a 160deg version of this same gradient looked like). A
+   *horizontal* gradient sidesteps that: color depends only on x, and every
+   full-width piece (head/mid/foot — the bars — always exactly the row's own
+   width) shares the identical size reference, so they render pixel-
+   identical at any given x with no seam possible between them. The one
+   piece narrower than the row is the spine (`--wrap-spine-w`, 44px, pinned
+   to the block's left edge) — sampling this same gradient relative to its
+   own 44px width would recreate the same bug in miniature (a visibly
+   steeper, mismatched ramp packed into a much narrower strip), so
+   `.wrap-mouth`'s own rule below widens that piece's box to match the
+   row's width before sampling, then crops the visible result back down —
+   see its comment for why. */
 .instruction-row.instruction-row-wrap {
   --wrap-head-h: 60px;
   --wrap-mid-h: 36px;
   --wrap-foot-h: 32px;
   --wrap-spine-w: 44px;
-  --wrap-fill: linear-gradient(160deg, var(--bg3), var(--bg2));
+  --wrap-fill: linear-gradient(to right, var(--bg3), var(--bg2));
   --wrap-outline: var(--border);
   display: flex;
   flex-direction: column;
@@ -1105,13 +1124,28 @@ body.sidebar-resizing {
   margin-left: var(--wrap-spine-w);
   padding-right: var(--spacing);
   min-height: 20px;
+  /* `.instruction-row-wrap`'s own width is auto (shrink-to-fit): a
+     column flex container's auto width is the largest max-content
+     contribution among its children, and without this, that includes
+     the mouth's nested rows — so a wide nested block (e.g. a long
+     condition on an inner If) silently widens *this* block too, even
+     though nothing about its own head line changed. `contain:
+     inline-size` makes this box report a 0 width contribution to that
+     calculation (as if empty), so the wrap block's width tracks only
+     the head/mid bars (i.e. the condition), not whatever's nested
+     inside. It still gets stretched to whatever width that resolves
+     to via the parent's default `align-items: stretch`, same as
+     before — nested rows just can't grow it past that anymore
+     (confirmed).
+  */
+  contain: inline-size;
   display: flex;
   flex-direction: column;
   pointer-events: none;
 }
-/* The spine's own left/right border is only half the seam story: a bar's
-   *flat* shoulder — the part of its top/bottom edge outside the notch/tab,
-   at x < spine-w — is still a genuine edge of that bar's own independent
+/* The spine's own borders are only half the seam story: a bar's *flat*
+   shoulder — the part of its top/bottom edge outside the notch/tab, at
+   x < spine-w — is still a genuine edge of that bar's own independent
    shape (it has to stop somewhere; it doesn't know the spine continues
    past it), so it still gets a ~1.5px sliver of border color there, right
    where it should instead read as a seamless continuation into the spine
@@ -1121,7 +1155,29 @@ body.sidebar-resizing {
    above every bar via the parent's `z-index: 1` (without that, only the
    *preceding* bar would be covered — painting is DOM-order among
    `z-index: auto` siblings, so the *following* bar, painted later, would
-   still cover the spine's extension into its territory). */
+   still cover the spine's extension into its territory).
+
+   Widened past its own visible width — `left` pulls it out to the block's
+   true left edge as before, but `width` extends it all the way to the
+   *mouth's* right edge instead of stopping at `--wrap-spine-w` — then
+   `clip-path` crops the visible result back down to just the spine's own
+   sliver. The reason: `--wrap-fill`'s gradient (see the big comment on
+   `.instruction-row-wrap`) is sampled relative to *this element's own
+   width*, and the bars sample that same gradient relative to *their* own
+   width, which is the whole row. Those two widths only match — making the
+   two gradients line up as one continuous surface instead of two
+   differently-scaled ones meeting at a seam — if the spine's box is
+   *exactly as wide as the row*, not just its own visible 44px.
+
+   Only the *outer* (left) border lives here — the mouth's own real
+   `border-left` was tried for the inner one instead of a second pseudo,
+   but a real border shrinks the element's padding box, which is what an
+   absolutely-positioned child's own percentages (`width: calc(100% + ...)`
+   just above) resolve against — that quietly shrank this pseudo's width by
+   the border's own 1.5px, throwing the gradient reference width off by
+   that much and reopening a (much smaller, but still visible) seam
+   (confirmed). `::after` below draws that inner edge as a second overlay
+   instead, leaving this element's box untouched. */
 .wrap-mouth::before {
   content: '';
   position: absolute;
@@ -1129,7 +1185,8 @@ body.sidebar-resizing {
   top: -2px;
   bottom: -2px;
   left: calc(-1 * var(--wrap-spine-w));
-  width: var(--wrap-spine-w);
+  width: calc(100% + var(--wrap-spine-w));
+  clip-path: inset(0 calc(100% - var(--wrap-spine-w)) 0 0);
   /* Behind the mouth's own real nested rows (a separate, local concern from
      the parent's `z-index: 1` above, which ranks the *whole mouth* against
      its sibling bars) — otherwise nested blocks would render underneath
@@ -1138,8 +1195,25 @@ body.sidebar-resizing {
   pointer-events: none;
   background: var(--wrap-fill);
   border-left: 1.5px solid var(--wrap-outline);
-  border-right: 1.5px solid var(--wrap-outline);
   transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+/* The spine's inner (right) edge — a flat color, so unlike `::before` it
+   needs no width-matching trick, just its own copy of the same top/bottom
+   extension and `z-index: -1` (painting after `::before` at the same
+   z-index, by generation order, so it layers on top of that gradient
+   rather than getting hidden under it) to erase the same bar-seam sliver
+   at its own x position. */
+.wrap-mouth::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 1.5px;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 .wrap-mouth .instruction-row {
   pointer-events: auto;

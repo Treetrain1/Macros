@@ -753,14 +753,14 @@ body.sidebar-resizing {
    Each bar is a real element (not a shared pseudo-layer): `.wrap-head-line`,
    `.wrap-mid-bar`, `.wrap-foot-bar`, stacked by the row's own `flex-direction:
    column` alongside one `.wrap-mouth` per arm. A bar's *fill* (background,
-   border, the notch/tab shape) lives on its own `::before` — kept off the
-   bar element itself for the same reason the old single shape avoided the
-   row: `clip-path` on an ancestor would clip away real content painted
-   inside it (`.wrap-head-line`'s icon/condition/label, `.wrap-mid-bar`'s
-   "else" text). A bar's tab (where it feeds into the mouth below) pokes
-   `--connector-notch-depth` *past* its own bottom edge — done by extending
-   just the `::before` layer down via `inset`, not the bar's real box, so the
-   overhang never disturbs the bar's own flex height or its content's
+   border, the notch/tab shape) lives on its own `::before`/`::after` — kept
+   off the bar element itself for the same reason the old single shape
+   avoided the row: `clip-path` on an ancestor would clip away real content
+   painted inside it (`.wrap-head-line`'s icon/condition/label, `.wrap-mid-
+   bar`'s "else" text). A bar's tab (where it feeds into the mouth below)
+   pokes `--connector-notch-depth` *past* its own bottom edge — done by
+   extending both shape layers down via `inset`, not the bar's real box, so
+   the overhang never disturbs the bar's own flex height or its content's
    padding/centering. A bar's notch (where it receives the mouth *above* it)
    is carved *into* its own top edge instead and needs no overhang. Every
    bar's notch/tab that meets a mouth is shifted right by `--wrap-spine-w`
@@ -769,12 +769,37 @@ body.sidebar-resizing {
    (unshifted, chamfered like an ordinary row's) — everywhere else is a
    plain internal seam (no chamfer).
 
+   Each bar's border is the *same* two-layer technique `.instruction-row`
+   uses below, not `box-shadow` — `box-shadow: inset` only ever traces the
+   element's own rectangular box, not its `clip-path`, so at every place the
+   notch/tab curves *away* from that rectangle the shadow simply isn't there
+   to clip *to*, and the border vanishes exactly along the curve (confirmed:
+   this is what made the connector walls look "cut off"). `::before` (the
+   ORIGINAL, unmitered polygon, solid `--wrap-outline`) sits behind
+   `::after` (the same polygon shrunk 1.5px inward along every edge's own
+   normal, mitered at corners, solid `--wrap-fill`) so a uniform ~1.5px ring
+   of the first shows around the second — identical math to `.instruction-
+   row`'s `::before`/`::after`, just re-plotted for these three shapes.
+   Sharp (unchamfered) internal corners — where a bar's flat edge meets its
+   own left/right side, or meets a notch/tab wall — shrink to a plain
+   perpendicular-offset intersection; only the four hand-plotted connector
+   trapezoids (reused verbatim from `.instruction-row`'s own mitered
+   numbers, since they're the same shape) need the curved miter.
+
    The spine (the thin strip down the mouth's left edge) belongs to
    `.wrap-mouth` itself, not the bars — a plain, unshaped rectangle
    (`::before`, `left: -spine-w`) the full height of its own mouth, which is
    why the spine breaks at each mid bar instead of running the full height
    of an If-Else block: matches a real C-block, where the "else" bar spans
-   the full width, not just to the right of a continuing spine.
+   the full width, not just to the right of a continuing spine. It only
+   borders its own *left* (the block's true outer edge) and *right* (the
+   seam with the open mouth) sides — plain `border-left`/`border-right`,
+   no `box-shadow`, since a bare rectangle has no curve for a shadow to
+   mishandle. It deliberately has no top/bottom border: those seams are
+   where the spine's fill is a *continuation* of the bar above/below, not a
+   boundary — bordering them would draw a horizontal line across the mouth's
+   own width and read as its own separate boxed-in rectangle sitting between
+   the head and foot (confirmed).
 
    Only `.wrap-head-line` is pickup-draggable/right-clickable (see
    InstructionRow.vue) — mid bar, foot bar, and spine are purely visual. Each
@@ -793,11 +818,13 @@ body.sidebar-resizing {
   --wrap-foot-h: 32px;
   --wrap-spine-w: 44px;
   --wrap-fill: linear-gradient(160deg, var(--bg3), var(--bg2));
-  --wrap-outline: var(--glass-border);
+  --wrap-outline: var(--border);
   display: flex;
   flex-direction: column;
   position: relative;
   cursor: default;
+  transition: filter var(--dur-fast) var(--ease-standard);
+  filter: drop-shadow(var(--shadow-sm));
 }
 /* The base `.instruction-row::before`/`::after` rules (the ordinary
    puzzle-piece fill/backer) would otherwise still apply here too, since this
@@ -828,24 +855,22 @@ body.sidebar-resizing {
   touch-action: none;
 }
 .wrap-head-line:active { cursor: grabbing; }
+/* Border layer: the ORIGINAL, unmitered shape in solid `--wrap-outline` —
+   identical to `.instruction-row::before` below, just this bar's own outer
+   top notch + a tab overhanging into the mouth (shifted under its indent,
+   the first nested row's own top notch docks into it). */
 .wrap-head-line::before {
   content: '';
   position: absolute;
   inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
-  background: var(--wrap-fill);
-  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
-  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
-  /* outer top notch (identical to an ordinary row's) */
+  background: var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard);
   clip-path: polygon(
     4px 0, 7.5px 0, 10.5px 2px, 13.5px 6px, 16.5px 8px, 25.5px 8px, 28.5px 6px, 31.5px 2px, 34.5px 0,
     calc(100% - 4px) 0, 100% 4px,
-    /* down the right edge to this bar's own bottom */
     100% var(--wrap-head-h),
-    /* tab overhanging into the mouth below — the first nested row's own top
-       notch docks into this, right-to-left, same trapezoid as an outer tab,
-       relocated and shifted under the mouth's indent */
     calc(var(--wrap-spine-w) + 34.5px) var(--wrap-head-h),
     calc(var(--wrap-spine-w) + 31.5px) calc(var(--wrap-head-h) + 2px),
     calc(var(--wrap-spine-w) + 28.5px) calc(var(--wrap-head-h) + 6px),
@@ -857,6 +882,36 @@ body.sidebar-resizing {
     0 var(--wrap-head-h), 0 4px
   );
 }
+/* Backer: same shape shrunk 1.5px inward (mitered numbers lifted verbatim
+   from `.instruction-row::after`'s own top-notch and bottom-tab, since it's
+   the same trapezoid) — see the big comment above for why this replaces a
+   `box-shadow` border. Percentages here read as "100% = this bar's own box,
+   including its overhang" — exactly the relationship `.instruction-row`'s
+   own mitered polygon already assumes, which is what makes reusing its
+   numbers verbatim (only x-shifted for the tab) valid. */
+.wrap-head-line::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  transition: background var(--dur-fast) var(--ease-standard);
+  clip-path: polygon(
+    4.6px 1.5px, 7px 1.5px, 9.5px 3.1px, 12.5px 7.1px, 16px 9.5px, 26px 9.5px, 29.5px 7.1px, 32.5px 3.1px, 35px 1.5px,
+    calc(100% - 4.6px) 1.5px, calc(100% - 1.5px) 4.6px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    calc(var(--wrap-spine-w) + 34px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    calc(var(--wrap-spine-w) + 30.5px) calc(100% - var(--connector-notch-depth) + 0.9px),
+    calc(var(--wrap-spine-w) + 27.5px) calc(100% - var(--connector-notch-depth) + 4.9px),
+    calc(var(--wrap-spine-w) + 25px) calc(100% - 1.5px), calc(var(--wrap-spine-w) + 17px) calc(100% - 1.5px),
+    calc(var(--wrap-spine-w) + 14.5px) calc(100% - var(--connector-notch-depth) + 4.9px),
+    calc(var(--wrap-spine-w) + 11.5px) calc(100% - var(--connector-notch-depth) + 0.9px),
+    calc(var(--wrap-spine-w) + 8px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px 4.6px
+  );
+}
 .instruction-type-icon-inline {
   width: 16px;
   height: 16px;
@@ -865,11 +920,16 @@ body.sidebar-resizing {
 }
 
 /* The "else" bar of an If-Else block — the mid bar sitting between the two
-   mice. Same overhanging-`::before` technique as the head/foot bars, but
-   both its notch (top) and tab (bottom) are shifted under the mouths'
-   indent, since neither of its edges is a true outer corner of the block —
-   unlike the head bar's top or the foot bar's bottom, nothing ever chamfers
-   here. */
+   mice. Same two-layer technique as the head/foot bars, but both its notch
+   (top) and tab (bottom) are shifted under the mouths' indent and neither
+   gets a chamfer, since neither of its edges is a true outer corner of the
+   block — unlike the head bar's top or the foot bar's bottom.
+
+   "else" sits at `padding-left: spine-w + 8px`, not centered — centering
+   across the bar's full width (which can be very wide once the block has
+   real content) put the label far from the left-aligned condition/nested
+   content above and below it; this lines it up with the mouths' own
+   indent instead. */
 .wrap-mid-bar {
   flex-shrink: 0;
   height: var(--wrap-mid-h);
@@ -877,20 +937,17 @@ body.sidebar-resizing {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  padding-left: calc(var(--wrap-spine-w) + 8px);
 }
 .wrap-mid-bar::before {
   content: '';
   position: absolute;
   inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
-  background: var(--wrap-fill);
-  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
-  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  background: var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard);
   clip-path: polygon(
-    /* inward notch at this bar's own top, receiving the tab of the mouth
-       above (same shape as an outer top notch, relocated) */
     0 0,
     calc(var(--wrap-spine-w) + 4px) 0,
     calc(var(--wrap-spine-w) + 7.5px) 2px,
@@ -901,9 +958,7 @@ body.sidebar-resizing {
     calc(var(--wrap-spine-w) + 31.5px) 2px,
     calc(var(--wrap-spine-w) + 34.5px) 0,
     100% 0,
-    /* down the right edge to this bar's own bottom */
     100% var(--wrap-mid-h),
-    /* tab overhanging into the mouth below */
     calc(var(--wrap-spine-w) + 34.5px) var(--wrap-mid-h),
     calc(var(--wrap-spine-w) + 31.5px) calc(var(--wrap-mid-h) + 2px),
     calc(var(--wrap-spine-w) + 28.5px) calc(var(--wrap-mid-h) + 6px),
@@ -913,6 +968,36 @@ body.sidebar-resizing {
     calc(var(--wrap-spine-w) + 10.5px) calc(var(--wrap-mid-h) + 2px),
     calc(var(--wrap-spine-w) + 7.5px) var(--wrap-mid-h),
     0 var(--wrap-mid-h)
+  );
+}
+.wrap-mid-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  transition: background var(--dur-fast) var(--ease-standard);
+  clip-path: polygon(
+    1.5px 1.5px,
+    calc(var(--wrap-spine-w) + 7px) 1.5px,
+    calc(var(--wrap-spine-w) + 9.5px) 3.1px,
+    calc(var(--wrap-spine-w) + 12.5px) 7.1px,
+    calc(var(--wrap-spine-w) + 16px) calc(var(--connector-notch-depth) + 1.5px),
+    calc(var(--wrap-spine-w) + 26px) calc(var(--connector-notch-depth) + 1.5px),
+    calc(var(--wrap-spine-w) + 29.5px) 7.1px,
+    calc(var(--wrap-spine-w) + 32.5px) 3.1px,
+    calc(var(--wrap-spine-w) + 35px) 1.5px,
+    calc(100% - 1.5px) 1.5px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    calc(var(--wrap-spine-w) + 34px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    calc(var(--wrap-spine-w) + 30.5px) calc(100% - var(--connector-notch-depth) + 0.9px),
+    calc(var(--wrap-spine-w) + 27.5px) calc(100% - var(--connector-notch-depth) + 4.9px),
+    calc(var(--wrap-spine-w) + 25px) calc(100% - 1.5px), calc(var(--wrap-spine-w) + 17px) calc(100% - 1.5px),
+    calc(var(--wrap-spine-w) + 14.5px) calc(100% - var(--connector-notch-depth) + 4.9px),
+    calc(var(--wrap-spine-w) + 11.5px) calc(100% - var(--connector-notch-depth) + 0.9px),
+    calc(var(--wrap-spine-w) + 8px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 1.5px)
   );
 }
 
@@ -930,14 +1015,11 @@ body.sidebar-resizing {
   content: '';
   position: absolute;
   inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
-  background: var(--wrap-fill);
-  box-shadow: inset 0 0 0 1.5px var(--wrap-outline), var(--shadow-sm);
-  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  background: var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard);
   clip-path: polygon(
-    /* inward notch at this bar's own top, receiving the tab of the mouth
-       above */
     0 0,
     calc(var(--wrap-spine-w) + 4px) 0,
     calc(var(--wrap-spine-w) + 7.5px) 2px,
@@ -948,10 +1030,7 @@ body.sidebar-resizing {
     calc(var(--wrap-spine-w) + 31.5px) 2px,
     calc(var(--wrap-spine-w) + 34.5px) 0,
     100% 0,
-    /* down the right edge to this bar's own bottom */
     100% calc(var(--wrap-foot-h) - 4px),
-    /* outer bottom tab (identical to an ordinary row's, unshifted — this is
-       the block's own true bottom-outer corner) */
     calc(100% - 4px) var(--wrap-foot-h),
     34.5px var(--wrap-foot-h),
     31.5px calc(var(--wrap-foot-h) + 2px),
@@ -962,6 +1041,38 @@ body.sidebar-resizing {
     10.5px calc(var(--wrap-foot-h) + 2px),
     4px var(--wrap-foot-h),
     0 calc(var(--wrap-foot-h) - 4px)
+  );
+}
+.wrap-foot-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--wrap-fill);
+  transition: background var(--dur-fast) var(--ease-standard);
+  clip-path: polygon(
+    1.5px 1.5px,
+    calc(var(--wrap-spine-w) + 7px) 1.5px,
+    calc(var(--wrap-spine-w) + 9.5px) 3.1px,
+    calc(var(--wrap-spine-w) + 12.5px) 7.1px,
+    calc(var(--wrap-spine-w) + 16px) calc(var(--connector-notch-depth) + 1.5px),
+    calc(var(--wrap-spine-w) + 26px) calc(var(--connector-notch-depth) + 1.5px),
+    calc(var(--wrap-spine-w) + 29.5px) 7.1px,
+    calc(var(--wrap-spine-w) + 32.5px) 3.1px,
+    calc(var(--wrap-spine-w) + 35px) 1.5px,
+    calc(100% - 1.5px) 1.5px,
+    calc(100% - 1.5px) calc(100% - var(--connector-notch-depth) - 4.6px),
+    calc(100% - 4.6px) calc(100% - var(--connector-notch-depth) - 1.5px),
+    34px calc(100% - var(--connector-notch-depth) - 1.5px),
+    30.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    27.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    25px calc(100% - 1.5px), 17px calc(100% - 1.5px),
+    14.5px calc(100% - var(--connector-notch-depth) + 4.9px),
+    11.5px calc(100% - var(--connector-notch-depth) + 0.9px),
+    8px calc(100% - var(--connector-notch-depth) - 1.5px),
+    4.6px calc(100% - var(--connector-notch-depth) - 1.5px),
+    1.5px calc(100% - var(--connector-notch-depth) - 4.6px)
   );
 }
 
@@ -988,6 +1099,9 @@ body.sidebar-resizing {
    (and the sidebar drag/drop they support) stay fully interactive. */
 .wrap-mouth {
   position: relative;
+  /* Above every bar (all `z-index: auto`), regardless of DOM order — see
+     the spine comment on `::before` just below for why this matters. */
+  z-index: 1;
   margin-left: var(--wrap-spine-w);
   padding-right: var(--spacing);
   min-height: 20px;
@@ -995,18 +1109,37 @@ body.sidebar-resizing {
   flex-direction: column;
   pointer-events: none;
 }
+/* The spine's own left/right border is only half the seam story: a bar's
+   *flat* shoulder — the part of its top/bottom edge outside the notch/tab,
+   at x < spine-w — is still a genuine edge of that bar's own independent
+   shape (it has to stop somewhere; it doesn't know the spine continues
+   past it), so it still gets a ~1.5px sliver of border color there, right
+   where it should instead read as a seamless continuation into the spine
+   below/above (confirmed). Rather than teach every bar shape to omit that
+   edge, the spine simply paints over it: extended 2px past its own mouth
+   on both top and bottom (comfortably past the ~1.5px sliver) and lifted
+   above every bar via the parent's `z-index: 1` (without that, only the
+   *preceding* bar would be covered — painting is DOM-order among
+   `z-index: auto` siblings, so the *following* bar, painted later, would
+   still cover the spine's extension into its territory). */
 .wrap-mouth::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
+  box-sizing: border-box;
+  top: -2px;
+  bottom: -2px;
   left: calc(-1 * var(--wrap-spine-w));
   width: var(--wrap-spine-w);
+  /* Behind the mouth's own real nested rows (a separate, local concern from
+     the parent's `z-index: 1` above, which ranks the *whole mouth* against
+     its sibling bars) — otherwise nested blocks would render underneath
+     the spine instead of on top of it. */
   z-index: -1;
   pointer-events: none;
   background: var(--wrap-fill);
-  box-shadow: inset 0 0 0 1.5px var(--wrap-outline);
-  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+  border-left: 1.5px solid var(--wrap-outline);
+  border-right: 1.5px solid var(--wrap-outline);
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .wrap-mouth .instruction-row {
   pointer-events: auto;

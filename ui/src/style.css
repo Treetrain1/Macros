@@ -824,9 +824,9 @@ body.sidebar-resizing {
    full-width piece (head/mid/foot — the bars — always exactly the row's own
    width) shares the identical size reference, so they render pixel-
    identical at any given x with no seam possible between them. The one
-   piece narrower than the row is the spine (`--wrap-spine-w`, 44px, pinned
-   to the block's left edge) — sampling this same gradient relative to its
-   own 44px width would recreate the same bug in miniature (a visibly
+   piece narrower than the row is the spine (`--wrap-spine-w`, pinned to the
+   block's left edge) — sampling this same gradient relative to its own
+   (much narrower) width would recreate the same bug in miniature (a visibly
    steeper, mismatched ramp packed into a much narrower strip), so
    `.wrap-mouth`'s own rule below widens that piece's box to match the
    row's width before sampling, then crops the visible result back down —
@@ -835,15 +835,11 @@ body.sidebar-resizing {
   --wrap-head-h: 60px;
   --wrap-mid-h: 36px;
   --wrap-foot-h: 32px;
-  /* 32px, not some rounder number — matches `connector-cut-inset +
-     connector-cut-width` (10 + 22, the icon column an ordinary row's own
-     content is indented past), so a mouth's nested content lines up with
-     roughly where the head line's own icon starts instead of reading as an
-     arbitrarily wide left margin. As a side effect this also lines up
-     `.wrap-mid-bar`'s "else" label (`spine-w + 8px` = 40px) with the head
-     line's own `if`/condition text (`connector-cut-inset + connector-cut-
-     width + 8px` = 40px too) — those were 12px apart before. */
-  --wrap-spine-w: 32px;
+  /* Every notch/tab/spine measurement below is a `calc()` off this one
+     value, so shrinking it narrows the whole left-hand column (spine,
+     mouth indent, bar notches) consistently without touching any of that
+     geometry by hand. */
+  --wrap-spine-w: 20px;
   --wrap-fill: linear-gradient(to right, var(--bg3), var(--bg2));
   --wrap-outline: var(--border);
   display: flex;

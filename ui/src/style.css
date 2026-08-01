@@ -1676,9 +1676,23 @@ body.sidebar-resizing {
   inset: 0;
   pointer-events: none;
 }
+/* Two background layers, not one: a real `border` (as `.value-card-shape`
+   uses) paints its translucent color OVER that same element's own
+   background — `--glass-border` is 8% white, so it blends bright against
+   the light bg3→bg2 gradient sitting right underneath it. `::before` sits
+   *behind* `::after` (the fill), so without a copy of that same gradient
+   underneath its own tint, the 1px ring where `::before` shows through
+   blends against whatever's behind the block *instead* — the page/canvas
+   background, much darker — reading as a dim, muddy ring instead of the
+   crisp bright one every other block gets from the same color. Painting
+   the gradient here too, under the tint, gives it the same bright surface
+   to blend against as a real border would. (`linear-gradient(X, X)` is a
+   flat-color layer, not a fade — `background`'s color shorthand only
+   applies to the *last* layer, so a solid color can't otherwise sit
+   in front of an earlier image layer.) */
 .value-card-shape-bool::before {
   z-index: -2;
-  background: var(--glass-border);
+  background: linear-gradient(var(--glass-border), var(--glass-border)), linear-gradient(160deg, var(--bg3), var(--bg2));
   clip-path: polygon(var(--notch) 0%, calc(100% - var(--notch)) 0%, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0% 50%);
 }
 /* Mitered 1px inward from `::before`'s polygon above. The flat top/bottom

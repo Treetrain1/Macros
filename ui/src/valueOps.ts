@@ -83,6 +83,6 @@ export function labelForOp(op: ValueOp): Pick<OperatorKindSpec, 'prefix' | 'infi
 
 export function defaultArgFor(spec: OperatorKindSpec, index: number): ValueDto {
   if (spec.enumArg?.index === index) return { kind: 'Text', value: spec.enumArg.options[0].value };
-  if (spec.argTypes[index] === 'bool') return { kind: 'Op', op: 'False', args: [], saved: { kind: 'Number', value: 0 } };
+  if (spec.argTypes[index] === 'bool') return { kind: 'Bool' };
   return spec.argTypes[index] === 'text' ? { kind: 'Text', value: '' } : { kind: 'Number', value: 0 };
 }

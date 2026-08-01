@@ -56,9 +56,9 @@ export function paletteValueFor(kind: ValueKind): ValueDto {
     args: args.map((v, i) => {
       const argType = spec.argTypes[i];
       if (argType === 'text') return textValue(String(v));
-      // No editable palette leaf for booleans — a fresh "false", same as
+      // No editable palette leaf for booleans — blank, same as
       // defaultArgFor's fallback for a bool-typed slot.
-      if (argType === 'bool') return { kind: 'Op', op: 'False', args: [], saved: numberValue(0) };
+      if (argType === 'bool') return { kind: 'Bool' };
       return numberValue(Number(v));
     }),
     saved: numberValue(0),

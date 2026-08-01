@@ -277,6 +277,7 @@ pub(crate) struct KeyCaptureDto {
 pub(crate) enum ValueDto {
     Number { value: f64 },
     Text { value: String },
+    Bool,
     Op { op: Op, args: Vec<ValueDto>, saved: Box<ValueDto> },
     Var { name: String },
     Param { name: String },
@@ -511,6 +512,7 @@ pub(crate) fn value_to_dto(value: &Value) -> ValueDto {
     match value {
         Value::Number { value } => ValueDto::Number { value: *value },
         Value::Text { value } => ValueDto::Text { value: value.clone() },
+        Value::Bool => ValueDto::Bool,
         Value::Op { op, args, saved } => {
             ValueDto::Op { op: *op, args: args.iter().map(value_to_dto).collect(), saved: Box::new(value_to_dto(saved)) }
         }
@@ -526,6 +528,7 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
     match dto {
         ValueDto::Number { value } => Value::Number { value: *value },
         ValueDto::Text { value } => Value::Text { value: value.clone() },
+        ValueDto::Bool => Value::Bool,
         ValueDto::Op { op, args, saved } => {
             Value::Op { op: *op, args: args.iter().map(dto_to_value).collect(), saved: Box::new(dto_to_value(saved)) }
         }

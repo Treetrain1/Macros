@@ -94,9 +94,12 @@ function onArgInput(index: number, v: string) {
           class-name="dd-compact"
           @update:model-value="v => onArgInput(i, v)"
         />
-        <!-- Boolean slots have no editable palette leaf (there's no bare
-             boolean literal) — show a static placeholder instead. -->
-        <span v-else-if="spec.argTypes[i] === 'bool'" class="value-block value-card-shape-bool value-op">false</span>
+        <!-- Boolean slots have no editable palette leaf — a static blank
+             hexagon placeholder, same as a real unfilled boolean slot
+             (ValueBlock.vue's `.value-hex-blank`). -->
+        <span v-else-if="spec.argTypes[i] === 'bool'" class="value-block value-hex-blank">
+          <span class="value-op value-hex-blank-spacer">&nbsp;</span>
+        </span>
         <AutosizeInput
           v-else
           :model-value="String(arg)"

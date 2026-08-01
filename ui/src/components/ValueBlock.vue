@@ -87,10 +87,13 @@ const boxed = computed(() =>
   (props.location.kind === 'Floating' && props.location.path.length === 0) ||
   isCapsuleLocation(props.location));
 
-// Boolean-producing operators (comparisons, and/or/not, true/false) render
-// as a hexagon instead of the ordinary rounded capsule — Scratch's visual
-// language for "this slot expects a boolean."
-const isBool = computed(() => displayValue.value.kind === 'Op' && specForOp(displayValue.value.op)?.resultType === 'bool');
+// Boolean-producing operators (comparisons, and/or/not, true/false), and the
+// blank `Bool` leaf a boolean slot defaults to, render as a hexagon instead
+// of the ordinary rounded capsule — Scratch's visual language for "this slot
+// expects a boolean."
+const isBool = computed(() =>
+  displayValue.value.kind === 'Bool' ||
+  (displayValue.value.kind === 'Op' && specForOp(displayValue.value.op)?.resultType === 'bool'));
 
 // The hexagon's point angle (style.css's `--notch`) is a fixed ratio of
 // this block's own height, so it stays constant whether the block is a
@@ -133,7 +136,7 @@ function onPointerDown(e: PointerEvent) {
   <span
     ref="rootEl"
     class="value-block"
-    :class="{ 'value-card-shape': boxed && !isBool, 'value-card-shape-bool': boxed && isBool }"
+    :class="{ 'value-card-shape': boxed && !isBool, 'value-card-shape-bool': boxed && isBool, 'value-hex-blank': !boxed && isBool }"
     :style="isBool ? { '--bh': blockHeight + 'px' } : undefined"
     :data-value-location="JSON.stringify(location)"
     @pointerdown="onPointerDown"
@@ -160,6 +163,14 @@ function onPointerDown(e: PointerEvent) {
         <span v-if="item.piece.kind === 'Label'" class="value-op">{{ item.piece.text }}</span>
         <ValueBlock v-else :location="childLocation(item.argIndex)" :value="displayValue.args[item.argIndex]" />
       </template>
+    </template>
+    <template v-else-if="displayValue.kind === 'Bool'">
+      <!-- Invisible spacer, not the empty string — gives the blank hexagon
+           the exact same line-height as a real "true"/"false"/comparison
+           block's `.value-op` text, so it matches their height instead of
+           collapsing to whatever the (content-less) hexagon shape alone
+           would be. -->
+      <span class="value-op value-hex-blank-spacer">&nbsp;</span>
     </template>
     <template v-else>
       <AutosizeInput

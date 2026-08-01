@@ -1597,7 +1597,8 @@ body.sidebar-resizing {
 .value-card-shape .value-card-shape,
 .value-card-shape .value-card-shape-bool,
 .value-card-shape-bool .value-card-shape,
-.value-card-shape-bool .value-card-shape-bool {
+.value-card-shape-bool .value-card-shape-bool,
+.value-card-shape-bool .value-hex-blank {
   /* Nested operators read as distinct blocks without stacking up full-size
      chrome several levels deep. */
   padding: 1px 4px;
@@ -1660,17 +1661,39 @@ body.sidebar-resizing {
    stacking context the same way a `z-index` would, without any of a
    `z-index`'s side effects on this element's actual paint order relative
    to its siblings. */
-.value-card-shape-bool {
+.value-card-shape-bool,
+.value-hex-blank {
   position: relative;
   isolation: isolate;
   gap: 2px;
   padding: 2px 12px;
-  cursor: grab;
-  touch-action: none;
   --notch: min(calc(var(--bh, 25px) * 0.32), 50%);
 }
+.value-card-shape-bool {
+  cursor: grab;
+  touch-action: none;
+}
+/* The blank fallback a boolean slot shows with nothing dropped in — same
+   hexagon geometry as a real boolean block, just empty (no label, not
+   draggable), so an unfilled `If`/`And`/`Or`/`Not` slot still reads as
+   "this wants a boolean" at a glance instead of collapsing to nothing.
+   Height matches a real "true"/"false"/comparison block exactly because it
+   contains the same `.value-op`-styled content those do (see
+   `.value-hex-blank-spacer` below) — only wider, via `min-width`, to read
+   clearly as an empty slot rather than a sliver. */
+.value-hex-blank {
+  min-width: 44px;
+}
+/* Invisible (but space-occupying) placeholder inside `.value-hex-blank` —
+   gives it a real `.value-op` text line box to size against instead of
+   guessing a fixed height that'd drift out of sync with the real thing. */
+.value-hex-blank-spacer {
+  visibility: hidden;
+}
 .value-card-shape-bool::before,
-.value-card-shape-bool::after {
+.value-card-shape-bool::after,
+.value-hex-blank::before,
+.value-hex-blank::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1690,7 +1713,8 @@ body.sidebar-resizing {
    flat-color layer, not a fade — `background`'s color shorthand only
    applies to the *last* layer, so a solid color can't otherwise sit
    in front of an earlier image layer.) */
-.value-card-shape-bool::before {
+.value-card-shape-bool::before,
+.value-hex-blank::before {
   z-index: -2;
   background: linear-gradient(var(--glass-border), var(--glass-border)), linear-gradient(160deg, var(--bg3), var(--bg2));
   clip-path: polygon(var(--notch) 0%, calc(100% - var(--notch)) 0%, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0% 50%);
@@ -1702,7 +1726,8 @@ body.sidebar-resizing {
    and nudge the flat-edge corners out by `0.547px` (= 1.187px − 1px·0.64)
    — both constants derived from that fixed ratio, so they hold at every
    height, not just the one they were checked against. */
-.value-card-shape-bool::after {
+.value-card-shape-bool::after,
+.value-hex-blank::after {
   z-index: -1;
   background: linear-gradient(160deg, var(--bg3), var(--bg2));
   box-shadow: var(--bevel-top);
@@ -1734,7 +1759,8 @@ body.sidebar-resizing {
 .value-drop-target.value-card-shape {
   box-shadow: var(--bevel-top), var(--shadow-sm), var(--glow-accent);
 }
-.value-drop-target.value-card-shape-bool::before {
+.value-drop-target.value-card-shape-bool::before,
+.value-drop-target.value-hex-blank::before {
   background: var(--accent);
 }
 

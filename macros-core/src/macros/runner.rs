@@ -70,6 +70,7 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
     match value {
         Value::Number { value } => Ok(Value::Number { value: *value }),
         Value::Text { value } => Ok(Value::Text { value: value.clone() }),
+        Value::Bool => Ok(Value::Bool),
         // Shouldn't appear here (resolve_vars already ran), but a harmless
         // passthrough rather than a hard error keeps this function total.
         Value::Var { name } => Ok(Value::Var { name: name.clone() }),

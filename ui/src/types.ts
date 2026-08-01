@@ -27,6 +27,10 @@ export type ValueKind = 'Number' | 'Text' | ValueOp | 'Join3' | `Var:${string}` 
 export type ValueDto =
   | { kind: 'Number'; value: number }
   | { kind: 'Text'; value: string }
+  // Bare boolean leaf, no value of its own — the "nothing plugged in here"
+  // state of a boolean slot (an If's condition, an And/Or/Not operand).
+  // Renders as a blank hexagon (ValueBlock.vue) and evaluates as false.
+  | { kind: 'Bool' }
   | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto }
   | { kind: 'Var'; name: string }
   | { kind: 'Param'; name: string }
@@ -40,10 +44,10 @@ export function textValue(value: string): ValueDto {
   return { kind: 'Text', value };
 }
 
-// Fresh boolean-typed default — there's no bare boolean leaf, so this is a
-// standalone "false" block, same spirit as `numberValue(0)`/`textValue('')`.
-export function falseValue(): ValueDto {
-  return { kind: 'Op', op: 'False', args: [], saved: numberValue(0) };
+// Fresh boolean-typed default — blank, same spirit as
+// `numberValue(0)`/`textValue('')`, not a pre-filled "false".
+export function blankBoolValue(): ValueDto {
+  return { kind: 'Bool' };
 }
 
 // Fresh default tree for a value block dragged off the sidebar palette —
@@ -187,8 +191,8 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'BlockHeader': return { type: 'BlockHeader', block_id: '' };
     case 'CallBlock': return { type: 'CallBlock', block_id: '', args: [] };
     case 'Return': return { type: 'Return', value: numberValue(0) };
-    case 'If': return { type: 'If', condition: falseValue(), body: [] };
-    case 'IfElse': return { type: 'IfElse', condition: falseValue(), then_body: [], else_body: [] };
+    case 'If': return { type: 'If', condition: blankBoolValue(), body: [] };
+    case 'IfElse': return { type: 'IfElse', condition: blankBoolValue(), then_body: [], else_body: [] };
     default: return { type: 'Comment', comment: '' };
   }
 }

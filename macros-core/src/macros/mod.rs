@@ -161,6 +161,38 @@ impl Instruction {
         }
     }
 
+    /// Repairs boolean slots poisoned by the historical `Value::Bool`-less
+    /// bug (see `Value::migrate_bool_slots`) — run once over every
+    /// instruction when a macro loads (`From<MacroDe>`). An `If`/`IfElse`
+    /// condition is the one position this module knows is boolean-typed by
+    /// construction; everything else starts `false` and lets `Value::migrate_bool_slots`
+    /// find any `And`/`Or`/`Not` operands nested further in on its own.
+    pub fn migrate_bool_slots(&mut self) {
+        match self {
+            Instruction::Wait(value) | Instruction::Return(value) => value.migrate_bool_slots(false),
+            Instruction::Token(token) => token.migrate_bool_slots(),
+            Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.migrate_bool_slots(false),
+            Instruction::CallBlock { args, .. } => {
+                for a in args.iter_mut() {
+                    a.migrate_bool_slots(false);
+                }
+            }
+            Instruction::If { condition, body } => {
+                condition.migrate_bool_slots(true);
+                for ins in body.iter_mut() {
+                    ins.migrate_bool_slots();
+                }
+            }
+            Instruction::IfElse { condition, then_body, else_body } => {
+                condition.migrate_bool_slots(true);
+                for ins in then_body.iter_mut().chain(else_body.iter_mut()) {
+                    ins.migrate_bool_slots();
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+        }
+    }
+
     /// Renames every `Value::Param` leaf reading `old` to `new`, keeping a
     /// block's body working after one of its inputs is renamed.
     pub fn rename_param(&mut self, old: &str, new: &str) {
@@ -348,7 +380,7 @@ enum MacroDe {
 
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
-        match de {
+        let mut mac = match de {
             MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables, block_defs } => {
                 // Pre-"When Ran" saves have a strand id=="root" that was the
                 // implicit entry point; give it a real WhenRan on upgrade.
@@ -364,7 +396,19 @@ impl From<MacroDe> for Macro {
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
                 Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new(), block_defs: Vec::new() }
             }
+        };
+        // Repairs boolean slots poisoned by the historical `Value::Bool`-less
+        // bug (see `Value::migrate_bool_slots`) — a save from before that fix
+        // may have a raw number leaf sitting where a blank hexagon belongs.
+        for strand in mac.strands.iter_mut() {
+            for ins in strand.instructions.iter_mut() {
+                ins.migrate_bool_slots();
+            }
         }
+        for fv in mac.floating_values.iter_mut() {
+            fv.value.migrate_bool_slots(false);
+        }
+        mac
     }
 }
 
@@ -711,6 +755,60 @@ mod tests {
         ]}"#;
         let mac: Macro = serde_json::from_str(json).unwrap();
         assert_eq!(mac.strand("root").unwrap().instructions, vec![Instruction::WhenRan, Instruction::Comment("hi".into())]);
+    }
+
+    #[test]
+    fn migrate_bool_slots_repairs_poisoned_if_condition_on_load() {
+        // Pre-`Value::Bool` save: dragging the default boolean block out of
+        // an `If`'s condition once left a bare `Number` behind.
+        let json = r#"{"id":"m1","name":"Old","description":"","strands":[
+            {"id":"root","x":0,"y":0,"instructions":["WhenRan",
+                {"If":{"condition":{"kind":"Number","value":0.0},"body":[]}}
+            ]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        match &mac.strand("root").unwrap().instructions[1] {
+            Instruction::If { condition, .. } => assert_eq!(condition, &Value::Bool),
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn migrate_bool_slots_repairs_poisoned_operand_nested_inside_condition() {
+        // The poisoned `Number` can be arbitrarily deep — here inside an
+        // `And` that itself is the `If`'s condition. Its sibling (a real
+        // comparison) must survive untouched.
+        let json = r#"{"id":"m1","name":"Old","description":"","strands":[
+            {"id":"root","x":0,"y":0,"instructions":["WhenRan",
+                {"If":{"condition":{
+                    "kind":"Op","op":"And",
+                    "args":[
+                        {"kind":"Number","value":0.0},
+                        {"kind":"Op","op":"Eq","args":[{"kind":"Number","value":1.0},{"kind":"Number","value":1.0}],"saved":{"kind":"Number","value":0.0}}
+                    ],
+                    "saved":{"kind":"Number","value":0.0}
+                },"body":[]}}
+            ]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        match &mac.strand("root").unwrap().instructions[1] {
+            Instruction::If { condition: Value::Op { op: Op::And, args, .. }, .. } => {
+                assert_eq!(args[0], Value::Bool);
+                assert_eq!(args[1], Value::Op { op: Op::Eq, args: vec![Value::number(1.0), Value::number(1.0)], saved: Box::new(Value::Bool) });
+            }
+            other => panic!("expected If(And(..)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn migrate_bool_slots_leaves_legitimately_numeric_fields_alone() {
+        // A `Wait` duration is never boolean-typed — a `Number` there is
+        // always legitimate and must not be touched.
+        let json = r#"{"id":"m1","name":"Old","description":"","strands":[
+            {"id":"root","x":0,"y":0,"instructions":["WhenRan",{"Wait":{"kind":"Number","value":0.0}}]}
+        ]}"#;
+        let mac: Macro = serde_json::from_str(json).unwrap();
+        assert_eq!(mac.strand("root").unwrap().instructions[1], Instruction::Wait(Value::number(0.0)));
     }
 
     #[test]

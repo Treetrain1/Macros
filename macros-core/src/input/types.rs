@@ -249,4 +249,18 @@ impl InputToken {
             InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
         }
     }
+
+    /// See `Value::migrate_bool_slots` — walks every embedded `Value` tree.
+    /// None of these fields are boolean-typed themselves.
+    pub fn migrate_bool_slots(&mut self) {
+        match self {
+            InputToken::MoveMouse(x, y, _) => {
+                x.migrate_bool_slots(false);
+                y.migrate_bool_slots(false);
+            }
+            InputToken::Scroll(amount, _) => amount.migrate_bool_slots(false),
+            InputToken::Text(value) => value.migrate_bool_slots(false),
+            InputToken::Key(..) | InputToken::Button(..) | InputToken::Raw(..) => {}
+        }
+    }
 }

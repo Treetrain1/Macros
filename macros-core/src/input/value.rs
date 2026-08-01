@@ -75,6 +75,13 @@ pub enum Op {
 pub enum Value {
     Number { value: f64 },
     Text { value: String },
+    /// Bare boolean leaf with no value of its own — the "nothing plugged in
+    /// here" state of a boolean-typed slot (an `If`'s condition, an
+    /// `And`/`Or`/`Not` operand). Evaluates as `false`, same as Scratch's
+    /// empty hexagon. Distinct from the standalone `Op::True`/`Op::False`
+    /// blocks, which are explicit, draggable "I want this to literally read
+    /// true/false" blocks rather than an unset slot.
+    Bool,
     Op { op: Op, args: Vec<Value>, saved: Box<Value> },
     /// A read of a macro-wide variable by name, resolved against the running
     /// macro's variable store by [`Value::resolve_vars`] before `eval` sees it.
@@ -186,10 +193,10 @@ fn text_default() -> Value {
     Value::Text { value: String::new() }
 }
 
-/// Default for a boolean-typed operand slot — there's no bare boolean leaf,
-/// so this is a fresh `false` block, same spirit as `text_default`.
+/// Default for a boolean-typed operand slot — blank (`Value::Bool`), same
+/// spirit as `text_default`, not a pre-filled `false`.
 fn bool_default() -> Value {
-    Value::Op { op: Op::False, args: vec![], saved: Box::new(Value::number(0.0)) }
+    Value::Bool
 }
 
 pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
@@ -270,6 +277,8 @@ impl Value {
         match self {
             Value::Number { value } => Ok(Evaluated::Number(*value)),
             Value::Text { value } => Ok(Evaluated::Text(value.clone())),
+            // The "nothing plugged in" state of a boolean slot acts as false.
+            Value::Bool => Ok(Evaluated::Bool(false)),
             // Every real call site resolves vars via `resolve_vars` first; this
             // only fires if that step was skipped (a bug, not something a
             // macro can trigger).
@@ -407,7 +416,7 @@ impl Value {
                 }
                 saved.rename_var(old, new);
             }
-            Value::Number { .. } | Value::Text { .. } | Value::Param { .. } => {}
+            Value::Number { .. } | Value::Text { .. } | Value::Bool | Value::Param { .. } => {}
         }
     }
 
@@ -426,7 +435,7 @@ impl Value {
                 }
                 saved.rename_param(old, new);
             }
-            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } => {}
+            Value::Number { .. } | Value::Text { .. } | Value::Bool | Value::Var { .. } => {}
         }
     }
 
@@ -435,7 +444,7 @@ impl Value {
     /// lists aligned with the block's current pieces.
     pub fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
         match self {
-            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
+            Value::Number { .. } | Value::Text { .. } | Value::Bool | Value::Var { .. } | Value::Param { .. } => {}
             Value::Op { args, saved, .. } => {
                 for a in args.iter_mut() {
                     a.for_each_call_args_mut(block_id, f);
@@ -459,7 +468,7 @@ impl Value {
     /// dangling ones.
     pub fn scrub_block_calls(&mut self, block_id: &str) {
         match self {
-            Value::Number { .. } | Value::Text { .. } | Value::Var { .. } | Value::Param { .. } => {}
+            Value::Number { .. } | Value::Text { .. } | Value::Bool | Value::Var { .. } | Value::Param { .. } => {}
             Value::Op { args, saved, .. } => {
                 for a in args.iter_mut() {
                     a.scrub_block_calls(block_id);
@@ -479,6 +488,42 @@ impl Value {
         }
     }
 
+    /// Repairs a "poisoned" boolean slot left by a historical bug: before
+    /// `Value::Bool` existed, a boolean-typed slot's blank state was a
+    /// standalone `False` op whose `saved` fallback was a plain `Number(0)`
+    /// — so dragging that (or any other block) out of an `If`/`IfElse`
+    /// condition or an `And`/`Or`/`Not` operand could reveal a raw number
+    /// leaf instead of the blank hexagon it should be. `expects_bool` is
+    /// true exactly at the positions a boolean value belongs — the caller
+    /// (an `Instruction`'s own `migrate_bool_slots`) passes `true` for an
+    /// `If`/`IfElse` condition, `false` everywhere else; from there this
+    /// threads it into `And`/`Or`/`Not` operands (and along every `saved`
+    /// chain, which occupies the same slot as whatever displaced it) on its
+    /// own. Only a bare `Number` gets converted — anything else already has
+    /// a real shape, boolean-looking or not, so there's nothing to fix.
+    pub fn migrate_bool_slots(&mut self, expects_bool: bool) {
+        if expects_bool && matches!(self, Value::Number { .. }) {
+            *self = Value::Bool;
+            return;
+        }
+        match self {
+            Value::Op { op, args, saved } => {
+                let args_are_bool = matches!(op, Op::And | Op::Or | Op::Not);
+                for arg in args.iter_mut() {
+                    arg.migrate_bool_slots(args_are_bool);
+                }
+                saved.migrate_bool_slots(expects_bool);
+            }
+            Value::Call { args, saved, .. } => {
+                for arg in args.iter_mut() {
+                    arg.migrate_bool_slots(false);
+                }
+                saved.migrate_bool_slots(expects_bool);
+            }
+            Value::Number { .. } | Value::Text { .. } | Value::Bool | Value::Var { .. } | Value::Param { .. } => {}
+        }
+    }
+
     /// Rebuilds this tree with every `Value::Var` leaf replaced by its
     /// current value from `env` (defaulting to `0` if missing, so a stray
     /// reference doesn't error the whole tree). Must run before `eval`.
@@ -486,6 +531,7 @@ impl Value {
         match self {
             Value::Number { value } => Value::Number { value: *value },
             Value::Text { value } => Value::Text { value: value.clone() },
+            Value::Bool => Value::Bool,
             Value::Op { op, args, saved } => Value::Op {
                 op: *op,
                 args: args.iter().map(|a| a.resolve_vars(env)).collect(),
@@ -520,6 +566,9 @@ impl std::hash::Hash for Value {
             Value::Text { value } => {
                 1u8.hash(state);
                 value.hash(state);
+            }
+            Value::Bool => {
+                6u8.hash(state);
             }
             Value::Op { op, args, saved } => {
                 2u8.hash(state);
@@ -563,6 +612,7 @@ impl<'de> Deserialize<'de> for Value {
         enum Tagged {
             Number { value: f64 },
             Text { value: String },
+            Bool,
             Op {
                 op: Op,
                 args: Vec<Value>,
@@ -610,6 +660,7 @@ impl<'de> Deserialize<'de> for Value {
             ValueDe::LegacyText(s) => Value::Text { value: s },
             ValueDe::Current(Tagged::Number { value }) => Value::Number { value },
             ValueDe::Current(Tagged::Text { value }) => Value::Text { value },
+            ValueDe::Current(Tagged::Bool) => Value::Bool,
             ValueDe::Current(Tagged::Op { op, args, saved }) => Value::Op { op, args, saved },
             ValueDe::Current(Tagged::Var { name }) => Value::Var { name },
             ValueDe::Current(Tagged::Param { name }) => Value::Param { name },

@@ -60,10 +60,38 @@ function onRowPointerDown(e: PointerEvent) {
   const target = e.target as Element | null;
   if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
   if (target instanceof HTMLElement && target.isContentEditable) return;
+  // Wrap blocks (If/If-Else) listen on their own outer container, not just
+  // `.wrap-head-line`, so the whole outline (head line, mid bar, foot bar,
+  // spine) is grabbable — matching the blue hover highlight covering the
+  // same area (see .instruction-row-wrap's :has() rule in style.css). But
+  // that container also wraps every nested block sitting in its mouth, and
+  // pointerdown bubbles, so without these guards, picking up a nested block
+  // — or even clicking genuinely empty space inside a mouth — would *also*
+  // pick up the outer wrap block.
+  // `.wrap-mouth`'s own box is `pointer-events: none` (only its spine
+  // pseudo-elements opt back into `auto`), so a real nested `.instruction-
+  // row` is only ever reached as `target` when the pointer is actually over
+  // that row's own content — the spine hits `.wrap-mouth` itself as
+  // `target`, not a descendant.
+  const mouth = target?.closest?.('.wrap-mouth');
+  if (mouth && target !== mouth) return;
+  // Genuinely empty mouth space (no spine, no nested row under the pointer)
+  // has nothing pointer-events:auto to hit at all, so the browser falls all
+  // the way through to the nearest ancestor that still accepts pointer
+  // events — this row itself, meaning `target` ends up as the *same*
+  // element the listener is bound to instead of any real descendant.
+  if (target === e.currentTarget) return;
   beginPickup(e, props.strandId, props.path);
 }
 
 function onRowContextMenu(e: MouseEvent) {
+  // Same reasoning as onRowPointerDown's guards above — right-clicking a
+  // nested block, or genuinely hollow space inside a mouth, shouldn't open
+  // the outer wrap block's own menu.
+  const target = e.target as Element | null;
+  const mouth = target?.closest?.('.wrap-mouth');
+  if (mouth && target !== mouth) return;
+  if (target === e.currentTarget) return;
   openBlockMenu(e, props.strandId, props.path);
 }
 </script>
@@ -74,8 +102,10 @@ function onRowContextMenu(e: MouseEvent) {
     class="instruction-row instruction-row-wrap"
     :class="{ 'row-first': isFirst, 'row-last': isLast }"
     :data-index="index"
+    @pointerdown="onRowPointerDown"
+    @contextmenu.prevent.stop="onRowContextMenu"
   >
-    <div class="wrap-head-line" @pointerdown="onRowPointerDown" @contextmenu.prevent.stop="onRowContextMenu">
+    <div class="wrap-head-line">
       <component :is="typeIcon" class="instruction-type-icon-inline" />
       <IfFields v-if="instruction.type === 'If'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
       <IfElseFields v-else-if="instruction.type === 'IfElse'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />

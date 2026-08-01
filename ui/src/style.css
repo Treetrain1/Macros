@@ -855,8 +855,30 @@ body.sidebar-resizing {
 .instruction-row.instruction-row-wrap::after {
   content: none;
 }
-.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover) {
-  --wrap-fill: var(--bg3);
+/* Hovering any part of the block's own outline — head line (top), mid bar
+   ("else", middle), foot bar (bottom), or the spine (left, via `.wrap-mouth`
+   below) — re-themes it blue, matching a real C-block's hit area being its
+   outline, not its bounding box. `.wrap-mouth` itself is deliberately
+   excluded (its hollow interior has `pointer-events: none` and never matches
+   `:hover` on its own — see its comment) so hovering empty space inside a
+   mouth, or a nested block sitting inside it, never triggers this. */
+.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover, .wrap-mid-bar:hover, .wrap-foot-bar:hover, .wrap-mouth:hover) {
+  /* A flat color, not `var(--bg3)` directly — `background: var(--wrap-fill)`
+     resolves to either `background-image` (gradient) or `background-color`
+     (plain color) depending on which kind of value `--wrap-fill` holds, and
+     the two are separate sub-properties under that shorthand. Toggling
+     between a `linear-gradient()` and a bare color therefore isn't a single
+     smooth transition: `background-color` fades in from transparent fine,
+     but `background-image` can't interpolate to/from `none` and just snaps
+     — for part of the transition's duration the gradient has already
+     dropped out while the color hasn't fully faded in yet, which paints as
+     a genuine flash of transparency (confirmed: this is what made the left
+     side of a hovered If/If-Else block flicker). Keeping this a
+     same-shape, same-stop-count gradient means `background-image` always
+     holds a `linear-gradient()` on both sides of the toggle, so it
+     interpolates smoothly like any other gradient-to-gradient transition
+     instead of ever touching `none`. */
+  --wrap-fill: linear-gradient(to right, var(--bg3), var(--bg3));
   --wrap-outline: var(--accent);
 }
 
@@ -957,7 +979,15 @@ body.sidebar-resizing {
   display: flex;
   align-items: center;
   padding-left: calc(var(--wrap-spine-w) + 8px);
+  /* Grabbable like `.wrap-head-line` — the pointerdown/contextmenu listeners
+     live on the outer `.instruction-row-wrap` now (see InstructionRow.vue),
+     so every bar making up the block's outline needs to actually look and
+     behave like part of the same grab handle, not just re-theme blue on
+     hover. */
+  cursor: grab;
+  touch-action: none;
 }
+.wrap-mid-bar:active { cursor: grabbing; }
 .wrap-mid-bar::before {
   content: '';
   position: absolute;
@@ -968,10 +998,10 @@ body.sidebar-resizing {
   transition: background var(--dur-fast) var(--ease-standard);
   clip-path: polygon(
     0 0,
-    calc(var(--wrap-spine-w) + 4px) 0,
-    calc(var(--wrap-spine-w) + 7.5px) 2px,
-    calc(var(--wrap-spine-w) + 10.5px) 6px,
-    calc(var(--wrap-spine-w) + 13.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 7.5px) 0,
+    calc(var(--wrap-spine-w) + 10.5px) 2px,
+    calc(var(--wrap-spine-w) + 13.5px) 6px,
+    calc(var(--wrap-spine-w) + 16.5px) var(--connector-notch-depth),
     calc(var(--wrap-spine-w) + 25.5px) var(--connector-notch-depth),
     calc(var(--wrap-spine-w) + 28.5px) 6px,
     calc(var(--wrap-spine-w) + 31.5px) 2px,
@@ -1020,16 +1050,22 @@ body.sidebar-resizing {
   );
 }
 
-/* The closing cap below the last mouth — purely decorative (no content, no
-   listeners), just the inward notch that receives the last mouth's last row
-   and the ordinary outer bottom tab so the next block snaps on below, same
-   as any lone row's. */
+/* The closing cap below the last mouth — no content of its own, just the
+   inward notch that receives the last mouth's last row and the ordinary
+   outer bottom tab so the next block snaps on below, same as any lone
+   row's. It has no listeners of its own (the outer `.instruction-row-wrap`
+   handles pointerdown/contextmenu for the whole block — see
+   InstructionRow.vue), but it's part of the same grab handle as the other
+   bars, hence the cursor below. */
 .wrap-foot-bar {
   flex-shrink: 0;
   height: var(--wrap-foot-h);
   box-sizing: border-box;
   position: relative;
+  cursor: grab;
+  touch-action: none;
 }
+.wrap-foot-bar:active { cursor: grabbing; }
 .wrap-foot-bar::before {
   content: '';
   position: absolute;
@@ -1040,10 +1076,10 @@ body.sidebar-resizing {
   transition: background var(--dur-fast) var(--ease-standard);
   clip-path: polygon(
     0 0,
-    calc(var(--wrap-spine-w) + 4px) 0,
-    calc(var(--wrap-spine-w) + 7.5px) 2px,
-    calc(var(--wrap-spine-w) + 10.5px) 6px,
-    calc(var(--wrap-spine-w) + 13.5px) var(--connector-notch-depth),
+    calc(var(--wrap-spine-w) + 7.5px) 0,
+    calc(var(--wrap-spine-w) + 10.5px) 2px,
+    calc(var(--wrap-spine-w) + 13.5px) 6px,
+    calc(var(--wrap-spine-w) + 16.5px) var(--connector-notch-depth),
     calc(var(--wrap-spine-w) + 25.5px) var(--connector-notch-depth),
     calc(var(--wrap-spine-w) + 28.5px) 6px,
     calc(var(--wrap-spine-w) + 31.5px) 2px,
@@ -1058,6 +1094,7 @@ body.sidebar-resizing {
     16.5px calc(var(--wrap-foot-h) + var(--connector-notch-depth)),
     13.5px calc(var(--wrap-foot-h) + 6px),
     10.5px calc(var(--wrap-foot-h) + 2px),
+    7.5px var(--wrap-foot-h),
     4px var(--wrap-foot-h),
     0 calc(var(--wrap-foot-h) - 4px)
   );
@@ -1192,11 +1229,24 @@ body.sidebar-resizing {
      its sibling bars) — otherwise nested blocks would render underneath
      the spine instead of on top of it. */
   z-index: -1;
-  pointer-events: none;
+  /* Unlike `.wrap-mouth` itself (`pointer-events: none`, so hollow space and
+     the width the mouth stretches to don't intercept clicks meant for the
+     row below), this pseudo opts back into `auto` — it's what lets hovering
+     the visible spine register as `.wrap-mouth:hover` for the block-outline
+     highlight above. Safe to re-enable here specifically: the `clip-path`
+     above already restricts the hit area to just the spine's own painted
+     sliver, and real nested rows lay out to its right (`.wrap-mouth`'s own
+     `margin-left`), so this can never intercept a click meant for one. */
+  pointer-events: auto;
+  /* Same grab handle as the bars (see InstructionRow.vue's pointerdown
+     guard, which lets a click land on `.wrap-mouth` itself — i.e. this
+     pseudo — without being treated as a click on a nested block). */
+  cursor: grab;
   background: var(--wrap-fill);
   border-left: 1.5px solid var(--wrap-outline);
   transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
+.wrap-mouth:active::before { cursor: grabbing; }
 /* The spine's inner (right) edge — a flat color, so unlike `::before` it
    needs no width-matching trick, just its own copy of the same top/bottom
    extension and `z-index: -1` (painting after `::before` at the same
@@ -1421,7 +1471,15 @@ body.sidebar-resizing {
     1.5px calc(100% - var(--connector-notch-depth) - 4.6px), 1.5px 4.6px
   );
 }
-.instruction-row:hover .instruction-shape { background: var(--bg3); }
+/* Child combinator, not descendant — `.instruction-row-wrap` is `:hover`
+   whenever the pointer is anywhere in its bounding box, including deep
+   inside a nested mouth, and a plain descendant selector would then repaint
+   every nested row's `.instruction-shape` at once instead of just the one
+   actually under the pointer (confirmed: this is what made unrelated inner
+   blocks flash on hovering the outer If/If-Else block). `.instruction-shape`
+   is always a direct child of its own `.instruction-row`, so `>` scopes
+   this to exactly that row without affecting anything nested inside it. */
+.instruction-row:hover > .instruction-shape { background: var(--bg3); }
 
 .instruction-content {
   display: flex;

@@ -835,7 +835,15 @@ body.sidebar-resizing {
   --wrap-head-h: 60px;
   --wrap-mid-h: 36px;
   --wrap-foot-h: 32px;
-  --wrap-spine-w: 44px;
+  /* 32px, not some rounder number — matches `connector-cut-inset +
+     connector-cut-width` (10 + 22, the icon column an ordinary row's own
+     content is indented past), so a mouth's nested content lines up with
+     roughly where the head line's own icon starts instead of reading as an
+     arbitrarily wide left margin. As a side effect this also lines up
+     `.wrap-mid-bar`'s "else" label (`spine-w + 8px` = 40px) with the head
+     line's own `if`/condition text (`connector-cut-inset + connector-cut-
+     width + 8px` = 40px too) — those were 12px apart before. */
+  --wrap-spine-w: 32px;
   --wrap-fill: linear-gradient(to right, var(--bg3), var(--bg2));
   --wrap-outline: var(--border);
   display: flex;
@@ -856,13 +864,22 @@ body.sidebar-resizing {
   content: none;
 }
 /* Hovering any part of the block's own outline — head line (top), mid bar
-   ("else", middle), foot bar (bottom), or the spine (left, via `.wrap-mouth`
-   below) — re-themes it blue, matching a real C-block's hit area being its
-   outline, not its bounding box. `.wrap-mouth` itself is deliberately
-   excluded (its hollow interior has `pointer-events: none` and never matches
-   `:hover` on its own — see its comment) so hovering empty space inside a
-   mouth, or a nested block sitting inside it, never triggers this. */
-.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover, .wrap-mid-bar:hover, .wrap-foot-bar:hover, .wrap-mouth:hover) {
+   ("else", middle), foot bar (bottom), or the spine (left) — re-themes it
+   blue, matching a real C-block's hit area being its outline, not its
+   bounding box. The first three are plain `:hover` since nothing else ever
+   competes for that space. The spine can't be: `.wrap-mouth:hover` is also
+   true whenever a nested block *inside* it is hovered (hover state bubbles
+   through every ancestor regardless of `pointer-events`), and there's no
+   way to carve that back out with `:has()` alone — `:has()` can't contain
+   another `:has()`, which is what excluding "a nested row is also hovered"
+   would need. `.wrap-spine-hover` is set in JS instead (see
+   InstructionRow.vue) using the same boundary-scoped check that also fixes
+   picking up a nested block. Genuinely empty mouth interior triggers
+   neither path (its own box is `pointer-events: none` and never becomes
+   `:hover` on its own — see its comment), so hovering hollow space inside
+   a mouth, or a nested block sitting inside it, never triggers this. */
+.instruction-row.instruction-row-wrap:has(.wrap-head-line:hover, .wrap-mid-bar:hover, .wrap-foot-bar:hover),
+.instruction-row.instruction-row-wrap.wrap-spine-hover {
   /* A flat color, not `var(--bg3)` directly — `background: var(--wrap-fill)`
      resolves to either `background-image` (gradient) or `background-color`
      (plain color) depending on which kind of value `--wrap-fill` holds, and
@@ -1056,10 +1073,31 @@ body.sidebar-resizing {
    row's. It has no listeners of its own (the outer `.instruction-row-wrap`
    handles pointerdown/contextmenu for the whole block — see
    InstructionRow.vue), but it's part of the same grab handle as the other
-   bars, hence the cursor below. */
+   bars, hence the cursor below.
+
+   Real height includes the tab (`+ notch-depth`), unlike the head/mid bars
+   above, whose tabs get away with staying purely visual (`::before`/
+   `::after` alone, overhanging past the bar's own box via `inset`) because
+   they feed into a mouth that's already sitting right there to receive
+   hover/clicks in that space. This bar's tab feeds the *next block in the
+   strand* instead, with nothing else covering that space — so if only the
+   pseudo-layers extended down there, the tab would be purely decorative:
+   unhoverable (confirmed: this is what made hovering the visual connector
+   not select the block, "until above the bottom connector"), and, since
+   `.instruction-row`'s own `margin-bottom: calc(-1 * notch-depth)` (which
+   this row inherits unchanged) assumes the real box already reserves that
+   height to pull back against, silently over-pulling the next block up by
+   a full `notch-depth` with nothing to offset it (confirmed: this is what
+   placed an attached block too high, connectors misaligned). Growing the
+   real box instead — and dropping the matching overhang on the pseudo
+   layers below, `inset: 0` now that the box itself already spans the tab —
+   fixes both: the exact same clip-path math still traces the identical
+   shape (it was already written in terms of `var(--wrap-foot-h)` plus
+   `notch-depth`, not `100%`, so it never assumed the overhang), just now
+   over a real, hoverable, correctly-sized box. */
 .wrap-foot-bar {
   flex-shrink: 0;
-  height: var(--wrap-foot-h);
+  height: calc(var(--wrap-foot-h) + var(--connector-notch-depth));
   box-sizing: border-box;
   position: relative;
   cursor: grab;
@@ -1069,7 +1107,7 @@ body.sidebar-resizing {
 .wrap-foot-bar::before {
   content: '';
   position: absolute;
-  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  inset: 0;
   z-index: -2;
   pointer-events: none;
   background: var(--wrap-outline);
@@ -1102,7 +1140,7 @@ body.sidebar-resizing {
 .wrap-foot-bar::after {
   content: '';
   position: absolute;
-  inset: 0 0 calc(-1 * var(--connector-notch-depth)) 0;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background: var(--wrap-fill);

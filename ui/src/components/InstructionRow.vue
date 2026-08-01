@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, type Component } from 'vue';
+import { computed, ref, type Component } from 'vue';
 import type { InstrPath, InstructionDto } from '../types';
 import { isCapType, isHeaderType, isWrapType } from '../types';
 import { beginPickup } from '../canvasDrag';
@@ -56,31 +56,51 @@ const isRecordingTarget = computed(
   () => props.isFirst && props.path.length === 1 && props.strandId === state.current_macro?.recording_target_strand_id,
 );
 
+// Walks up from `el` toward (but never past) `boundary`, looking for an
+// ancestor matching `selector`. Unlike a plain `el.closest(selector)`, this
+// never looks *above* the row whose own listener is running the check — a
+// wrap block's outer container wraps every nested block sitting in its own
+// mouth, and a plain `.closest('.wrap-mouth')` from any of those nested
+// blocks' own handlers would also find whatever mouth belongs to an
+// *ancestor* wrap block further up the tree (e.g. an If nested inside
+// another If), incorrectly treating a click/hover on the inner block's own
+// content as if it landed inside a mouth at all (confirmed: this is what
+// made a nested block's own pointerdown do nothing — every nested row's
+// own guard below was tripping on a mouth that belonged to some block
+// *above* it, not one of its own).
+function closestWithin(el: Element | null, selector: string, boundary: Element): Element | null {
+  let cur = el;
+  while (cur && cur !== boundary) {
+    if (cur.matches(selector)) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 function onRowPointerDown(e: PointerEvent) {
   const target = e.target as Element | null;
   if (target?.closest?.('input, select, textarea, button, .dd-trigger, .dd-option')) return;
   if (target instanceof HTMLElement && target.isContentEditable) return;
+  const currentTarget = e.currentTarget as Element;
   // Wrap blocks (If/If-Else) listen on their own outer container, not just
   // `.wrap-head-line`, so the whole outline (head line, mid bar, foot bar,
-  // spine) is grabbable — matching the blue hover highlight covering the
-  // same area (see .instruction-row-wrap's :has() rule in style.css). But
-  // that container also wraps every nested block sitting in its mouth, and
-  // pointerdown bubbles, so without these guards, picking up a nested block
-  // — or even clicking genuinely empty space inside a mouth — would *also*
-  // pick up the outer wrap block.
+  // spine) is grabbable. But that container also wraps every nested block
+  // sitting in its mouth, and pointerdown bubbles, so without this guard,
+  // picking up a nested block — or even clicking genuinely empty space
+  // inside a mouth — would *also* pick up the outer wrap block.
   // `.wrap-mouth`'s own box is `pointer-events: none` (only its spine
   // pseudo-elements opt back into `auto`), so a real nested `.instruction-
   // row` is only ever reached as `target` when the pointer is actually over
   // that row's own content — the spine hits `.wrap-mouth` itself as
   // `target`, not a descendant.
-  const mouth = target?.closest?.('.wrap-mouth');
+  const mouth = target ? closestWithin(target, '.wrap-mouth', currentTarget) : null;
   if (mouth && target !== mouth) return;
   // Genuinely empty mouth space (no spine, no nested row under the pointer)
   // has nothing pointer-events:auto to hit at all, so the browser falls all
   // the way through to the nearest ancestor that still accepts pointer
   // events — this row itself, meaning `target` ends up as the *same*
   // element the listener is bound to instead of any real descendant.
-  if (target === e.currentTarget) return;
+  if (target === currentTarget) return;
   beginPickup(e, props.strandId, props.path);
 }
 
@@ -89,10 +109,48 @@ function onRowContextMenu(e: MouseEvent) {
   // nested block, or genuinely hollow space inside a mouth, shouldn't open
   // the outer wrap block's own menu.
   const target = e.target as Element | null;
-  const mouth = target?.closest?.('.wrap-mouth');
+  const currentTarget = e.currentTarget as Element;
+  const mouth = target ? closestWithin(target, '.wrap-mouth', currentTarget) : null;
   if (mouth && target !== mouth) return;
-  if (target === e.currentTarget) return;
+  if (target === currentTarget) return;
   openBlockMenu(e, props.strandId, props.path);
+}
+
+// Whether the spine (the visual strip along the left edge of a mouth,
+// painted by `.wrap-mouth`'s own pseudo-elements — see style.css) is
+// currently hovered, so `.wrap-spine-hover` below can re-theme the whole
+// block blue the same way hovering the head/mid/foot bars already does.
+// This can't be expressed as a plain `:has(.wrap-mouth:hover)` in CSS:
+// `:hover` on `.wrap-mouth` is *also* true whenever a nested block sitting
+// inside it is hovered (CSS hover state bubbles up through every ancestor
+// regardless of `pointer-events`, so a nested row being hovered — which
+// does have `pointer-events: auto` — makes its `.wrap-mouth` ancestor
+// `:hover` too), and there's no way to carve that back out in pure CSS
+// here: `:has()` cannot itself contain another `:has()`, which is what a
+// `:not(:has(.instruction-row:hover))` refinement would need (confirmed via
+// `CSS.supports`). Tracking it in JS instead sidesteps the restriction
+// entirely.
+const spineHovered = ref(false);
+
+function onRowPointerOver(e: PointerEvent) {
+  const target = e.target as Element | null;
+  // A spine hit always lands exactly *on* its `.wrap-mouth` element — it's
+  // painted by that element's own pseudo-elements (see style.css), never a
+  // descendant — so this doesn't need `closestWithin`'s ancestor walk, just
+  // a direct match. That distinction matters for a nested wrap block (an
+  // If inside an If): the walk finds the *nearest* `.wrap-mouth` between
+  // target and boundary regardless of whose it is, so hovering the *inner*
+  // block's own spine (target IS the inner mouth) would otherwise also
+  // satisfy the *outer* row's check, since the inner mouth is still found
+  // somewhere between target and the outer boundary (confirmed: this made
+  // hovering the inner block's spine highlight the outer block too).
+  // Requiring `target.parentElement === currentTarget` pins the match to
+  // *this* row's own direct mouth specifically.
+  spineHovered.value = !!target && target.classList.contains('wrap-mouth') && target.parentElement === e.currentTarget;
+}
+
+function onRowPointerLeave() {
+  spineHovered.value = false;
 }
 </script>
 
@@ -100,10 +158,12 @@ function onRowContextMenu(e: MouseEvent) {
   <div
     v-if="isWrap"
     class="instruction-row instruction-row-wrap"
-    :class="{ 'row-first': isFirst, 'row-last': isLast }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'wrap-spine-hover': spineHovered }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"
+    @pointerover="onRowPointerOver"
+    @pointerleave="onRowPointerLeave"
   >
     <div class="wrap-head-line">
       <component :is="typeIcon" class="instruction-type-icon-inline" />

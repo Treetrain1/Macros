@@ -13,8 +13,9 @@ pub(crate) type SharedState = Arc<Mutex<AppState>>;
 
 /// One step of an [`InstrPath`] — `index` into the current instruction list,
 /// and (for every step but the last) which nested body of that instruction
-/// to descend into next: `0` for `If`'s body or `IfElse`'s `then_body`, `1`
-/// for `IfElse`'s `else_body`. The last step's `slot` is always `None`.
+/// to descend into next: `0` for `If`'s body, `IfElse`'s `then_body`,
+/// `Repeat`/`Forever`/`While`'s body, `1` for `IfElse`'s `else_body`. The
+/// last step's `slot` is always `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct PathStep {
     pub(crate) index: usize,
@@ -40,8 +41,10 @@ pub(crate) enum FieldId {
     /// One of `CallBlock`'s N argument slots, indexed positionally since a
     /// call's arity is dynamic.
     CallArg(usize),
-    /// `If`/`IfElse`'s boolean condition.
+    /// `If`/`IfElse`/`While`'s boolean condition.
     Condition,
+    /// `Repeat`'s iteration count.
+    RepeatCount,
 }
 
 impl std::fmt::Display for FieldId {
@@ -57,6 +60,7 @@ impl std::fmt::Display for FieldId {
             FieldId::ReturnValue => write!(f, "ReturnValue"),
             FieldId::CallArg(i) => write!(f, "CallArg:{i}"),
             FieldId::Condition => write!(f, "Condition"),
+            FieldId::RepeatCount => write!(f, "RepeatCount"),
         }
     }
 }
@@ -74,6 +78,7 @@ impl std::str::FromStr for FieldId {
             "ChangeVariableValue" => Ok(FieldId::ChangeVariableValue),
             "ReturnValue" => Ok(FieldId::ReturnValue),
             "Condition" => Ok(FieldId::Condition),
+            "RepeatCount" => Ok(FieldId::RepeatCount),
             _ if s.starts_with("CallArg:") => s["CallArg:".len()..]
                 .parse::<usize>()
                 .map(FieldId::CallArg)
@@ -400,6 +405,11 @@ pub(crate) enum InstructionDto {
     Return { value: ValueDto },
     If { condition: ValueDto, body: Vec<InstructionDto> },
     IfElse { condition: ValueDto, then_body: Vec<InstructionDto>, else_body: Vec<InstructionDto> },
+    Repeat { count: ValueDto, body: Vec<InstructionDto> },
+    Forever { body: Vec<InstructionDto> },
+    While { condition: ValueDto, body: Vec<InstructionDto> },
+    EscapeLoop,
+    ContinueLoop,
 }
 
 #[derive(Serialize, Clone)]
@@ -561,6 +571,15 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
             then_body: then_body.iter().map(instruction_to_dto).collect(),
             else_body: else_body.iter().map(instruction_to_dto).collect(),
         },
+        Instruction::Repeat { count, body } => {
+            InstructionDto::Repeat { count: value_to_dto(count), body: body.iter().map(instruction_to_dto).collect() }
+        }
+        Instruction::Forever { body } => InstructionDto::Forever { body: body.iter().map(instruction_to_dto).collect() },
+        Instruction::While { condition, body } => {
+            InstructionDto::While { condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
+        }
+        Instruction::EscapeLoop => InstructionDto::EscapeLoop,
+        Instruction::ContinueLoop => InstructionDto::ContinueLoop,
         Instruction::Token(token) => match token {
             InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
@@ -624,6 +643,19 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
             then_body: then_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
             else_body: else_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
         },
+        InstructionDto::Repeat { count, body } => Instruction::Repeat {
+            count: dto_to_value(count),
+            body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
+        },
+        InstructionDto::Forever { body } => {
+            Instruction::Forever { body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()? }
+        }
+        InstructionDto::While { condition, body } => Instruction::While {
+            condition: dto_to_value(condition),
+            body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
+        },
+        InstructionDto::EscapeLoop => Instruction::EscapeLoop,
+        InstructionDto::ContinueLoop => Instruction::ContinueLoop,
     })
 }
 

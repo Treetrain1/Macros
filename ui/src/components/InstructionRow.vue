@@ -22,14 +22,21 @@ import CallBlockFields from './fields/CallBlockFields.vue';
 import ReturnFields from './fields/ReturnFields.vue';
 import IfFields from './fields/IfFields.vue';
 import IfElseFields from './fields/IfElseFields.vue';
+import RepeatFields from './fields/RepeatFields.vue';
+import ForeverFields from './fields/ForeverFields.vue';
+import WhileFields from './fields/WhileFields.vue';
+import EscapeLoopFields from './fields/EscapeLoopFields.vue';
+import ContinueLoopFields from './fields/ContinueLoopFields.vue';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: InstructionDto; isFirst?: boolean; isLast?: boolean }>();
 
 // Every ordinary (non-wrap) instruction type renders as one puzzle-piece row
-// with this field component filling `.instruction-content`. If/IfElse are
-// wrap/C-blocks — a stack of independently-shaped bars around hollow mice
-// (see style.css's .instruction-row-wrap), rendered separately below.
-const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'If' | 'IfElse'>, Component> = {
+// with this field component filling `.instruction-content`. If/IfElse/
+// Repeat/Forever/While are wrap/C-blocks — a stack of independently-shaped
+// bars around hollow mice (see style.css's .instruction-row-wrap), rendered
+// separately below.
+type WrapType = 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
+const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], WrapType>, Component> = {
   WhenRan: WhenRanFields,
   Wait: WaitFields,
   Text: TextFields,
@@ -44,10 +51,12 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'If' | 'IfElse'>,
   BlockHeader: BlockHeaderFields,
   CallBlock: CallBlockFields,
   Return: ReturnFields,
+  EscapeLoop: EscapeLoopFields,
+  ContinueLoop: ContinueLoopFields,
 };
 
 const isWrap = computed(() => isWrapType(props.instruction.type));
-const fieldComponent = computed(() => (isWrap.value ? null : FIELD_COMPONENTS[props.instruction.type as Exclude<InstructionDto['type'], 'If' | 'IfElse'>]));
+const fieldComponent = computed(() => (isWrap.value ? null : FIELD_COMPONENTS[props.instruction.type as Exclude<InstructionDto['type'], WrapType>]));
 const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.instruction.type]]);
 const showIcon = computed(() => !isHeaderType(props.instruction.type));
 const index = computed(() => props.path[props.path.length - 1]?.index ?? 0);
@@ -169,9 +178,15 @@ function onRowPointerLeave() {
       <component :is="typeIcon" class="instruction-type-icon-inline" />
       <IfFields v-if="instruction.type === 'If'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
       <IfElseFields v-else-if="instruction.type === 'IfElse'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
+      <RepeatFields v-else-if="instruction.type === 'Repeat'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
+      <ForeverFields v-else-if="instruction.type === 'Forever'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
+      <WhileFields v-else-if="instruction.type === 'While'" part="head" :strand-id="strandId" :path="path" :instruction="instruction" />
     </div>
     <IfFields v-if="instruction.type === 'If'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
     <IfElseFields v-else-if="instruction.type === 'IfElse'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+    <RepeatFields v-else-if="instruction.type === 'Repeat'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+    <ForeverFields v-else-if="instruction.type === 'Forever'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
+    <WhileFields v-else-if="instruction.type === 'While'" part="body" :strand-id="strandId" :path="path" :instruction="instruction" />
     <div class="wrap-foot-bar" />
   </div>
   <div

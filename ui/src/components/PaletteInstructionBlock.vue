@@ -27,6 +27,11 @@ import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableF
 import PaletteReturnFields from './fields/palette/PaletteReturnFields.vue';
 import PaletteIfFields from './fields/palette/PaletteIfFields.vue';
 import PaletteIfElseFields from './fields/palette/PaletteIfElseFields.vue';
+import PaletteRepeatFields from './fields/palette/PaletteRepeatFields.vue';
+import PaletteForeverFields from './fields/palette/PaletteForeverFields.vue';
+import PaletteWhileFields from './fields/palette/PaletteWhileFields.vue';
+import PaletteEscapeLoopFields from './fields/palette/PaletteEscapeLoopFields.vue';
+import PaletteContinueLoopFields from './fields/palette/PaletteContinueLoopFields.vue';
 
 // `BlockHeader`/`CallBlock` are excluded — a header is never dragged from
 // the sidebar at all (only ever created via the "Make a Block" dialog), and
@@ -35,10 +40,11 @@ import PaletteIfElseFields from './fields/palette/PaletteIfElseFields.vue';
 // could render.
 const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'CallBlock'> }>();
 
-// If/IfElse are wrap/C-blocks, rendered separately below (mirrors
-// InstructionRow.vue's own real-canvas split) — a flattened single-line
-// `.instruction-content` can't show a bracket shape.
-const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse'>, Component> = {
+// If/IfElse/Repeat/Forever/While are wrap/C-blocks, rendered separately
+// below (mirrors InstructionRow.vue's own real-canvas split) — a flattened
+// single-line `.instruction-content` can't show a bracket shape.
+type ExcludedType = 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
+const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Component> = {
   WhenRan: PaletteWhenRanFields,
   Wait: PaletteWaitFields,
   Text: PaletteTextFields,
@@ -51,12 +57,14 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], 'BlockHeader' | '
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
   Return: PaletteReturnFields,
+  EscapeLoop: PaletteEscapeLoopFields,
+  ContinueLoop: PaletteContinueLoopFields,
 };
 
 const instruction = computed(() => paletteInstructions[props.type]);
 const isWrap = computed(() => isWrapType(props.type));
 const fieldComponent = computed(() =>
-  isWrap.value ? null : FIELD_COMPONENTS[props.type as Exclude<InstructionType, 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse'>],
+  isWrap.value ? null : FIELD_COMPONENTS[props.type as Exclude<InstructionType, ExcludedType>],
 );
 const typeIcon = computed(() => ICONS[INSTRUCTION_TYPE_ICONS[props.type]]);
 
@@ -75,9 +83,15 @@ function onPointerDown(e: PointerEvent) {
       <component :is="typeIcon" class="instruction-type-icon-inline" />
       <PaletteIfFields v-if="type === 'If'" :instruction="(instruction as Extract<InstructionDto, { type: 'If' }>)" part="head" />
       <PaletteIfElseFields v-else-if="type === 'IfElse'" :instruction="(instruction as Extract<InstructionDto, { type: 'IfElse' }>)" part="head" />
+      <PaletteRepeatFields v-else-if="type === 'Repeat'" :instruction="(instruction as Extract<InstructionDto, { type: 'Repeat' }>)" part="head" />
+      <PaletteForeverFields v-else-if="type === 'Forever'" :instruction="(instruction as Extract<InstructionDto, { type: 'Forever' }>)" part="head" />
+      <PaletteWhileFields v-else-if="type === 'While'" :instruction="(instruction as Extract<InstructionDto, { type: 'While' }>)" part="head" />
     </div>
     <PaletteIfFields v-if="type === 'If'" :instruction="(instruction as Extract<InstructionDto, { type: 'If' }>)" part="body" />
     <PaletteIfElseFields v-else-if="type === 'IfElse'" :instruction="(instruction as Extract<InstructionDto, { type: 'IfElse' }>)" part="body" />
+    <PaletteRepeatFields v-else-if="type === 'Repeat'" :instruction="(instruction as Extract<InstructionDto, { type: 'Repeat' }>)" part="body" />
+    <PaletteForeverFields v-else-if="type === 'Forever'" :instruction="(instruction as Extract<InstructionDto, { type: 'Forever' }>)" part="body" />
+    <PaletteWhileFields v-else-if="type === 'While'" :instruction="(instruction as Extract<InstructionDto, { type: 'While' }>)" part="body" />
     <div class="wrap-foot-bar" />
   </div>
   <div

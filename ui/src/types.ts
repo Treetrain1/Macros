@@ -99,6 +99,9 @@ export function resolveInstructionList(strand: StrandDto | null | undefined, bas
     if (ins.type === 'If' && step.slot === 0) list = ins.body;
     else if (ins.type === 'IfElse' && step.slot === 0) list = ins.then_body;
     else if (ins.type === 'IfElse' && step.slot === 1) list = ins.else_body;
+    else if (ins.type === 'Repeat' && step.slot === 0) list = ins.body;
+    else if (ins.type === 'Forever' && step.slot === 0) list = ins.body;
+    else if (ins.type === 'While' && step.slot === 0) list = ins.body;
     else return [];
   }
   return list ?? [];
@@ -169,7 +172,12 @@ export type InstructionDto =
   | { type: 'CallBlock'; block_id: string; args: ValueDto[] }
   | { type: 'Return'; value: ValueDto }
   | { type: 'If'; condition: ValueDto; body: InstructionDto[] }
-  | { type: 'IfElse'; condition: ValueDto; then_body: InstructionDto[]; else_body: InstructionDto[] };
+  | { type: 'IfElse'; condition: ValueDto; then_body: InstructionDto[]; else_body: InstructionDto[] }
+  | { type: 'Repeat'; count: ValueDto; body: InstructionDto[] }
+  | { type: 'Forever'; body: InstructionDto[] }
+  | { type: 'While'; condition: ValueDto; body: InstructionDto[] }
+  | { type: 'EscapeLoop' }
+  | { type: 'ContinueLoop' };
 
 export type InstructionType = InstructionDto['type'];
 
@@ -193,6 +201,11 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'Return': return { type: 'Return', value: numberValue(0) };
     case 'If': return { type: 'If', condition: blankBoolValue(), body: [] };
     case 'IfElse': return { type: 'IfElse', condition: blankBoolValue(), then_body: [], else_body: [] };
+    case 'Repeat': return { type: 'Repeat', count: numberValue(10), body: [] };
+    case 'Forever': return { type: 'Forever', body: [] };
+    case 'While': return { type: 'While', condition: blankBoolValue(), body: [] };
+    case 'EscapeLoop': return { type: 'EscapeLoop' };
+    case 'ContinueLoop': return { type: 'ContinueLoop' };
     default: return { type: 'Comment', comment: '' };
   }
 }
@@ -204,9 +217,10 @@ export function isHeaderType(type: InstructionDto['type']): boolean {
 }
 
 // "Cap" blocks (the mirror of header blocks) never have anything stacked
-// below them — `Return` ends the strand's control flow — so they render
-// with a flat bottom edge instead of a connector tab.
-export const CAP_TYPES = new Set<InstructionDto['type']>(['Return']);
+// below them — `Return` ends the strand's control flow, and `EscapeLoop`/
+// `ContinueLoop` jump straight to the enclosing loop's boundary — so they
+// render with a flat bottom edge instead of a connector tab.
+export const CAP_TYPES = new Set<InstructionDto['type']>(['Return', 'EscapeLoop', 'ContinueLoop']);
 
 export function isCapType(type: InstructionDto['type']): boolean {
   return CAP_TYPES.has(type);
@@ -215,7 +229,7 @@ export function isCapType(type: InstructionDto['type']): boolean {
 // "Wrap"/C-blocks encase a nested body (or two, for If-Else) between their
 // own top notch and bottom tab — unlike header/cap, they keep both, since
 // they snap above/below like any ordinary block.
-export const WRAP_TYPES = new Set<InstructionDto['type']>(['If', 'IfElse']);
+export const WRAP_TYPES = new Set<InstructionDto['type']>(['If', 'IfElse', 'Repeat', 'Forever', 'While']);
 
 export function isWrapType(type: InstructionDto['type']): boolean {
   return WRAP_TYPES.has(type);

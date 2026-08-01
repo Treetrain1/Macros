@@ -44,6 +44,10 @@ import {
   Blocks,
   GitBranch,
   GitFork,
+  Infinity,
+  RotateCw,
+  LogOut,
+  SkipForward,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -90,6 +94,10 @@ export const ICONS = {
   blocks: Blocks,
   'git-branch': GitBranch,
   'git-fork': GitFork,
+  infinity: Infinity,
+  'rotate-cw': RotateCw,
+  'log-out': LogOut,
+  'skip-forward': SkipForward,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -114,6 +122,11 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   Return: 'corner-up-left',
   If: 'git-branch',
   IfElse: 'git-fork',
+  Repeat: 'repeat',
+  Forever: 'infinity',
+  While: 'rotate-cw',
+  EscapeLoop: 'log-out',
+  ContinueLoop: 'skip-forward',
 };
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
@@ -133,4 +146,9 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   Return: 'Return',
   If: 'If',
   IfElse: 'If-Else',
+  Repeat: 'Repeat',
+  Forever: 'Forever',
+  While: 'While',
+  EscapeLoop: 'Escape Loop',
+  ContinueLoop: 'Continue Loop',
 };

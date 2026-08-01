@@ -504,6 +504,7 @@ pub(crate) fn add_instruction<R: Runtime>(
                 let idx = idx.min(list.len());
                 check_when_ran_attachment(list, idx, &ins, path.len() == 1)?;
                 check_return_placement(mac, strand, &ins)?;
+                check_loop_control_placement(strand, &path, &ins)?;
             }
         }
     }
@@ -578,6 +579,88 @@ fn check_return_placement(mac: &Macro, strand: &Strand, ins: &Instruction) -> Re
     }
 }
 
+/// `escape loop`/`continue loop` only make sense inside a `Repeat`/`Forever`/
+/// `While` body — enforced here (unlike `check_return_placement`, which only
+/// looks at the strand's header) by walking every ancestor bracket named in
+/// `path` and checking whether any of them is a loop instruction.
+fn check_loop_control_placement(strand: &Strand, path: &[PathStep], ins: &Instruction) -> Result<(), String> {
+    if !matches!(ins, Instruction::EscapeLoop | Instruction::ContinueLoop) {
+        return Ok(());
+    }
+    let mut list: &[Instruction] = &strand.instructions;
+    for step in path {
+        let Some(slot) = step.slot else { break };
+        let Some(ancestor) = list.get(step.index) else { break };
+        if matches!(ancestor, Instruction::Repeat { .. } | Instruction::Forever { .. } | Instruction::While { .. }) {
+            return Ok(());
+        }
+        let Some(body) = ancestor.body(slot) else { break };
+        list = body;
+    }
+    Err("An Escape Loop/Continue Loop block can only be used inside a Repeat/Forever/While loop".to_string())
+}
+
+#[cfg(test)]
+mod loop_control_placement_tests {
+    use super::*;
+
+    fn strand_with(instructions: Vec<Instruction>) -> Strand {
+        Strand { id: "s1".into(), x: 0, y: 0, instructions }
+    }
+
+    #[test]
+    fn non_loop_control_instructions_are_always_allowed() {
+        let strand = strand_with(vec![Instruction::WhenRan]);
+        assert!(check_loop_control_placement(&strand, &[PathStep { index: 1, slot: None }], &Instruction::Comment("x".into())).is_ok());
+    }
+
+    #[test]
+    fn escape_loop_at_strand_top_level_is_rejected() {
+        let strand = strand_with(vec![Instruction::WhenRan]);
+        let path = vec![PathStep { index: 1, slot: None }];
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_err());
+    }
+
+    #[test]
+    fn escape_loop_directly_inside_repeat_body_is_allowed() {
+        let strand = strand_with(vec![
+            Instruction::WhenRan,
+            Instruction::Repeat { count: Value::number(3.0), body: vec![] },
+        ]);
+        // Path: strand[1] (Repeat) -> slot 0 (its body) -> insertion index 0.
+        let path = vec![PathStep { index: 1, slot: Some(0) }, PathStep { index: 0, slot: None }];
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::ContinueLoop).is_ok());
+    }
+
+    #[test]
+    fn escape_loop_inside_if_inside_while_is_allowed() {
+        let strand = strand_with(vec![
+            Instruction::WhenRan,
+            Instruction::While {
+                condition: Value::Bool,
+                body: vec![Instruction::If { condition: Value::Bool, body: vec![] }],
+            },
+        ]);
+        // strand[1] (While) -> slot 0 -> [0] (If) -> slot 0 -> insertion index 0.
+        let path = vec![
+            PathStep { index: 1, slot: Some(0) },
+            PathStep { index: 0, slot: Some(0) },
+            PathStep { index: 0, slot: None },
+        ];
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_ok());
+    }
+
+    #[test]
+    fn escape_loop_inside_if_with_no_enclosing_loop_is_rejected() {
+        let strand = strand_with(vec![
+            Instruction::WhenRan,
+            Instruction::If { condition: Value::Bool, body: vec![] },
+        ]);
+        let path = vec![PathStep { index: 1, slot: Some(0) }, PathStep { index: 0, slot: None }];
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_err());
+    }
+}
+
 #[tauri::command]
 pub(crate) fn edit_instruction<R: Runtime>(
     state: State<SharedState>,
@@ -624,6 +707,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
         (Instruction::If { condition, .. }, FieldId::Condition) => Some(condition),
         (Instruction::IfElse { condition, .. }, FieldId::Condition) => Some(condition),
+        (Instruction::While { condition, .. }, FieldId::Condition) => Some(condition),
+        (Instruction::Repeat { count, .. }, FieldId::RepeatCount) => Some(count),
         _ => None,
     }
 }

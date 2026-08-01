@@ -157,7 +157,25 @@ impl Instruction {
                     ins.rename_var(old, new);
                 }
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+            Instruction::Repeat { count, body } => {
+                count.rename_var(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_var(old, new);
+                }
+            }
+            Instruction::Forever { body } => {
+                for ins in body.iter_mut() {
+                    ins.rename_var(old, new);
+                }
+            }
+            Instruction::While { condition, body } => {
+                condition.rename_var(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_var(old, new);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
+            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
         }
     }
 
@@ -189,7 +207,25 @@ impl Instruction {
                     ins.migrate_bool_slots();
                 }
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+            Instruction::Repeat { count, body } => {
+                count.migrate_bool_slots(false);
+                for ins in body.iter_mut() {
+                    ins.migrate_bool_slots();
+                }
+            }
+            Instruction::Forever { body } => {
+                for ins in body.iter_mut() {
+                    ins.migrate_bool_slots();
+                }
+            }
+            Instruction::While { condition, body } => {
+                condition.migrate_bool_slots(true);
+                for ins in body.iter_mut() {
+                    ins.migrate_bool_slots();
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
+            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
         }
     }
 
@@ -217,7 +253,25 @@ impl Instruction {
                     ins.rename_param(old, new);
                 }
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+            Instruction::Repeat { count, body } => {
+                count.rename_param(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_param(old, new);
+                }
+            }
+            Instruction::Forever { body } => {
+                for ins in body.iter_mut() {
+                    ins.rename_param(old, new);
+                }
+            }
+            Instruction::While { condition, body } => {
+                condition.rename_param(old, new);
+                for ins in body.iter_mut() {
+                    ins.rename_param(old, new);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
+            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
         }
     }
 
@@ -251,7 +305,25 @@ impl Instruction {
                     ins.for_each_call_args_mut(block_id, f);
                 }
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+            Instruction::Repeat { count, body } => {
+                count.for_each_call_args_mut(block_id, f);
+                for ins in body.iter_mut() {
+                    ins.for_each_call_args_mut(block_id, f);
+                }
+            }
+            Instruction::Forever { body } => {
+                for ins in body.iter_mut() {
+                    ins.for_each_call_args_mut(block_id, f);
+                }
+            }
+            Instruction::While { condition, body } => {
+                condition.for_each_call_args_mut(block_id, f);
+                for ins in body.iter_mut() {
+                    ins.for_each_call_args_mut(block_id, f);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
+            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
         }
     }
 
@@ -280,7 +352,25 @@ impl Instruction {
                     ins.scrub_block_calls(block_id);
                 }
             }
-            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_) => {}
+            Instruction::Repeat { count, body } => {
+                count.scrub_block_calls(block_id);
+                for ins in body.iter_mut() {
+                    ins.scrub_block_calls(block_id);
+                }
+            }
+            Instruction::Forever { body } => {
+                for ins in body.iter_mut() {
+                    ins.scrub_block_calls(block_id);
+                }
+            }
+            Instruction::While { condition, body } => {
+                condition.scrub_block_calls(block_id);
+                for ins in body.iter_mut() {
+                    ins.scrub_block_calls(block_id);
+                }
+            }
+            Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
+            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
         }
     }
 
@@ -290,19 +380,27 @@ impl Instruction {
             (Instruction::If { body, .. }, 0) => Some(body),
             (Instruction::IfElse { then_body, .. }, 0) => Some(then_body),
             (Instruction::IfElse { else_body, .. }, 1) => Some(else_body),
+            (Instruction::Repeat { body, .. }, 0) => Some(body),
+            (Instruction::Forever { body }, 0) => Some(body),
+            (Instruction::While { body, .. }, 0) => Some(body),
             _ => None,
         }
     }
 
     /// The nested instruction list for compound-instruction `slot` — `If`'s
     /// single body (`slot == 0`), or `IfElse`'s `then_body`/`else_body`
-    /// (`slot == 0`/`1`). `None` for anything else (including an out-of-range
-    /// slot). The one primitive nested-instruction addressing builds on.
+    /// (`slot == 0`/`1`); `Repeat`/`Forever`/`While` each have a single body
+    /// at `slot == 0`, same as `If`. `None` for anything else (including an
+    /// out-of-range slot). The one primitive nested-instruction addressing
+    /// builds on.
     pub fn body_mut(&mut self, slot: u8) -> Option<&mut Vec<Instruction>> {
         match (self, slot) {
             (Instruction::If { body, .. }, 0) => Some(body),
             (Instruction::IfElse { then_body, .. }, 0) => Some(then_body),
             (Instruction::IfElse { else_body, .. }, 1) => Some(else_body),
+            (Instruction::Repeat { body, .. }, 0) => Some(body),
+            (Instruction::Forever { body }, 0) => Some(body),
+            (Instruction::While { body, .. }, 0) => Some(body),
             _ => None,
         }
     }
@@ -606,6 +704,21 @@ pub enum Instruction {
     If { condition: Value, body: Vec<Instruction> },
     /// `if <condition> then { then_body } else { else_body }`.
     IfElse { condition: Value, then_body: Vec<Instruction>, else_body: Vec<Instruction> },
+    /// `repeat <count> { body }` — runs `body` `count` times (rounded,
+    /// clamped to non-negative).
+    Repeat { count: Value, body: Vec<Instruction> },
+    /// `forever { body }` — runs `body` in an unconditional loop; only ends
+    /// via `EscapeLoop`, a `Return` inside it, or the run being stopped.
+    Forever { body: Vec<Instruction> },
+    /// `while <condition> { body }` — re-evaluates `condition` before every
+    /// iteration, running `body` for as long as it's truthy.
+    While { condition: Value, body: Vec<Instruction> },
+    /// Stops the nearest enclosing `Repeat`/`Forever`/`While` immediately.
+    /// A no-op if not inside a loop.
+    EscapeLoop,
+    /// Skips straight to the next iteration of the nearest enclosing
+    /// `Repeat`/`Forever`/`While`. A no-op if not inside a loop.
+    ContinueLoop,
 }
 
 impl std::hash::Hash for Macro {
@@ -642,6 +755,11 @@ impl std::hash::Hash for Instruction {
                 then_body.hash(state);
                 else_body.hash(state);
             }
+            Self::Repeat { count, body } => { 12u8.hash(state); count.hash(state); body.hash(state); }
+            Self::Forever { body } => { 13u8.hash(state); body.hash(state); }
+            Self::While { condition, body } => { 14u8.hash(state); condition.hash(state); body.hash(state); }
+            Self::EscapeLoop => { 15u8.hash(state); }
+            Self::ContinueLoop => { 16u8.hash(state); }
         }
     }
 }
@@ -660,6 +778,11 @@ enum InstructionDe {
     Return(Value),
     If { condition: Value, body: Vec<Instruction> },
     IfElse { condition: Value, then_body: Vec<Instruction>, else_body: Vec<Instruction> },
+    Repeat { count: Value, body: Vec<Instruction> },
+    Forever { body: Vec<Instruction> },
+    While { condition: Value, body: Vec<Instruction> },
+    EscapeLoop,
+    ContinueLoop,
 }
 
 #[derive(Deserialize)]
@@ -710,6 +833,11 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Return(v) => Instruction::Return(v),
             InstructionDe::If { condition, body } => Instruction::If { condition, body },
             InstructionDe::IfElse { condition, then_body, else_body } => Instruction::IfElse { condition, then_body, else_body },
+            InstructionDe::Repeat { count, body } => Instruction::Repeat { count, body },
+            InstructionDe::Forever { body } => Instruction::Forever { body },
+            InstructionDe::While { condition, body } => Instruction::While { condition, body },
+            InstructionDe::EscapeLoop => Instruction::EscapeLoop,
+            InstructionDe::ContinueLoop => Instruction::ContinueLoop,
         }
     }
 }
@@ -952,5 +1080,21 @@ mod tests {
         assert_eq!(if_else.body_mut(0), Some(&mut vec![Instruction::Comment("then".into())]));
         assert_eq!(if_else.body_mut(1), Some(&mut vec![Instruction::Comment("else".into())]));
         assert_eq!(if_else.body_mut(2), None);
+    }
+
+    #[test]
+    fn body_mut_addresses_loop_slots() {
+        let mut repeat = Instruction::Repeat { count: Value::number(3.0), body: vec![Instruction::Comment("a".into())] };
+        assert_eq!(repeat.body_mut(0), Some(&mut vec![Instruction::Comment("a".into())]));
+        assert_eq!(repeat.body_mut(1), None);
+
+        let mut forever = Instruction::Forever { body: vec![Instruction::Comment("b".into())] };
+        assert_eq!(forever.body_mut(0), Some(&mut vec![Instruction::Comment("b".into())]));
+
+        let mut while_ins = Instruction::While { condition: Value::Bool, body: vec![Instruction::Comment("c".into())] };
+        assert_eq!(while_ins.body_mut(0), Some(&mut vec![Instruction::Comment("c".into())]));
+
+        assert_eq!(Instruction::EscapeLoop.body_mut(0), None);
+        assert_eq!(Instruction::ContinueLoop.body_mut(0), None);
     }
 }

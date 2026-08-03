@@ -233,10 +233,15 @@ fn stop_recording_key() -> Option<String> {
     })
 }
 
-pub fn start_grab_thread() {
-    static STARTED: OnceLock<()> = OnceLock::new();
-    STARTED.get_or_init(|| {
-        backend::start_capture(Box::new(move |event: CaptureEvent, ts: CaptureTimestamp| {
+/// Builds the same capture callback `start_grab_thread()` installs on the
+/// platform's native hook, for a caller that has its own event source
+/// instead (e.g. the Wine bridge, which gets real input from a native
+/// Linux helper process rather than from `WH_KEYBOARD_LL`/`WH_MOUSE_LL`,
+/// which don't see real host input under Wine). Identical recording-queue
+/// bookkeeping and cursor tracking either way — this is the one place that
+/// logic lives.
+pub fn build_capture_callback() -> Box<dyn FnMut(CaptureEvent, CaptureTimestamp) -> CaptureDecision + Send + 'static> {
+    Box::new(move |event: CaptureEvent, ts: CaptureTimestamp| {
             match &event {
                 CaptureEvent::KeyPress(key) => {
                     let bit = key.modifier_bit();
@@ -325,7 +330,13 @@ pub fn start_grab_thread() {
             }
 
             CaptureDecision::Passthrough
-        }));
+    })
+}
+
+pub fn start_grab_thread() {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        backend::start_capture(build_capture_callback());
     });
 }
 

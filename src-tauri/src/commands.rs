@@ -1592,7 +1592,10 @@ pub(crate) fn stop_recording<R: Runtime>(state: State<SharedState>, app: tauri::
     Ok(())
 }
 
-fn stop_recording_impl(s: &mut crate::state::AppState) {
+/// Returns the macro to auto-save (an owned clone), if recorded instructions
+/// actually got appended — saving itself happens after the state lock is
+/// released, see `stop_recording_internal`.
+fn stop_recording_impl(s: &mut crate::state::AppState) -> Option<Macro> {
     recording::RECORDING_ACTIVE.store(false, Ordering::Relaxed);
     s.recording_phase = RecordingPhase::Idle;
     // Cancel any in-progress countdown
@@ -1603,21 +1606,38 @@ fn stop_recording_impl(s: &mut crate::state::AppState) {
         .unwrap()
         .drain(..)
         .collect();
-    if !instructions.is_empty() {
-        push_undo(s);
-        if let Some(mac) = &mut s.current_macro {
-            mac.recording_target_mut().instructions.extend(instructions);
-            auto_save(s);
-        }
+    if instructions.is_empty() {
+        return None;
     }
+    push_undo(s);
+    let mac = s.current_macro.as_mut()?;
+    mac.recording_target_mut().instructions.extend(instructions);
+    Some(mac.clone())
 }
 
 /// Called from the QueueSignal background task when the OS-level hook signals stop.
 pub(crate) fn stop_recording_internal<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) {
-    if let Ok(mut s) = state.lock() {
-        stop_recording_impl(&mut s);
-        emit_state_updated(app, &s);
+    let (to_save, dto) = {
+        let Ok(mut s) = state.lock() else { return };
+        let to_save = stop_recording_impl(&mut s);
+        (to_save, build_state_dto(&s))
+    };
+    // The disk write (and the JSON-serialize-plus-emit below) run after the
+    // state lock is released. GD's IPC commands go through this same lock
+    // (`StartRecordingImmediate` needs it just to capture its timing
+    // baseline via `reset_timing()`), so holding it across a save here was
+    // enough to make the *next* attempt's start signal land inconsistently
+    // whenever it followed close behind this one — exactly the pattern
+    // rapid retries produce.
+    if let Some(mac) = to_save {
+        if let Err(e) = mac.save() {
+            warn!("Failed to auto-save macro: {e}");
+        } else {
+            config::set_selected_macro_id(Some(&mac.id));
+        }
     }
+    use tauri::Emitter;
+    let _ = app.emit("state-updated", dto);
 }
 
 #[tauri::command]

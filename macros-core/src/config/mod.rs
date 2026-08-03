@@ -11,6 +11,30 @@ pub const GLOBAL_HOTKEYS_KEY: &str = "global_hotkeys";
 
 use crate::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo, MOD_ALT, MOD_CTRL};
 use crate::macros::Macro;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static CONFIG_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Redirects every `config::*`/`Macro::save`/`Macro::remove` file lookup to
+/// `dir/Macros` instead of the OS config directory — for an embedder (e.g.
+/// the Geode mod) whose process sees a different filesystem namespace than
+/// wherever the macro files actually live (a Wine prefix's `Z:` mapping
+/// notwithstanding, this keeps the path explicit rather than assumed).
+/// First caller wins; must be called, if at all, before any other
+/// `config::*` or `recording::*` function.
+pub fn set_config_dir_override(dir: PathBuf) {
+    let _ = CONFIG_DIR_OVERRIDE.set(dir);
+}
+
+pub(crate) fn config_root() -> Result<PathBuf, String> {
+    if let Some(dir) = CONFIG_DIR_OVERRIDE.get() {
+        return Ok(dir.join(APP_ID));
+    }
+    dirs::config_dir()
+        .map(|d| d.join(APP_ID))
+        .ok_or_else(|| "Unable to resolve config directory".to_string())
+}
 
 impl Macro {
     pub fn add(mut self) -> Result<(), String> {

@@ -17,8 +17,7 @@ pub struct AppSettings {
 }
 
 fn settings_path() -> Result<PathBuf, String> {
-    let mut p = dirs::config_dir().ok_or_else(|| "no config directory".to_string())?;
-    p.push(super::APP_ID);
+    let mut p = super::config_root()?;
     std::fs::create_dir_all(&p)
         .map_err(|e| format!("Failed to create config dir: {e}"))?;
     p.push("settings.json");

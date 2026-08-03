@@ -1,4 +1,4 @@
-use crate::state::{emit_state_updated, SharedState};
+use crate::state::{build_state_dto, SharedState};
 use macros_core::macros::backend::InputBackend;
 use macros_core::macros::run_registry;
 use macros_core::macros::runner::VariableStore;
@@ -13,18 +13,27 @@ use tracing::warn;
 /// macro and saves it to disk. Called once per run/loop finish rather than
 /// per-instruction, and a no-op if the macro was switched away mid-run.
 fn persist_variables<R: Runtime>(shared_state: &SharedState, app: &AppHandle<R>, macro_id: &str, variables: &VariableStore) {
-    let Ok(mut s) = shared_state.lock() else { return };
-    let Some(mac) = s.current_macro.as_mut() else { return };
-    if mac.id != macro_id {
-        return;
-    }
-    if let Ok(values) = variables.lock() {
-        mac.sync_variables_from(&values);
-    }
-    if let Err(e) = mac.save() {
+    let (mac_to_save, dto) = {
+        let Ok(mut s) = shared_state.lock() else { return };
+        let Some(mac) = s.current_macro.as_mut() else { return };
+        if mac.id != macro_id {
+            return;
+        }
+        if let Ok(values) = variables.lock() {
+            mac.sync_variables_from(&values);
+        }
+        (mac.clone(), build_state_dto(&s))
+    };
+    // Saved after the state lock is released. This runs every time a macro
+    // run or loop finishes — right when GD is likely to fire the next
+    // start/run command over IPC — and that command needs this same lock
+    // just to touch its own state, so holding it through a disk write here
+    // was enough to make the next command's timing land inconsistently.
+    if let Err(e) = mac_to_save.save() {
         warn!("Failed to persist variable values: {e}");
     }
-    emit_state_updated(app, &s);
+    use tauri::Emitter;
+    let _ = app.emit("state-updated", dto);
 }
 
 pub(crate) fn into_loop_task<R: Runtime>(

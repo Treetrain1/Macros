@@ -6,6 +6,15 @@ edition.workspace = true
 [lib]
 name = "macros_core"
 
+[features]
+default = ["ipc", "updater"]
+# Loopback TCP control server; not needed by an embedder (e.g. the Geode
+# mod) that calls into this crate directly and in-process.
+ipc = ["tokio/rt", "tokio/rt-multi-thread", "tokio/macros", "tokio/net", "tokio/io-util", "tokio/time"]
+# Self-update mechanism for the standalone desktop app; inappropriate for a
+# copy of this crate embedded inside another process (e.g. a game).
+updater = ["dep:self_update", "dep:http"]
+
 [dependencies]
 tracing.workspace = true
 serde.workspace = true
@@ -15,6 +24,7 @@ uuid.workspace = true
 rand.workspace = true
 tokio.workspace = true
 spin_sleep.workspace = true
+bincode.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -25,8 +35,8 @@ evdev.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 enigo.workspace = true
-self_update.workspace = true
-http.workspace = true
+self_update = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics.workspace = true

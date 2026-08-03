@@ -66,6 +66,14 @@ pub async fn run_server(port: u16, mut shutdown: watch::Receiver<bool>) {
             accept_result = listener.accept() => {
                 match accept_result {
                     Ok((socket, _addr)) => {
+                        // Loopback commands are small (a JSON line or two) and
+                        // latency-sensitive (game triggers a recording at an
+                        // exact frame); Nagle's algorithm buffering them
+                        // against delayed ACKs is what causes intermittent
+                        // tens-of-ms stalls otherwise.
+                        if let Err(err) = socket.set_nodelay(true) {
+                            warn!("IPC: failed to set TCP_NODELAY: {err}");
+                        }
                         tokio::spawn(handle_connection(socket, shutdown.clone()));
                     }
                     Err(err) => warn!("IPC: accept error: {err}"),

@@ -1,4 +1,3 @@
-use super::APP_ID;
 use crate::macros::Macro;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,15 +6,8 @@ use tracing::warn;
 const MACROS_DIR_NAME: &str = "macros";
 const MACRO_FILE_EXTENSION: &str = "json";
 
-fn app_config_dir() -> Result<PathBuf, String> {
-    let mut config_dir = dirs::config_dir()
-        .ok_or_else(|| "Unable to resolve config directory".to_string())?;
-    config_dir.push(APP_ID);
-    Ok(config_dir)
-}
-
 fn ensure_macros_dir() -> Result<PathBuf, String> {
-    let mut path = app_config_dir()?;
+    let mut path = super::config_root()?;
     path.push(MACROS_DIR_NAME);
     fs::create_dir_all(&path)
         .map_err(|err| format!("Failed to create macros directory '{}': {}", path.display(), err))?;

@@ -1830,24 +1830,31 @@ body.sidebar-resizing {
   pointer-events: none;
   opacity: 0.92;
 }
-.strand-snap-preview {
-  position: fixed;
-  z-index: 19;
-  pointer-events: none;
-  opacity: 0.4;
-}
+/* Inserted as a real sibling among a target `.instruction-list`'s own rows
+   (see canvasDrag.ts's showSnapPreview) — not a `position: fixed` overlay —
+   so it's the class added directly onto the cloned `.instruction-row`
+   itself, not onto some wrapping ancestor. Being a genuine flex child is
+   what makes the rows after it shift down and an ancestor `.wrap-mouth`
+   grow to fit, for free, via ordinary layout. */
+.strand-snap-preview,
 .strand-snap-preview .instruction-row {
   filter: none !important;
   cursor: default;
+}
+.strand-snap-preview {
+  pointer-events: none;
+  opacity: 0.4;
 }
 .strand-snap-preview .instruction-shape {
   background: rgba(var(--accent-rgb), 0.2);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+.strand-snap-preview::before,
 .strand-snap-preview .instruction-row::before {
   display: none;
 }
+.strand-snap-preview::after,
 .strand-snap-preview .instruction-row::after {
   background: rgba(var(--accent-rgb), 0.15);
 }

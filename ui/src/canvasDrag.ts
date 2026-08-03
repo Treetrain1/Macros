@@ -379,7 +379,14 @@ const SNAP_THRESHOLD = 36;
 
 // Shared by strand-drags and palette-drags; writes the result onto
 // `target.snap` and updates the shared snap preview.
-interface SnapCandidate { targetId: string; path: InstrPath; dist: number; y: number; left: number; width: number }
+interface SnapCandidate { targetId: string; path: InstrPath; dist: number; container: HTMLElement }
+
+// A container's *real* direct-child rows — excludes the snap-preview clone
+// itself (see showSnapPreview) so it never counts as a row when computing
+// boundaries/indices, even though it shares the `.instruction-row` class.
+function realRows(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.children).filter((el): el is HTMLElement => el.classList.contains('instruction-row') && el !== snapPreviewEl);
+}
 
 // Scans every `.instruction-list` container on the canvas (a strand's own
 // top level, or a nested If/IfElse body) independently — each contributes
@@ -409,7 +416,7 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; p
     const basePath = parseBasePath(container);
     if (!basePath) continue;
 
-    const rows = Array.from(container.children).filter((el): el is HTMLElement => el.classList.contains('instruction-row'));
+    const rows = realRows(container);
     const boundaries = rows.map(r => r.getBoundingClientRect().top);
     boundaries.push(rows.length ? rows[rows.length - 1].getBoundingClientRect().bottom : containerRect.top + 8);
 
@@ -428,11 +435,7 @@ function updateSnapTarget(e: PointerEvent, target: { snap: { targetId: string; p
       const refY = ghostRect ? ghostRect.top : e.clientY;
       const dist = Math.abs(refY - y);
       if (dist <= SNAP_THRESHOLD && (best === null || dist < best.dist)) {
-        // The last row's margin-bottom: -6px means the next item starts 6px
-        // above its border-box bottom. That's a canvas-space constant, but
-        // `y` is a zoomed screen coordinate — scale the offset too.
-        const insY = idx === rows.length ? y - 6 * canvasZoom : y;
-        best = { targetId: id, path: [...basePath, { index: idx }], dist, y: insY, left: containerRect.left, width: containerRect.width };
+        best = { targetId: id, path: [...basePath, { index: idx }], dist, container };
       }
     }
   }
@@ -454,30 +457,37 @@ function clearSnapPreview() {
   }
 }
 
+// Inserted as a genuine sibling among the target list's real rows (not a
+// `position: fixed` overlay floating on top of them) — a translucent clone
+// of only the *first* row being dragged, so it participates in the same
+// flex-column flow as everything else. That single change gets two things
+// for free: every row after the drop point visibly shifts down to make
+// room (exactly as if the drop had already happened), and an ancestor
+// `.wrap-mouth` (If/IfElse/Repeat/Forever/While) auto-grows to fit it,
+// since it's just another flex child now. Cloning only the ghost's first
+// row — not the whole dragged strand — is what caps the gap at one block
+// even when a long multi-block strand is being dragged.
 function showSnapPreview(best: SnapCandidate, ghostEl?: HTMLElement) {
-  if (snapPreviewEl) snapPreviewEl.remove();
+  clearSnapPreview();
 
   if (!ghostEl) return;
   const ghostRow = ghostEl.querySelector('.instruction-row');
   if (!ghostRow) return;
 
-  const preview = document.createElement('div');
-  preview.className = 'strand-snap-preview';
-
   const clone = ghostRow.cloneNode(true) as HTMLElement;
-  clone.style.marginBottom = '0';
-  preview.appendChild(clone);
+  clone.classList.add('strand-snap-preview');
+  // The clone may itself be a wrap block whose real nested body carries
+  // `.instruction-list` markers (with their own data-strand-id/data-path,
+  // copied verbatim by cloneNode) — strip those so updateSnapTarget's own
+  // `.instruction-list` scan never mistakes this inert preview for a real
+  // drop target.
+  clone.querySelectorAll('.instruction-list').forEach(el => el.classList.remove('instruction-list'));
 
-  preview.style.left = `${best.left}px`;
-  preview.style.top = `${best.y}px`;
-  if (canvasZoom !== 1) {
-    preview.style.transform = `scale(${canvasZoom})`;
-    preview.style.transformOrigin = '0 0';
-  }
+  const idx = best.path[best.path.length - 1].index;
+  const rows = realRows(best.container);
+  best.container.insertBefore(clone, rows[idx] ?? null);
 
-  document.body.appendChild(preview);
-
-  snapPreviewEl = preview;
+  snapPreviewEl = clone;
 }
 
 export function clientToCanvas(clientX: number, clientY: number): [number, number] {

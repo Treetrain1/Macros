@@ -1,3 +1,4 @@
+pub(crate) mod battery_watch;
 pub(crate) mod commands;
 #[cfg(feature = "dev-bridge")]
 pub(crate) mod dev_bridge;
@@ -187,6 +188,9 @@ pub fn run() {
                 let bridge_handle = app.handle().clone();
                 tauri::async_runtime::spawn(crate::dev_bridge::run(bridge_handle));
             }
+
+            // ── Background battery-event watcher (see src/battery_watch.rs) ──
+            battery_watch::start(Arc::clone(&shared), app.handle().clone());
 
             // ── QueueSignal consumer (replaces iced hotkey subscription) ──
             let app_handle = app.handle().clone();

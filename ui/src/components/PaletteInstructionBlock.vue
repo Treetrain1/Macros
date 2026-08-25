@@ -14,6 +14,8 @@ import { paletteInstructions } from '../paletteState';
 import { beginPaletteDrag } from '../canvasDrag';
 import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
 import PaletteWhenRanFields from './fields/palette/PaletteWhenRanFields.vue';
+import PaletteWhenBatteryDischargedToFields from './fields/palette/PaletteWhenBatteryDischargedToFields.vue';
+import PaletteWhenBatteryChargedToFields from './fields/palette/PaletteWhenBatteryChargedToFields.vue';
 import PaletteWaitFields from './fields/palette/PaletteWaitFields.vue';
 import PaletteTextFields from './fields/palette/PaletteTextFields.vue';
 import PaletteKeyFields from './fields/palette/PaletteKeyFields.vue';
@@ -46,6 +48,8 @@ const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'Call
 type ExcludedType = 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
 const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Component> = {
   WhenRan: PaletteWhenRanFields,
+  WhenBatteryDischargedTo: PaletteWhenBatteryDischargedToFields,
+  WhenBatteryChargedTo: PaletteWhenBatteryChargedToFields,
   Wait: PaletteWaitFields,
   Text: PaletteTextFields,
   Key: PaletteKeyFields,
@@ -97,7 +101,7 @@ function onPointerDown(e: PointerEvent) {
   <div
     v-else
     class="instruction-row palette-prefab"
-    :class="{ 'instruction-row-when-ran': type === 'WhenRan', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
+    :class="{ 'instruction-row-when-ran': type === 'WhenRan' || type === 'WhenBatteryDischargedTo' || type === 'WhenBatteryChargedTo', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
     @pointerdown="onPointerDown"
   >
     <div class="instruction-shape">

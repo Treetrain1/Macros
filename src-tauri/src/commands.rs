@@ -709,6 +709,8 @@ fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
         (Instruction::IfElse { condition, .. }, FieldId::Condition) => Some(condition),
         (Instruction::While { condition, .. }, FieldId::Condition) => Some(condition),
         (Instruction::Repeat { count, .. }, FieldId::RepeatCount) => Some(count),
+        (Instruction::WhenBatteryDischargedTo(v), FieldId::BatteryDischargeThreshold) => Some(v),
+        (Instruction::WhenBatteryChargedTo(v), FieldId::BatteryChargeThreshold) => Some(v),
         _ => None,
     }
 }
@@ -727,11 +729,13 @@ fn resolve_location_mut<'a>(mac: &'a mut Macro, location: &ValueLocation) -> Opt
     }
 }
 
-/// `MoveMouseX/Y` and `ScrollAmount` are integer-only fields; everything
-/// else (including floating value blocks) allows decimals.
+/// `MoveMouseX/Y`, `ScrollAmount`, and the battery-percentage thresholds are
+/// integer-only fields; everything else (including floating value blocks)
+/// allows decimals.
 fn location_requires_integer(location: &ValueLocation) -> bool {
     matches!(location, ValueLocation::Field { field_id, .. }
-        if matches!(field_id, FieldId::MoveMouseX | FieldId::MoveMouseY | FieldId::ScrollAmount))
+        if matches!(field_id, FieldId::MoveMouseX | FieldId::MoveMouseY | FieldId::ScrollAmount
+            | FieldId::BatteryDischargeThreshold | FieldId::BatteryChargeThreshold))
 }
 
 /// Drops buffered invalid-text entries at or beneath `location` — used

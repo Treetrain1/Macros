@@ -156,6 +156,12 @@ fn spin_sleeper() -> &'static SpinSleeper {
 /// instead of only being noticed once the full wait elapses.
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(15);
 
+/// `true` once a stop has been requested on `flag` (the flag itself holds
+/// "should keep running", so this is just its negation behind the lock).
+fn stop_requested(flag: &Arc<Mutex<bool>>) -> bool {
+    !flag.lock().map(|g| *g).unwrap_or(false)
+}
+
 impl Macro {
     /// Runs every "When Ran" entry-point strand concurrently on its own
     /// thread, sharing one `stop_flag`. A custom block's header strand isn't
@@ -207,7 +213,13 @@ impl Macro {
                         block_table.insert(id.clone(), BlockRuntime { input_names, body });
                     }
                 }
-                _ if strand.starts_with_when_ran() => entry_strands.push(strand.instructions),
+                Some(Instruction::WhenRan) => entry_strands.push(strand.instructions),
+                // Battery-triggered strands aren't run here at all — they're
+                // driven by the app's own background battery watcher (e.g.
+                // src-tauri's `battery_watch` module), which fires just their
+                // body directly once the battery condition holds, independent
+                // of Run/Loop. A manual Run intentionally leaves them alone.
+                Some(Instruction::WhenBatteryDischargedTo(_)) | Some(Instruction::WhenBatteryChargedTo(_)) => {}
                 _ => {}
             }
         }
@@ -329,10 +341,6 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
     // that strand's `initial_offset` — see `Macro::run_with_offset`.
     let mut deadline = start;
 
-    let stop_requested = |flag: &Arc<Mutex<bool>>| -> bool {
-        !flag.lock().map(|g| *g).unwrap_or(false)
-    };
-
     let normalize_modifier_key = |key: MacroKey| -> MacroKey {
         match key {
             MacroKey::Shift => MacroKey::LShift,
@@ -356,6 +364,14 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
             Instruction::Comment(_) => {}
             Instruction::WhenRan => {}
             Instruction::BlockHeader(_) => {}
+            // Header-only markers, same as `WhenRan`/`BlockHeader` — never
+            // actually reached in practice (`run_with_offset` excludes these
+            // strands from `entry_strands` entirely, and the battery watcher
+            // that does fire them starts from `strand.instructions[1..]`,
+            // skipping the header). Handled here defensively so the match
+            // stays total.
+            Instruction::WhenBatteryDischargedTo(_) => {}
+            Instruction::WhenBatteryChargedTo(_) => {}
             Instruction::Return(value) => {
                 let resolved = ctx.resolve(value, depth)?;
                 return Ok(Flow::Return(resolved.eval()?));

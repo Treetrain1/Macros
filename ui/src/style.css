@@ -609,9 +609,10 @@ body.sidebar-resizing {
 
 .strand-body { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 
-/* "When Ran" is a normal instruction row (see .instruction-row) — it's
-   draggable, splittable and trashable exactly like every other block. It
-   only gets a quiet accent tint on its icon/label so it still reads as an
+/* "When Ran" (and the other entry-point headers: WhenBatteryDischargedTo/
+   WhenBatteryChargedTo) is a normal instruction row (see .instruction-row) —
+   it's draggable, splittable and trashable exactly like every other block.
+   It only gets a quiet accent tint on its icon/label so it still reads as an
    entry point at a glance; no outline or glow (that used to make the old
    fixed root marker feel like an error state). */
 .instruction-row-when-ran .instruction-shape { color: var(--accent); }

@@ -48,6 +48,8 @@ import {
   RotateCw,
   LogOut,
   SkipForward,
+  BatteryWarning,
+  BatteryCharging,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -98,6 +100,8 @@ export const ICONS = {
   'rotate-cw': RotateCw,
   'log-out': LogOut,
   'skip-forward': SkipForward,
+  'battery-warning': BatteryWarning,
+  'battery-charging': BatteryCharging,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -105,6 +109,8 @@ export type IconName = keyof typeof ICONS;
 /** Icon for each instruction type, used by the sidebar palette. */
 export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   WhenRan: 'play',
+  WhenBatteryDischargedTo: 'battery-warning',
+  WhenBatteryChargedTo: 'battery-charging',
   Wait: 'clock',
   Text: 'text-cursor',
   Key: 'key',
@@ -131,6 +137,8 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
 
 export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   WhenRan: 'When Ran',
+  WhenBatteryDischargedTo: 'When Battery Discharged To',
+  WhenBatteryChargedTo: 'When Battery Charged To',
   Wait: 'Wait',
   Text: 'Text',
   Key: 'Key',

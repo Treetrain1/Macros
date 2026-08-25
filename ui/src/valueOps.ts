@@ -64,6 +64,8 @@ export const OPERATOR_KINDS: OperatorKindSpec[] = [
   { kind: 'Not', op: 'Not', arity: 1, argTypes: ['bool'], resultType: 'bool', prefix: 'not' },
   { kind: 'True', op: 'True', arity: 0, argTypes: [], resultType: 'bool', prefix: 'true' },
   { kind: 'False', op: 'False', arity: 0, argTypes: [], resultType: 'bool', prefix: 'false' },
+  // Zero-arity, like NewLine/Tab — evaluates to the live system battery percentage.
+  { kind: 'BatteryPercentage', op: 'BatteryPercentage', arity: 0, argTypes: [], resultType: 'number', prefix: 'battery percentage' },
 ];
 
 export function specForKind(kind: ValueKind): OperatorKindSpec | undefined {

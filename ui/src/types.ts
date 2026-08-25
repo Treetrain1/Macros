@@ -15,7 +15,9 @@ export type ValueOp =
   | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case'
   // Boolean: comparisons, logic, and the two standalone true/false literals
   // (separate blocks, not a toggle — see valueOps.ts's OPERATOR_KINDS).
-  | 'Eq' | 'Neq' | 'Gt' | 'Lt' | 'Gte' | 'Lte' | 'And' | 'Or' | 'Not' | 'True' | 'False';
+  | 'Eq' | 'Neq' | 'Gt' | 'Lt' | 'Gte' | 'Lte' | 'And' | 'Or' | 'Not' | 'True' | 'False'
+  // Zero-arity — the system's current battery charge, 0-100.
+  | 'BatteryPercentage';
 // Join/Join3 both emit op 'Join' (only args.length differs, no 'Join3' on the
 // wire). `Var:<name>`/`Param:<name>` are per-variable/per-input identifiers,
 // not fixed operators. `Call:<blockId>` (a "My Blocks" reporter) has dynamic
@@ -166,6 +168,8 @@ export type InstructionDto =
   | { type: 'Command'; command: string }
   | { type: 'Comment'; comment: string }
   | { type: 'WhenRan' }
+  | { type: 'WhenBatteryDischargedTo'; threshold: ValueDto }
+  | { type: 'WhenBatteryChargedTo'; threshold: ValueDto }
   | { type: 'SetVariable'; name: string; value: ValueDto }
   | { type: 'ChangeVariable'; name: string; value: ValueDto }
   | { type: 'BlockHeader'; block_id: string }
@@ -186,6 +190,8 @@ export type InstructionType = InstructionDto['type'];
 export function defaultInstruction(type: InstructionType): InstructionDto {
   switch (type) {
     case 'WhenRan': return { type: 'WhenRan' };
+    case 'WhenBatteryDischargedTo': return { type: 'WhenBatteryDischargedTo', threshold: numberValue(20) };
+    case 'WhenBatteryChargedTo': return { type: 'WhenBatteryChargedTo', threshold: numberValue(100) };
     case 'Wait': return { type: 'Wait', duration: numberValue(1000) };
     case 'Text': return { type: 'Text', text: textValue('text') };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
@@ -210,7 +216,7 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
   }
 }
 
-export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader']);
+export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo']);
 
 export function isHeaderType(type: InstructionDto['type']): boolean {
   return HEADER_TYPES.has(type);

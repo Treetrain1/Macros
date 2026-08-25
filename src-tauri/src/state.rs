@@ -45,6 +45,10 @@ pub(crate) enum FieldId {
     Condition,
     /// `Repeat`'s iteration count.
     RepeatCount,
+    /// `WhenBatteryDischargedTo`'s battery-percentage threshold.
+    BatteryDischargeThreshold,
+    /// `WhenBatteryChargedTo`'s battery-percentage threshold.
+    BatteryChargeThreshold,
 }
 
 impl std::fmt::Display for FieldId {
@@ -61,6 +65,8 @@ impl std::fmt::Display for FieldId {
             FieldId::CallArg(i) => write!(f, "CallArg:{i}"),
             FieldId::Condition => write!(f, "Condition"),
             FieldId::RepeatCount => write!(f, "RepeatCount"),
+            FieldId::BatteryDischargeThreshold => write!(f, "BatteryDischargeThreshold"),
+            FieldId::BatteryChargeThreshold => write!(f, "BatteryChargeThreshold"),
         }
     }
 }
@@ -79,6 +85,8 @@ impl std::str::FromStr for FieldId {
             "ReturnValue" => Ok(FieldId::ReturnValue),
             "Condition" => Ok(FieldId::Condition),
             "RepeatCount" => Ok(FieldId::RepeatCount),
+            "BatteryDischargeThreshold" => Ok(FieldId::BatteryDischargeThreshold),
+            "BatteryChargeThreshold" => Ok(FieldId::BatteryChargeThreshold),
             _ if s.starts_with("CallArg:") => s["CallArg:".len()..]
                 .parse::<usize>()
                 .map(FieldId::CallArg)
@@ -401,6 +409,8 @@ pub(crate) enum InstructionDto {
     Command { command: String },
     Comment { comment: String },
     WhenRan,
+    WhenBatteryDischargedTo { threshold: ValueDto },
+    WhenBatteryChargedTo { threshold: ValueDto },
     SetVariable { name: String, value: ValueDto },
     ChangeVariable { name: String, value: ValueDto },
     BlockHeader { block_id: String },
@@ -559,6 +569,8 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
         Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
         Instruction::WhenRan => InstructionDto::WhenRan,
+        Instruction::WhenBatteryDischargedTo(threshold) => InstructionDto::WhenBatteryDischargedTo { threshold: value_to_dto(threshold) },
+        Instruction::WhenBatteryChargedTo(threshold) => InstructionDto::WhenBatteryChargedTo { threshold: value_to_dto(threshold) },
         Instruction::SetVariable(name, value) => InstructionDto::SetVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::ChangeVariable(name, value) => InstructionDto::ChangeVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::BlockHeader(block_id) => InstructionDto::BlockHeader { block_id: block_id.clone() },
@@ -630,6 +642,8 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
         InstructionDto::Command { command } => Instruction::Command(command.clone()),
         InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
         InstructionDto::WhenRan => Instruction::WhenRan,
+        InstructionDto::WhenBatteryDischargedTo { threshold } => Instruction::WhenBatteryDischargedTo(dto_to_value(threshold)),
+        InstructionDto::WhenBatteryChargedTo { threshold } => Instruction::WhenBatteryChargedTo(dto_to_value(threshold)),
         InstructionDto::SetVariable { name, value } => Instruction::SetVariable(name.clone(), dto_to_value(value)),
         InstructionDto::ChangeVariable { name, value } => Instruction::ChangeVariable(name.clone(), dto_to_value(value)),
         InstructionDto::BlockHeader { block_id } => Instruction::BlockHeader(block_id.clone()),

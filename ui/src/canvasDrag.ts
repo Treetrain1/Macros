@@ -5,6 +5,7 @@
 import { state } from './store';
 import { addInstruction, addStrand, deleteBlock, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
 import { clonePaletteInstruction } from './paletteState';
+import { closeAllDropdowns } from './dropdownRegistry';
 import { paletteCallInstructionFor } from './blockDefs';
 import type { InstrPath, InstructionDto, MacroDto, PathStep } from './types';
 import { isCapType, isHeaderType, resolveInstructionList } from './types';
@@ -283,6 +284,13 @@ function beginPan(e: PointerEvent) {
   // dead: no pan, and no preventDefault() either, so the browser fell back
   // to its native text-selection drag.
   if (e.button === 0 && (e.target as Element)?.closest?.('.instruction-row, .strand-empty-hint, .value-floating-card')) return;
+  // preventDefault() below suppresses the compatibility `mousedown` event a
+  // mouse pointerdown would otherwise fire — that's what the context menu
+  // and other dropdowns listen for to close on an outside click, so without
+  // this they'd only close once the pan's pointermove fires (e.g. scrolling
+  // the canvas trips their own scroll-closes-menu handler), not on the
+  // initiating click itself.
+  closeAllDropdowns();
   blockPrimaryPaste = true;
   blockPrimaryPasteGeneration++;
   e.preventDefault();

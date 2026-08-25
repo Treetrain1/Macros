@@ -1,3 +1,4 @@
+pub mod battery;
 pub mod config;
 pub mod hotkey_types;
 pub mod input;

@@ -15,6 +15,8 @@ import ScrollFields from './fields/ScrollFields.vue';
 import CommandFields from './fields/CommandFields.vue';
 import CommentFields from './fields/CommentFields.vue';
 import WhenRanFields from './fields/WhenRanFields.vue';
+import WhenBatteryDischargedToFields from './fields/WhenBatteryDischargedToFields.vue';
+import WhenBatteryChargedToFields from './fields/WhenBatteryChargedToFields.vue';
 import SetVariableFields from './fields/SetVariableFields.vue';
 import ChangeVariableFields from './fields/ChangeVariableFields.vue';
 import BlockHeaderFields from './fields/BlockHeaderFields.vue';
@@ -38,6 +40,8 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Inst
 type WrapType = 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
 const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], WrapType>, Component> = {
   WhenRan: WhenRanFields,
+  WhenBatteryDischargedTo: WhenBatteryDischargedToFields,
+  WhenBatteryChargedTo: WhenBatteryChargedToFields,
   Wait: WaitFields,
   Text: TextFields,
   Key: KeyFields,
@@ -192,7 +196,7 @@ function onRowPointerLeave() {
   <div
     v-else
     class="instruction-row"
-    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan' || instruction.type === 'WhenBatteryDischargedTo' || instruction.type === 'WhenBatteryChargedTo', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"

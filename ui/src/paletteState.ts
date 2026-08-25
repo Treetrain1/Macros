@@ -9,7 +9,7 @@ import { OPERATOR_KINDS, specForKind } from './valueOps';
 import type { OperatorKindSpec, OperatorValueKind } from './valueOps';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
-  'WhenRan', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'Comment',
+  'WhenRan', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'Comment',
   'SetVariable', 'ChangeVariable', 'Return', 'If', 'IfElse',
   'Repeat', 'Forever', 'While', 'EscapeLoop', 'ContinueLoop',
 ];

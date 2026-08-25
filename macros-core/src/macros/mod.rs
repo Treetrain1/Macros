@@ -121,18 +121,26 @@ fn default_block_id() -> String {
 }
 
 impl Instruction {
-    /// True for "header" blocks (`WhenRan`, `BlockHeader`) — must be first in
-    /// their strand, nothing may stack above them, and they render with a
-    /// flat top edge.
+    /// True for "header" blocks (`WhenRan`, `BlockHeader`, and the
+    /// `WhenBattery*To` entry points) — must be first in their strand,
+    /// nothing may stack above them, and they render with a flat top edge.
     pub fn is_header(&self) -> bool {
-        matches!(self, Instruction::WhenRan | Instruction::BlockHeader(_))
+        matches!(
+            self,
+            Instruction::WhenRan
+                | Instruction::BlockHeader(_)
+                | Instruction::WhenBatteryDischargedTo(_)
+                | Instruction::WhenBatteryChargedTo(_)
+        )
     }
 
     /// Renames `Value::Var` reads, plus a `SetVariable`/`ChangeVariable`
     /// instruction's own target name.
     pub fn rename_var(&mut self, old: &str, new: &str) {
         match self {
-            Instruction::Wait(value) | Instruction::Return(value) => value.rename_var(old, new),
+            Instruction::Wait(value) | Instruction::Return(value) | Instruction::WhenBatteryDischargedTo(value) | Instruction::WhenBatteryChargedTo(value) => {
+                value.rename_var(old, new)
+            }
             Instruction::Token(token) => token.rename_var(old, new),
             Instruction::SetVariable(name, value) | Instruction::ChangeVariable(name, value) => {
                 if name == old {
@@ -187,7 +195,9 @@ impl Instruction {
     /// find any `And`/`Or`/`Not` operands nested further in on its own.
     pub fn migrate_bool_slots(&mut self) {
         match self {
-            Instruction::Wait(value) | Instruction::Return(value) => value.migrate_bool_slots(false),
+            Instruction::Wait(value) | Instruction::Return(value) | Instruction::WhenBatteryDischargedTo(value) | Instruction::WhenBatteryChargedTo(value) => {
+                value.migrate_bool_slots(false)
+            }
             Instruction::Token(token) => token.migrate_bool_slots(),
             Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.migrate_bool_slots(false),
             Instruction::CallBlock { args, .. } => {
@@ -233,7 +243,9 @@ impl Instruction {
     /// block's body working after one of its inputs is renamed.
     pub fn rename_param(&mut self, old: &str, new: &str) {
         match self {
-            Instruction::Wait(value) | Instruction::Return(value) => value.rename_param(old, new),
+            Instruction::Wait(value) | Instruction::Return(value) | Instruction::WhenBatteryDischargedTo(value) | Instruction::WhenBatteryChargedTo(value) => {
+                value.rename_param(old, new)
+            }
             Instruction::Token(token) => token.rename_param(old, new),
             Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.rename_param(old, new),
             Instruction::CallBlock { args, .. } => {
@@ -280,7 +292,9 @@ impl Instruction {
     /// argument lists aligned after a block's inputs change.
     pub fn for_each_call_args_mut(&mut self, block_id: &str, f: &mut dyn FnMut(&mut Vec<Value>)) {
         match self {
-            Instruction::Wait(value) | Instruction::Return(value) => value.for_each_call_args_mut(block_id, f),
+            Instruction::Wait(value) | Instruction::Return(value) | Instruction::WhenBatteryDischargedTo(value) | Instruction::WhenBatteryChargedTo(value) => {
+                value.for_each_call_args_mut(block_id, f)
+            }
             Instruction::Token(token) => token.for_each_call_args_mut(block_id, f),
             Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => {
                 value.for_each_call_args_mut(block_id, f)
@@ -332,7 +346,9 @@ impl Instruction {
     /// entirely), so deleting a custom block never leaves a dangling ref.
     pub fn scrub_block_calls(&mut self, block_id: &str) {
         match self {
-            Instruction::Wait(value) | Instruction::Return(value) => value.scrub_block_calls(block_id),
+            Instruction::Wait(value) | Instruction::Return(value) | Instruction::WhenBatteryDischargedTo(value) | Instruction::WhenBatteryChargedTo(value) => {
+                value.scrub_block_calls(block_id)
+            }
             Instruction::Token(token) => token.scrub_block_calls(block_id),
             Instruction::SetVariable(_, value) | Instruction::ChangeVariable(_, value) => value.scrub_block_calls(block_id),
             Instruction::CallBlock { args, .. } => {
@@ -682,6 +698,20 @@ pub enum Instruction {
     /// Marks a strand as an entry point (always at index 0): it runs as its
     /// own concurrent thread when the macro runs. A macro can have several.
     WhenRan,
+    /// Header-only marker (like `WhenRan`/`BlockHeader`) for a strand whose
+    /// body should run whenever the system's battery charge drops to (or
+    /// below) the given percentage. Unlike `WhenRan`, this is *not* an
+    /// entry point Run/Loop invokes — `runner::run_with_offset` skips these
+    /// strands entirely. Instead they're driven independently by a
+    /// long-running background watcher outside a macro run altogether (in
+    /// the desktop app, `src-tauri`'s `battery_watch` module), which polls
+    /// the battery, fires the strand's body (everything after this marker)
+    /// the moment the condition holds, and won't fire it again until the
+    /// battery recovers past the threshold and crosses it again.
+    WhenBatteryDischargedTo(Value),
+    /// Same as `WhenBatteryDischargedTo`, but fires when the battery charge
+    /// rises to (or above) the given percentage instead.
+    WhenBatteryChargedTo(Value),
     /// `set <name> to <value>` — overwrites the named variable.
     SetVariable(String, Value),
     /// `change <name> by <value>` — adds `value` to the named variable.
@@ -760,6 +790,8 @@ impl std::hash::Hash for Instruction {
             Self::While { condition, body } => { 14u8.hash(state); condition.hash(state); body.hash(state); }
             Self::EscapeLoop => { 15u8.hash(state); }
             Self::ContinueLoop => { 16u8.hash(state); }
+            Self::WhenBatteryDischargedTo(v) => { 17u8.hash(state); v.hash(state); }
+            Self::WhenBatteryChargedTo(v) => { 18u8.hash(state); v.hash(state); }
         }
     }
 }
@@ -771,6 +803,8 @@ enum InstructionDe {
     Command(String),
     Comment(String),
     WhenRan,
+    WhenBatteryDischargedTo(Value),
+    WhenBatteryChargedTo(Value),
     SetVariable(String, Value),
     ChangeVariable(String, Value),
     BlockHeader(String),
@@ -826,6 +860,8 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::Command(s) => Instruction::Command(s),
             InstructionDe::Comment(s) => Instruction::Comment(s),
             InstructionDe::WhenRan => Instruction::WhenRan,
+            InstructionDe::WhenBatteryDischargedTo(v) => Instruction::WhenBatteryDischargedTo(v),
+            InstructionDe::WhenBatteryChargedTo(v) => Instruction::WhenBatteryChargedTo(v),
             InstructionDe::SetVariable(n, v) => Instruction::SetVariable(n, v),
             InstructionDe::ChangeVariable(n, v) => Instruction::ChangeVariable(n, v),
             InstructionDe::BlockHeader(id) => Instruction::BlockHeader(id),

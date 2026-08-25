@@ -62,6 +62,9 @@ pub enum Op {
     True,
     /// Zero-arity `false` literal — a standalone block, not a toggle.
     False,
+    /// Zero-arity — the system's current battery charge, 0-100. See
+    /// `crate::battery::percentage`.
+    BatteryPercentage,
 }
 
 /// Recursive expression tree backing a numeric/text instruction field — a
@@ -236,6 +239,8 @@ pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
     // Zero-arity, like NewLine/Tab — a standalone "true"/"false" block, not a toggle.
     OperatorKindSpec { kind: "True", op: Op::True, arity: 0, default_args: Vec::new },
     OperatorKindSpec { kind: "False", op: Op::False, arity: 0, default_args: Vec::new },
+    // Zero-arity, like NewLine/Tab — evaluates to the live system battery percentage.
+    OperatorKindSpec { kind: "BatteryPercentage", op: Op::BatteryPercentage, arity: 0, default_args: Vec::new },
 ];
 
 /// 1-based char index of the first occurrence of `needle` in `haystack`, or
@@ -327,6 +332,7 @@ impl Value {
             Value::Op { op: Op::Round, args, .. } => Ok(Evaluated::Number(args[0].eval_number()?.round())),
             Value::Op { op: Op::True, .. } => Ok(Evaluated::Bool(true)),
             Value::Op { op: Op::False, .. } => Ok(Evaluated::Bool(false)),
+            Value::Op { op: Op::BatteryPercentage, .. } => Ok(Evaluated::Number(crate::battery::percentage()?)),
             Value::Op { op: Op::Not, args, .. } => Ok(Evaluated::Bool(!args[0].eval()?.as_bool())),
             Value::Op { op: Op::And, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() && args[1].eval()?.as_bool())),
             Value::Op { op: Op::Or, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() || args[1].eval()?.as_bool())),
@@ -365,7 +371,7 @@ impl Value {
                     }
                     Op::Join | Op::NewLine | Op::Tab | Op::Length | Op::IndexOf | Op::LastIndexOf | Op::LetterOf | Op::Case
                     | Op::Round | Op::True | Op::False | Op::Not | Op::And | Op::Or | Op::Eq | Op::Neq | Op::Gt | Op::Lt
-                    | Op::Gte | Op::Lte => unreachable!("matched above"),
+                    | Op::Gte | Op::Lte | Op::BatteryPercentage => unreachable!("matched above"),
                 };
                 Ok(Evaluated::Number(result))
             }

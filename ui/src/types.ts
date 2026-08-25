@@ -370,6 +370,7 @@ export interface StateDto {
   is_looping: boolean;
   ipc_active_port: number | null;
   ipc_auto_start: boolean;
+  close_to_tray: boolean;
   confirm_remove_macro: boolean;
   confirm_remove_macro_remaining_secs: number;
   confirm_clear_instructions: boolean;
@@ -404,6 +405,7 @@ export function emptyState(): StateDto {
     is_looping: false,
     ipc_active_port: null,
     ipc_auto_start: false,
+    close_to_tray: false,
     confirm_remove_macro: false,
     confirm_remove_macro_remaining_secs: 0,
     confirm_clear_instructions: false,

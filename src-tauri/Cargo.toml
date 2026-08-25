@@ -9,7 +9,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 macros-core = { path = "../macros-core" }
-tauri.workspace = true
+tauri = { workspace = true, features = ["tray-icon"] }
 tauri-runtime-cef.workspace = true
 tracing.workspace = true
 tracing-log.workspace = true
@@ -21,6 +21,14 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net"
 rfd.workspace = true
 axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# tray-icon's Linux backend (muda + libappindicator) uses GTK for its context
+# menu but never calls `gtk::init()` itself -- the wry runtime gets this for
+# free from tao's EventLoop::new(), but our CEF runtime's winit EventLoop
+# doesn't touch GTK at all, so we have to initialize it ourselves before
+# building any tray menu.
+gtk = "0.18"
 
 [features]
 default = ["cef"]

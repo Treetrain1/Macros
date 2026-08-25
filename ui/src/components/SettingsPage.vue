@@ -6,6 +6,7 @@ import PerMacroHotkeysSection from './PerMacroHotkeysSection.vue';
 import TcpServerSection from './TcpServerSection.vue';
 import ImportExportSection from './ImportExportSection.vue';
 import UpdatesSection from './UpdatesSection.vue';
+import SystemSection from './SystemSection.vue';
 </script>
 
 <template>
@@ -16,6 +17,7 @@ import UpdatesSection from './UpdatesSection.vue';
       <GlobalHotkeysSection />
       <PerMacroHotkeysSection />
       <TcpServerSection />
+      <SystemSection />
       <ImportExportSection />
       <UpdatesSection />
     </div>

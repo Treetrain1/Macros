@@ -2,7 +2,9 @@ pub(crate) mod commands;
 #[cfg(feature = "dev-bridge")]
 pub(crate) mod dev_bridge;
 pub(crate) mod macros_thread;
+pub(crate) mod single_instance;
 pub(crate) mod state;
+pub(crate) mod tray;
 
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
 use macros_core::macros::runner::make_backend;
@@ -17,9 +19,36 @@ pub fn run() {
     tracing_subscriber::fmt::init();
     let _ = tracing_log::LogTracer::init();
 
+    // CEF re-execs this same binary for its helper processes (renderer, GPU,
+    // zygote, ...), tagged with a `--type=` switch -- those must fall
+    // straight through to `tauri::Builder::run`, which hands them to
+    // `cef::execute_process` and exits. The single-instance activation-port
+    // check below only makes sense for the real browser process.
+    let is_cef_subprocess = std::env::args().any(|a| a.starts_with("--type="));
+
+    let activation_listener = if is_cef_subprocess {
+        None
+    } else {
+        match single_instance::claim_or_activate_existing() {
+            Some(listener) => Some(listener),
+            // Another instance is already running and has been asked to
+            // show its window -- don't spin up a second one.
+            None => return,
+        }
+    };
+
     tauri::Builder::<Cef>::default()
         .command_line_args([("--use-mock-keychain", None::<String>)])
-        .setup(|app| {
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window.state::<SharedState>().lock().map(|s| s.close_to_tray).unwrap_or(false);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .setup(move |app| {
             let settings = config::load_settings();
 
             let initial_state = AppState {
@@ -37,6 +66,8 @@ pub fn run() {
                 ipc_shutdown_tx: None,
                 ipc_active_port: None,
                 ipc_auto_start: settings.ipc_auto_start.unwrap_or(false),
+                close_to_tray: settings.close_to_tray.unwrap_or(false),
+                tray_icon: None,
                 confirm_remove_macro: false,
                 remove_confirm_remaining_secs: 0,
                 remove_confirm_generation: 0,
@@ -118,6 +149,36 @@ pub fn run() {
                         s.ipc_active_port = Some(port);
                     }
                 }
+
+                // Show the tray icon if "close to tray" was left enabled from a
+                // previous session.
+                if s.close_to_tray {
+                    match tray::build(app.handle()) {
+                        Ok(icon) => s.tray_icon = Some(icon),
+                        Err(e) => tracing::warn!("Failed to create tray icon: {e}"),
+                    }
+                }
+            }
+
+            // ── Single-instance activation listener ─────────────────────────
+            // A later launch of the app (e.g. from a desktop shortcut) that
+            // finds this instance already running connects to the activation
+            // port instead of starting its own window; any connection here is
+            // that later launch asking us to come to the foreground.
+            if let Some(listener) = activation_listener {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    for stream in listener.incoming() {
+                        if stream.is_err() {
+                            continue;
+                        }
+                        tracing::info!("Another launch asked us to come to the foreground");
+                        let handle = app_handle.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            tray::show_main_window(&handle);
+                        });
+                    }
+                });
             }
 
             // ── Dev-only browser bridge (see src/dev_bridge.rs) ────────────
@@ -221,6 +282,7 @@ pub fn run() {
             commands::start_ipc_server,
             commands::stop_ipc_server,
             commands::set_ipc_auto_start,
+            commands::set_close_to_tray,
             commands::check_for_updates,
             commands::apply_update,
         ])

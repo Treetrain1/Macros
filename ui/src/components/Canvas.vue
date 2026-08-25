@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, watch } from 'vue';
 import { state } from '../store';
-import { attachDragListeners, positionCanvas } from '../canvasDrag';
+import { attachDragListeners, positionCanvas, resetCanvasView, zoomInCanvas, zoomOutCanvas } from '../canvasDrag';
 import { attachValueDragListeners } from '../valueDrag';
 import { openCanvasMenu } from '../contextMenu';
 import StrandCard from './StrandCard.vue';
@@ -54,6 +54,29 @@ watch(
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
       <span>Recording…</span>
       <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
+    </div>
+    <div class="canvas-zoom-controls">
+      <button type="button" class="canvas-zoom-btn" title="Zoom in" @click="zoomInCanvas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </button>
+      <button type="button" class="canvas-zoom-btn" title="Zoom out" @click="zoomOutCanvas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </button>
+      <button type="button" class="canvas-zoom-btn" title="Reset view" @click="resetCanvasView">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+        </svg>
+      </button>
     </div>
     <ContextMenu />
   </div>

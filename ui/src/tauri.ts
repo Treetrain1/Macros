@@ -123,6 +123,9 @@ export const startIpcServer = () => invoke<void>('start_ipc_server');
 export const stopIpcServer = () => invoke<void>('stop_ipc_server');
 export const setIpcAutoStart = (enabled: boolean) => invoke<void>('set_ipc_auto_start', { enabled });
 
+// ─── System tray ────────────────────────────────────────────────────────────
+export const setCloseToTray = (enabled: boolean) => invoke<void>('set_close_to_tray', { enabled });
+
 // ─── Updates ────────────────────────────────────────────────────────────────
 export const checkForUpdates = () => invoke<void>('check_for_updates');
 export const applyUpdate = () => invoke<void>('apply_update');

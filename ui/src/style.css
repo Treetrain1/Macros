@@ -573,6 +573,28 @@ body.sidebar-resizing {
   background-size: 22px 22px;
 }
 
+/* Zoom/reset controls — floating column, bottom-right of the canvas view. */
+.canvas-zoom-controls {
+  position: absolute;
+  right: var(--spacing-md, 16px);
+  bottom: var(--spacing-md, 16px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.canvas-zoom-btn {
+  width: 34px;
+  height: 34px;
+  min-height: unset;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.canvas-zoom-btn svg { width: 16px; height: 16px; }
+
 /* ── Strand card ──────────────────────────────────────────────────────────── */
 /* A strand is nothing but its blocks: `.strand-card` is a bare positioning
    container with no border/background of its own, and no fixed/uniform

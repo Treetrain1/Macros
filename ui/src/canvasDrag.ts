@@ -178,27 +178,63 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   }
 }
 
-function onCanvasWheel(e: WheelEvent) {
-  if (!e.ctrlKey) return;
-  if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
-  e.preventDefault();
+// Shared by wheel-zoom and the zoom buttons: rescales around a fixed client
+// point (mouse position for wheel, viewport center for the buttons) so that
+// point stays visually still.
+function zoomBy(factor: number, clientX: number, clientY: number) {
   const scrollEl = document.getElementById('canvas-scroll');
   if (!scrollEl) return;
   const rect = scrollEl.getBoundingClientRect();
-  const canvasPtX = (e.clientX - rect.left + scrollEl.scrollLeft) / canvasZoom;
-  const canvasPtY = (e.clientY - rect.top + scrollEl.scrollTop) / canvasZoom;
+  const canvasPtX = (clientX - rect.left + scrollEl.scrollLeft) / canvasZoom;
+  const canvasPtY = (clientY - rect.top + scrollEl.scrollTop) / canvasZoom;
 
-  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
   const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, canvasZoom * factor));
   if (newZoom === canvasZoom) return;
   canvasZoom = newZoom;
   positionCanvas(state.current_macro);
 
-  scrollEl.scrollLeft = canvasPtX * canvasZoom - (e.clientX - rect.left);
-  scrollEl.scrollTop = canvasPtY * canvasZoom - (e.clientY - rect.top);
+  scrollEl.scrollLeft = canvasPtX * canvasZoom - (clientX - rect.left);
+  scrollEl.scrollTop = canvasPtY * canvasZoom - (clientY - rect.top);
 }
 
-// ── Middle-click-drag panning ───────────────────────────────────────────────
+function onCanvasWheel(e: WheelEvent) {
+  if (!e.ctrlKey) return;
+  if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  zoomBy(factor, e.clientX, e.clientY);
+}
+
+const BUTTON_ZOOM_FACTOR = 1.25;
+
+/** Zoom-in button handler — zooms in around the canvas viewport's center. */
+export function zoomInCanvas() {
+  const scrollEl = document.getElementById('canvas-scroll');
+  if (!scrollEl) return;
+  const rect = scrollEl.getBoundingClientRect();
+  zoomBy(BUTTON_ZOOM_FACTOR, rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+/** Zoom-out button handler — zooms out around the canvas viewport's center. */
+export function zoomOutCanvas() {
+  const scrollEl = document.getElementById('canvas-scroll');
+  if (!scrollEl) return;
+  const rect = scrollEl.getBoundingClientRect();
+  zoomBy(1 / BUTTON_ZOOM_FACTOR, rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+/** Resets zoom to 1 and re-centers the scroll position on the canvas origin,
+ * matching the view a freshly opened macro starts at. */
+export function resetCanvasView() {
+  const scrollEl = document.getElementById('canvas-scroll');
+  if (!scrollEl) return;
+  canvasZoom = 1;
+  positionCanvas(state.current_macro);
+  scrollEl.scrollLeft = Math.max(0, -lastBounds.minX + CANVAS_PAD - 60);
+  scrollEl.scrollTop = Math.max(0, -lastBounds.minY + CANVAS_PAD - 60);
+}
+
+// ── Middle/left-click-drag panning ──────────────────────────────────────────
 interface PanState {
   pointerId: number;
   startX: number;
@@ -230,8 +266,23 @@ function blockMiddleClickPaste(e: ClipboardEvent) {
 }
 
 function beginPan(e: PointerEvent) {
-  if (e.button !== 1) return;
+  if (e.button !== 1 && e.button !== 0) return;
   if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
+  // A left-click only pans when it lands on genuinely empty canvas space —
+  // an actual instruction row (or the strand's empty-strand hint) or a
+  // floating value card is left alone so beginPickup/value-drag pointerdown
+  // handlers (bound deeper in those trees) keep working as normal
+  // left-click-drags. This deliberately checks for real row content rather
+  // than `.strand-card` as a whole: a card's bounding box is only as wide as
+  // its widest row (`.strand-body` uses `align-items: flex-start`, so
+  // narrower rows don't stretch to match), so a card with rows of differing
+  // widths has genuinely blank space inside its box, to the right of any
+  // narrower row — e.g. right of a short "forever" header when a wider
+  // block sits in its body/siblings. That gutter isn't covered by any row's
+  // own pointerdown handler, so excluding all of `.strand-card` left it
+  // dead: no pan, and no preventDefault() either, so the browser fell back
+  // to its native text-selection drag.
+  if (e.button === 0 && (e.target as Element)?.closest?.('.instruction-row, .strand-empty-hint, .value-floating-card')) return;
   blockPrimaryPaste = true;
   blockPrimaryPasteGeneration++;
   e.preventDefault();

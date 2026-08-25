@@ -28,6 +28,9 @@ pub struct AppSettings {
     /// own `speed_multiplier`. Persisted like the rest of `AppSettings`, but
     /// conceptually a session knob rather than a macro property.
     pub global_speed_multiplier: Option<f64>,
+    /// When true, closing the main window hides it to the system tray
+    /// instead of exiting the app.
+    pub close_to_tray: Option<bool>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {

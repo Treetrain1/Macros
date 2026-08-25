@@ -1865,6 +1865,27 @@ pub(crate) fn set_ipc_auto_start<R: Runtime>(state: State<SharedState>, app: tau
     Ok(())
 }
 
+// ─── System tray ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub(crate) fn set_close_to_tray(state: State<SharedState>, app: tauri::AppHandle<tauri::Cef>, enabled: bool) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.close_to_tray = enabled;
+    config::update_settings(|settings| settings.close_to_tray = Some(enabled));
+    if enabled {
+        if s.tray_icon.is_none() {
+            match crate::tray::build(&app) {
+                Ok(icon) => s.tray_icon = Some(icon),
+                Err(e) => warn!("Failed to create tray icon: {e}"),
+            }
+        }
+    } else {
+        s.tray_icon = None;
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 // ─── Updates (Windows) ─────────────────────────────────────────────────────
 
 #[tauri::command]

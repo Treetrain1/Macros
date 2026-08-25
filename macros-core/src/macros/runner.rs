@@ -129,7 +129,7 @@ fn call_block(block_id: &str, arg_values: Vec<Evaluated>, ctx: &mut ExecCtx, dep
     let runtime = block_table.get(block_id).ok_or_else(|| format!("call to unknown custom block '{block_id}'"))?;
     let new_env: HashMap<String, Evaluated> = runtime.input_names.iter().cloned().zip(arg_values).collect();
     let saved_env = std::mem::replace(&mut ctx.param_env, new_env);
-    let result = run_block(&runtime.body, ctx, depth);
+    let result = run_block(&runtime.body, ctx, depth, Instant::now());
     ctx.param_env = saved_env;
     // A stray Break/Continue reaching a custom block's own top level (no
     // enclosing loop within its body) is absorbed here, same as Normal —
@@ -169,6 +169,31 @@ impl Macro {
         speed_multiplier: f64,
         variables: VariableStore,
     ) {
+        self.run_with_offset(emulator, stop_flag, speed_multiplier, variables, Duration::ZERO)
+    }
+
+    /// Same as `run`, but backdates every entry strand's `Wait` deadline
+    /// anchor by `initial_offset` — i.e. pretends this run actually started
+    /// `initial_offset` ago rather than right now. Exists for callers that
+    /// know real time has already passed between the event this run is
+    /// supposed to be synced to and the moment this function actually gets
+    /// called (dispatch latency, or — the caller this was added for —
+    /// `macros-gd`'s attempt-start trigger, which only fires once per game
+    /// frame and so always overshoots its own target instant by however
+    /// much that frame's `dt` was; passing that overshoot back here keeps
+    /// the macro's timeline anchored to the *intended* start instant instead
+    /// of whichever frame the trigger happened to land on). Without this,
+    /// that overshoot — which grows with frame-time variance, i.e. exactly
+    /// when Proton is stuttering — just becomes unrecoverable drift baked
+    /// into the whole run.
+    pub fn run_with_offset(
+        self,
+        emulator: Arc<Mutex<dyn InputBackend>>,
+        stop_flag: Option<Arc<Mutex<bool>>>,
+        speed_multiplier: f64,
+        variables: VariableStore,
+        initial_offset: Duration,
+    ) {
         let block_defs = self.block_defs;
         let mut block_table: HashMap<String, BlockRuntime> = HashMap::new();
         let mut entry_strands: Vec<Vec<Instruction>> = Vec::new();
@@ -193,7 +218,7 @@ impl Macro {
         let rest: Vec<_> = iter.collect();
 
         if rest.is_empty() {
-            run_strand(first, emulator, stop_flag, speed_multiplier, variables, block_table);
+            run_strand(first, emulator, stop_flag, speed_multiplier, variables, block_table, initial_offset);
             return;
         }
 
@@ -203,9 +228,9 @@ impl Macro {
                 let stop_flag = stop_flag.clone();
                 let variables = Arc::clone(&variables);
                 let block_table = Arc::clone(&block_table);
-                scope.spawn(move || run_strand(instructions, emulator, stop_flag, speed_multiplier, variables, block_table));
+                scope.spawn(move || run_strand(instructions, emulator, stop_flag, speed_multiplier, variables, block_table, initial_offset));
             }
-            run_strand(first, emulator, stop_flag, speed_multiplier, variables, block_table);
+            run_strand(first, emulator, stop_flag, speed_multiplier, variables, block_table, initial_offset);
         });
     }
 }
@@ -222,8 +247,16 @@ fn run_strand(
     speed_multiplier: f64,
     variables: VariableStore,
     block_table: Arc<HashMap<String, BlockRuntime>>,
+    initial_offset: Duration,
 ) {
     raise_current_thread_priority();
+    // Priority-raise happens first (its own latency shouldn't eat into the
+    // offset), *then* anchor "now" for this strand's Wait chain — backdated
+    // by initial_offset if the caller knows real time already elapsed
+    // before this call happened. `checked_sub` guards the (only
+    // theoretically reachable) case of an offset larger than the process's
+    // own monotonic clock has been running.
+    let start = Instant::now().checked_sub(initial_offset).unwrap_or_else(Instant::now);
     let mut pressed_keys: Vec<MacroKey> = Vec::new();
     let mut pressed_buttons: Vec<MacroButton> = Vec::new();
     {
@@ -237,7 +270,7 @@ fn run_strand(
             pressed_buttons: &mut pressed_buttons,
             param_env: HashMap::new(),
         };
-        let _ = run_block(&instructions, &mut ctx, 0);
+        let _ = run_block(&instructions, &mut ctx, 0, start);
     }
 
     if !pressed_keys.is_empty() || !pressed_buttons.is_empty() {
@@ -267,7 +300,7 @@ pub fn run_instructions(
     speed_multiplier: f64,
     variables: VariableStore,
 ) {
-    run_strand(instructions, emulator, stop_flag, speed_multiplier, variables, Arc::new(HashMap::new()));
+    run_strand(instructions, emulator, stop_flag, speed_multiplier, variables, Arc::new(HashMap::new()), Duration::ZERO);
 }
 
 /// Runs `instructions` top to bottom, returning `Ok(Flow::Return(v))` the
@@ -284,14 +317,17 @@ pub fn run_instructions(
 /// `speed_multiplier` scales every `Wait` inversely (2.0 = half-length,
 /// twice as fast), combining the macro's own multiplier with the global
 /// runtime override.
-fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Result<Flow, String> {
+fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start: Instant) -> Result<Flow, String> {
     if depth > MAX_CALL_DEPTH {
         return Err("custom block call depth exceeded (possible infinite recursion)".to_string());
     }
 
     // Local to this invocation (not in `ctx`) so a nested call's waits pace
     // independently; the caller's deadline just re-anchors on its next Wait.
-    let mut deadline = Instant::now();
+    // `start` is `Instant::now()` at every call site except the very
+    // outermost one (`run_strand`'s top-level call), which backdates it by
+    // that strand's `initial_offset` — see `Macro::run_with_offset`.
+    let mut deadline = start;
 
     let stop_requested = |flag: &Arc<Mutex<bool>>| -> bool {
         !flag.lock().map(|g| *g).unwrap_or(false)
@@ -345,7 +381,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                 match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
                     Ok(cond) => {
                         if cond.as_bool() {
-                            let flow = run_block(body, ctx, depth)?;
+                            let flow = run_block(body, ctx, depth, Instant::now())?;
                             if flow != Flow::Normal {
                                 return Ok(flow);
                             }
@@ -358,7 +394,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                 match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
                     Ok(cond) => {
                         let branch = if cond.as_bool() { then_body } else { else_body };
-                        let flow = run_block(branch, ctx, depth)?;
+                        let flow = run_block(branch, ctx, depth, Instant::now())?;
                         if flow != Flow::Normal {
                             return Ok(flow);
                         }
@@ -381,7 +417,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                             break;
                         }
                     }
-                    match run_block(body, ctx, depth)? {
+                    match run_block(body, ctx, depth, Instant::now())? {
                         Flow::Normal | Flow::Continue => {}
                         Flow::Break => break,
                         flow @ Flow::Return(_) => return Ok(flow),
@@ -394,7 +430,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                         break;
                     }
                 }
-                match run_block(body, ctx, depth)? {
+                match run_block(body, ctx, depth, Instant::now())? {
                     Flow::Normal | Flow::Continue => {}
                     Flow::Break => break,
                     flow @ Flow::Return(_) => return Ok(flow),
@@ -417,7 +453,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32) -> Res
                         break;
                     }
                 }
-                match run_block(body, ctx, depth)? {
+                match run_block(body, ctx, depth, Instant::now())? {
                     Flow::Normal | Flow::Continue => {}
                     Flow::Break => break,
                     flow @ Flow::Return(_) => return Ok(flow),
@@ -710,6 +746,31 @@ mod tests {
         let start = Instant::now();
         mac.run(noop_emulator(), None, 1.0, empty_vars());
         assert!(start.elapsed() < Duration::from_millis(400), "entry strands ran sequentially instead of concurrently");
+    }
+
+    /// `run_with_offset` should backdate the first `Wait`'s deadline anchor
+    /// by `initial_offset` — a macro whose only strand waits 200ms should
+    /// return in roughly (200ms - offset) wall-clock time, proving the
+    /// anchor is `Instant::now() - initial_offset`, not just `Instant::now()`
+    /// with the offset silently ignored.
+    #[test]
+    fn run_with_offset_backdates_the_first_wait_deadline() {
+        let mac = Macro {
+            id: "m".into(),
+            name: "Offset".into(),
+            description: "".into(),
+            strands: vec![when_ran_strand("a", 200.0)],
+            recording_target: None,
+            speed_multiplier: 1.0,
+            floating_values: vec![],
+            variables: vec![],
+            block_defs: vec![],
+        };
+        let start = Instant::now();
+        mac.run_with_offset(noop_emulator(), None, 1.0, empty_vars(), Duration::from_millis(80));
+        let elapsed = start.elapsed();
+        assert!(elapsed < Duration::from_millis(170), "offset didn't shorten the wait as expected: {elapsed:?}");
+        assert!(elapsed >= Duration::from_millis(90), "returned suspiciously fast, offset may have overshot: {elapsed:?}");
     }
 
     /// A stop flag flipped false mid-run should cut every concurrently

@@ -1,4 +1,4 @@
-use super::persistence::get_macros_from_config;
+use super::persistence::read_macro_by_id;
 use super::settings::{load_settings, update_settings};
 use crate::macros::Macro;
 
@@ -12,7 +12,5 @@ pub fn get_selected_macro_id() -> Option<String> {
 }
 
 pub fn get_macro_by_id(macro_id: &str) -> Option<Macro> {
-    get_macros_from_config()
-        .into_iter()
-        .find(|mac| mac.id == macro_id)
+    read_macro_by_id(macro_id)
 }

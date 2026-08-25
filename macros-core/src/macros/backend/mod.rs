@@ -135,6 +135,8 @@ pub fn create_backend() -> Option<Arc<Mutex<dyn InputBackend>>> {
 pub mod evdev_mapping;
 #[cfg(target_os = "linux")]
 pub mod evdev;
+#[cfg(target_os = "linux")]
+pub mod xtest;
 
 #[cfg(windows)]
 pub mod windows;

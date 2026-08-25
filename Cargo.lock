@@ -2601,6 +2601,8 @@ version = "0.4.0"
 dependencies = [
  "cbindgen",
  "macros-core",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",

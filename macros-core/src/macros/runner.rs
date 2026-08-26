@@ -2,7 +2,7 @@ use crate::input::types::{Coordinate, Direction, InputToken, MacroButton, MacroK
 use crate::input::value::{Evaluated, Value};
 use crate::macros::backend::{create_backend, InputBackend};
 use crate::macros::priority::raise_current_thread_priority;
-use crate::macros::{Instruction, Macro};
+use crate::macros::{Instruction, InstructionKind, Macro};
 use spin_sleep::{SpinSleeper, SpinStrategy};
 use std::collections::HashMap;
 use std::process::Command;
@@ -118,7 +118,7 @@ fn resolve_calls_and_params(value: &Value, ctx: &mut ExecCtx, depth: u32) -> Res
 /// Runs custom block `block_id` with `arg_values` bound to its declared
 /// inputs, returning whatever `Return` produced (`None` if it ran to
 /// completion without one). Shared by both the value-position `Value::Call`
-/// and command-position `Instruction::CallBlock` call sites.
+/// and command-position `InstructionKind::CallBlock` call sites.
 fn call_block(block_id: &str, arg_values: Vec<Evaluated>, ctx: &mut ExecCtx, depth: u32) -> Result<Option<Evaluated>, String> {
     if depth > MAX_CALL_DEPTH {
         return Err("custom block call depth exceeded (possible infinite recursion)".to_string());
@@ -205,26 +205,26 @@ impl Macro {
         let mut entry_strands: Vec<Vec<Instruction>> = Vec::new();
 
         for strand in self.strands {
-            match strand.instructions.first() {
-                Some(Instruction::BlockHeader(id)) => {
+            match strand.instructions.first().map(|i| &i.kind) {
+                Some(InstructionKind::BlockHeader(id)) => {
                     if let Some(def) = block_defs.iter().find(|b| &b.id == id) {
                         let input_names: Vec<String> = def.input_names().map(str::to_string).collect();
                         let body = strand.instructions[1..].to_vec();
                         block_table.insert(id.clone(), BlockRuntime { input_names, body });
                     }
                 }
-                Some(Instruction::WhenRan) => entry_strands.push(strand.instructions),
+                Some(InstructionKind::WhenRan) => entry_strands.push(strand.instructions),
                 // Battery/time-triggered strands aren't run here at all —
                 // they're driven by the app's own background watchers (e.g.
                 // src-tauri's `battery_watch`/`time_watch` modules), which
                 // fire just their body directly once their own condition
                 // holds, independent of Run/Loop. A manual Run intentionally
                 // leaves them alone.
-                Some(Instruction::WhenBatteryDischargedTo(_))
-                | Some(Instruction::WhenBatteryChargedTo(_))
-                | Some(Instruction::WhenTime(_))
-                | Some(Instruction::WhenPowerPluggedIn)
-                | Some(Instruction::WhenPowerUnplugged) => {}
+                Some(InstructionKind::WhenBatteryDischargedTo(_))
+                | Some(InstructionKind::WhenBatteryChargedTo(_))
+                | Some(InstructionKind::WhenTime(_))
+                | Some(InstructionKind::WhenPowerPluggedIn)
+                | Some(InstructionKind::WhenPowerUnplugged) => {}
                 _ => {}
             }
         }
@@ -365,40 +365,40 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
             }
         }
 
-        match ins {
-            Instruction::Comment(_) => {}
-            Instruction::WhenRan => {}
-            Instruction::BlockHeader(_) => {}
+        match &ins.kind {
+            InstructionKind::Comment(_) => {}
+            InstructionKind::WhenRan => {}
+            InstructionKind::BlockHeader(_) => {}
             // Header-only markers, same as `WhenRan`/`BlockHeader` — never
             // actually reached in practice (`run_with_offset` excludes these
             // strands from `entry_strands` entirely, and the background
             // watcher that does fire them starts from
             // `strand.instructions[1..]`, skipping the header). Handled here
             // defensively so the match stays total.
-            Instruction::WhenBatteryDischargedTo(_) => {}
-            Instruction::WhenBatteryChargedTo(_) => {}
-            Instruction::WhenTime(_) => {}
-            Instruction::WhenPowerPluggedIn => {}
-            Instruction::WhenPowerUnplugged => {}
-            Instruction::OpenApp { command, .. } => {
+            InstructionKind::WhenBatteryDischargedTo(_) => {}
+            InstructionKind::WhenBatteryChargedTo(_) => {}
+            InstructionKind::WhenTime(_) => {}
+            InstructionKind::WhenPowerPluggedIn => {}
+            InstructionKind::WhenPowerUnplugged => {}
+            InstructionKind::OpenApp { command, .. } => {
                 println!("Opening app: {command}");
                 if let Err(e) = open_app(command) {
                     warn!("Failed to open app: {}", e);
                 }
             }
-            Instruction::CloseApp { command, name, .. } => {
+            InstructionKind::CloseApp { command, name, .. } => {
                 println!("Closing app: {name}");
                 if let Err(e) = close_app(command, name) {
                     warn!("Failed to close app: {}", e);
                 }
             }
-            Instruction::Return(value) => {
+            InstructionKind::Return(value) => {
                 let resolved = ctx.resolve(value, depth)?;
                 return Ok(Flow::Return(resolved.eval()?));
             }
-            Instruction::EscapeLoop => return Ok(Flow::Break),
-            Instruction::ContinueLoop => return Ok(Flow::Continue),
-            Instruction::CallBlock { block_id, args } => {
+            InstructionKind::EscapeLoop => return Ok(Flow::Break),
+            InstructionKind::ContinueLoop => return Ok(Flow::Continue),
+            InstructionKind::CallBlock { block_id, args } => {
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for a in args {
                     match ctx.resolve(a, depth).and_then(|v| v.eval()) {
@@ -413,7 +413,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                 // `Return`; if one sneaks in, it just ends the call early.
                 let _ = call_block(block_id, evaluated_args, ctx, depth + 1)?;
             }
-            Instruction::If { condition, body } => {
+            InstructionKind::If { condition, body } => {
                 match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
                     Ok(cond) => {
                         if cond.as_bool() {
@@ -426,7 +426,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     Err(e) => warn!("Skipping If: condition {}", e),
                 }
             }
-            Instruction::IfElse { condition, then_body, else_body } => {
+            InstructionKind::IfElse { condition, then_body, else_body } => {
                 match ctx.resolve(condition, depth).and_then(|v| v.eval()) {
                     Ok(cond) => {
                         let branch = if cond.as_bool() { then_body } else { else_body };
@@ -438,7 +438,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     Err(e) => warn!("Skipping IfElse: condition {}", e),
                 }
             }
-            Instruction::Repeat { count, body } => {
+            InstructionKind::Repeat { count, body } => {
                 let n = match ctx.resolve(count, depth).and_then(|v| v.eval_number()) {
                     Ok(v) => v,
                     Err(e) => {
@@ -460,7 +460,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     }
                 }
             }
-            Instruction::Forever { body } => loop {
+            InstructionKind::Forever { body } => loop {
                 if let Some(flag) = &ctx.stop_flag {
                     if stop_requested(flag) {
                         break;
@@ -472,7 +472,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     flow @ Flow::Return(_) => return Ok(flow),
                 }
             },
-            Instruction::While { condition, body } => loop {
+            InstructionKind::While { condition, body } => loop {
                 if let Some(flag) = &ctx.stop_flag {
                     if stop_requested(flag) {
                         break;
@@ -495,7 +495,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     flow @ Flow::Return(_) => return Ok(flow),
                 }
             },
-            Instruction::Wait(duration) => {
+            InstructionKind::Wait(duration) => {
                 let duration = match ctx.resolve(duration, depth).and_then(|v| v.eval_number()) {
                     Ok(v) => v,
                     Err(e) => {
@@ -539,13 +539,13 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     }
                 }
             }
-            Instruction::Command(command) => {
+            InstructionKind::Command(command) => {
                 println!("Running command: {command}");
                 if let Err(e) = Command::new("bash").args(["-c", command]).status() {
                     warn!("Command failed: {}", e)
                 }
             }
-            Instruction::Token(token) => match token {
+            InstructionKind::Token(token) => match token {
                 InputToken::Text(value) => {
                     let text = match ctx.resolve(value, depth).and_then(|v| v.eval_text()) {
                         Ok(t) => t,
@@ -686,7 +686,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                     }
                 }
             },
-            Instruction::SetVariable(name, value) => match ctx.resolve(value, depth).and_then(|v| v.eval()) {
+            InstructionKind::SetVariable(name, value) => match ctx.resolve(value, depth).and_then(|v| v.eval()) {
                 Ok(result) => {
                     if let Ok(mut vars) = ctx.variables.lock() {
                         vars.insert(name.clone(), result);
@@ -694,7 +694,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
                 }
                 Err(e) => warn!("Skipping Set Variable: {}", e),
             },
-            Instruction::ChangeVariable(name, value) => match ctx.resolve(value, depth).and_then(|v| v.eval()) {
+            InstructionKind::ChangeVariable(name, value) => match ctx.resolve(value, depth).and_then(|v| v.eval()) {
                 // The delta must be numeric — text/bool are a deliberate no-op.
                 Ok(Evaluated::Text(_) | Evaluated::Bool(_)) => {}
                 Ok(Evaluated::Number(delta)) => {
@@ -714,7 +714,7 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
 }
 
 /// Launches `command` — the already-resolved, platform-specific launch
-/// string an `Instruction::OpenApp` carries (see its doc comment). Each
+/// string an `InstructionKind::OpenApp` carries (see its doc comment). Each
 /// platform needs a different launcher: Windows' `start` shell built-in
 /// handles a `.lnk` path directly; macOS' `open` handles an `.app` bundle
 /// path; a plain `sh -c` covers Linux's cleaned `Exec=` line (which may
@@ -739,7 +739,7 @@ fn open_app(_command: &str) -> std::io::Result<()> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "opening apps is not supported on this platform"))
 }
 
-/// Terminates the app an `Instruction::CloseApp` names — there's no
+/// Terminates the app an `InstructionKind::CloseApp` names — there's no
 /// cross-platform "close this specific launch string" API the way there is
 /// for opening one, so each platform instead derives a best-effort process
 /// matcher from whatever `OpenApp`'s picker happened to capture: the
@@ -815,7 +815,7 @@ mod tests {
             id: id.to_string(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::WhenRan, Instruction::Wait(Value::number(wait_ms))],
+            instructions: vec![Instruction::new(InstructionKind::WhenRan), Instruction::new(InstructionKind::Wait(Value::number(wait_ms)))],
         }
     }
 
@@ -840,11 +840,11 @@ mod tests {
                 when_ran_strand("a", 150.0),
                 when_ran_strand("b", 150.0),
                 when_ran_strand("c", 150.0),
-                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::Wait(Value::number(150.0))] },
+                Strand { id: "inert".into(), x: 0, y: 0, instructions: vec![Instruction::new(InstructionKind::Wait(Value::number(150.0)))] },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![],
             settings: crate::macros::MacroSettings::default(),
@@ -868,7 +868,7 @@ mod tests {
             strands: vec![when_ran_strand("a", 200.0)],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![],
             settings: crate::macros::MacroSettings::default(),
@@ -892,7 +892,7 @@ mod tests {
             strands: vec![when_ran_strand("a", long_wait), when_ran_strand("b", long_wait)],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![],
             settings: crate::macros::MacroSettings::default(),
@@ -912,7 +912,7 @@ mod tests {
     fn set_variable_writes_evaluated_value() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::SetVariable("x".to_string(), Value::number(5.0))],
+            vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(5.0)))],
             noop_emulator(),
             None,
             1.0,
@@ -926,7 +926,7 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(10.0));
         run_instructions(
-            vec![Instruction::ChangeVariable("x".to_string(), Value::number(5.0))],
+            vec![Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(5.0)))],
             noop_emulator(),
             None,
             1.0,
@@ -940,7 +940,7 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("x".to_string(), Evaluated::Text("hello".to_string()));
         run_instructions(
-            vec![Instruction::ChangeVariable("x".to_string(), Value::number(5.0))],
+            vec![Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(5.0)))],
             noop_emulator(),
             None,
             1.0,
@@ -954,7 +954,7 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(10.0));
         run_instructions(
-            vec![Instruction::ChangeVariable("x".to_string(), Value::Text { value: "abc".to_string() })],
+            vec![Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::Text { value: "abc".to_string() }))],
             noop_emulator(),
             None,
             1.0,
@@ -968,7 +968,7 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("y".to_string(), Evaluated::Number(7.0));
         run_instructions(
-            vec![Instruction::SetVariable("x".to_string(), Value::Var { name: "y".to_string() })],
+            vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::Var { name: "y".to_string() }))],
             noop_emulator(),
             None,
             1.0,
@@ -991,7 +991,7 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: {
-                        let mut ins = vec![Instruction::WhenRan];
+                        let mut ins = vec![Instruction::new(InstructionKind::WhenRan)];
                         ins.extend(caller_instructions);
                         ins
                     },
@@ -1001,18 +1001,18 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::BlockHeader(block_id.clone()),
-                        Instruction::Return(Value::Op {
+                        Instruction::new(InstructionKind::BlockHeader(block_id.clone())),
+                        Instruction::new(InstructionKind::Return(Value::Op {
                             op: crate::input::value::Op::Mul,
                             args: vec![Value::Param { name: "n".into() }, Value::number(2.0)],
                             saved: Box::new(Value::number(0.0)),
-                        }),
+                        })),
                     ],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef {
                 id: block_id,
@@ -1026,10 +1026,10 @@ mod tests {
     #[test]
     fn value_call_to_reporter_block_resolves_and_runs() {
         let vars = empty_vars();
-        let mac = macro_with_double_block(vec![Instruction::SetVariable(
+        let mac = macro_with_double_block(vec![Instruction::new(InstructionKind::SetVariable(
             "x".to_string(),
             Value::Call { block_id: "double".to_string(), args: vec![Value::number(21.0)], saved: Box::new(Value::number(0.0)) },
-        )]);
+        ))]);
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(42.0)));
     }
@@ -1051,18 +1051,18 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::SetVariable(
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::SetVariable(
                             "x".to_string(),
                             Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
-                        ),
+                        )),
                     ],
                 },
-                Strand { id: "empty_body".into(), x: 0, y: 0, instructions: vec![Instruction::BlockHeader(block_id.clone())] },
+                Strand { id: "empty_body".into(), x: 0, y: 0, instructions: vec![Instruction::new(InstructionKind::BlockHeader(block_id.clone()))] },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
             settings: crate::macros::MacroSettings::default(),
@@ -1086,20 +1086,20 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::CallBlock { block_id: block_id.clone(), args: vec![] },
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::CallBlock { block_id: block_id.clone(), args: vec![] }),
                     ],
                 },
                 Strand {
                     id: "waiter_body".into(),
                     x: 0,
                     y: 0,
-                    instructions: vec![Instruction::BlockHeader(block_id.clone()), Instruction::Wait(Value::number(150.0))],
+                    instructions: vec![Instruction::new(InstructionKind::BlockHeader(block_id.clone())), Instruction::new(InstructionKind::Wait(Value::number(150.0)))],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: false }],
             settings: crate::macros::MacroSettings::default(),
@@ -1125,11 +1125,11 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::SetVariable(
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::SetVariable(
                             "x".to_string(),
                             Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
-                        ),
+                        )),
                     ],
                 },
                 Strand {
@@ -1137,14 +1137,14 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::BlockHeader(block_id.clone()),
-                        Instruction::Return(Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) }),
+                        Instruction::new(InstructionKind::BlockHeader(block_id.clone())),
+                        Instruction::new(InstructionKind::Return(Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) })),
                     ],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
             settings: crate::macros::MacroSettings::default(),
@@ -1173,15 +1173,15 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::SetVariable(
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::SetVariable(
                             "x".to_string(),
                             Value::Call {
                                 block_id: triple_id.clone(),
                                 args: vec![Value::number(2.0)],
                                 saved: Box::new(Value::number(0.0)),
                             },
-                        ),
+                        )),
                     ],
                 },
                 Strand {
@@ -1189,12 +1189,12 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::BlockHeader(double_id.clone()),
-                        Instruction::Return(Value::Op {
+                        Instruction::new(InstructionKind::BlockHeader(double_id.clone())),
+                        Instruction::new(InstructionKind::Return(Value::Op {
                             op: crate::input::value::Op::Mul,
                             args: vec![Value::Param { name: "n".into() }, Value::number(2.0)],
                             saved: Box::new(Value::number(0.0)),
-                        }),
+                        })),
                     ],
                 },
                 Strand {
@@ -1203,8 +1203,8 @@ mod tests {
                     y: 0,
                     // triple(n) = double(n) + n  =>  triple(2) = 4 + 2 = 6
                     instructions: vec![
-                        Instruction::BlockHeader(triple_id.clone()),
-                        Instruction::Return(Value::Op {
+                        Instruction::new(InstructionKind::BlockHeader(triple_id.clone())),
+                        Instruction::new(InstructionKind::Return(Value::Op {
                             op: crate::input::value::Op::Add,
                             args: vec![
                                 Value::Call {
@@ -1215,13 +1215,13 @@ mod tests {
                                 Value::Param { name: "n".into() },
                             ],
                             saved: Box::new(Value::number(0.0)),
-                        }),
+                        })),
                     ],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![
                 BlockDef {
@@ -1252,7 +1252,7 @@ mod tests {
     fn if_runs_body_when_condition_true() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::If { condition: true_cond(), body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))] }],
+            vec![Instruction::new(InstructionKind::If { condition: true_cond(), body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))] })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
@@ -1262,7 +1262,7 @@ mod tests {
     fn if_skips_body_when_condition_false() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::If { condition: false_cond(), body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))] }],
+            vec![Instruction::new(InstructionKind::If { condition: false_cond(), body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))] })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), None);
@@ -1272,22 +1272,22 @@ mod tests {
     fn if_else_runs_the_matching_branch() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::IfElse {
+            vec![Instruction::new(InstructionKind::IfElse {
                 condition: true_cond(),
-                then_body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
-                else_body: vec![Instruction::SetVariable("x".to_string(), Value::number(2.0))],
-            }],
+                then_body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
+                else_body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(2.0)))],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
 
         let vars2 = empty_vars();
         run_instructions(
-            vec![Instruction::IfElse {
+            vec![Instruction::new(InstructionKind::IfElse {
                 condition: false_cond(),
-                then_body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
-                else_body: vec![Instruction::SetVariable("x".to_string(), Value::number(2.0))],
-            }],
+                then_body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
+                else_body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(2.0)))],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars2),
         );
         assert_eq!(vars2.lock().unwrap().get("x"), Some(&Evaluated::Number(2.0)));
@@ -1297,26 +1297,26 @@ mod tests {
     fn nested_if_inside_if_runs_only_when_both_true() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::If {
+            vec![Instruction::new(InstructionKind::If {
                 condition: true_cond(),
-                body: vec![Instruction::If {
+                body: vec![Instruction::new(InstructionKind::If {
                     condition: true_cond(),
-                    body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
-                }],
-            }],
+                    body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
+                })],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
 
         let vars2 = empty_vars();
         run_instructions(
-            vec![Instruction::If {
+            vec![Instruction::new(InstructionKind::If {
                 condition: true_cond(),
-                body: vec![Instruction::If {
+                body: vec![Instruction::new(InstructionKind::If {
                     condition: false_cond(),
-                    body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
-                }],
-            }],
+                    body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
+                })],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars2),
         );
         assert_eq!(vars2.lock().unwrap().get("x"), None);
@@ -1340,11 +1340,11 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::SetVariable(
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::SetVariable(
                             "x".to_string(),
                             Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
-                        ),
+                        )),
                     ],
                 },
                 Strand {
@@ -1352,16 +1352,16 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::BlockHeader(block_id.clone()),
-                        Instruction::If { condition: true_cond(), body: vec![Instruction::Return(Value::number(42.0))] },
+                        Instruction::new(InstructionKind::BlockHeader(block_id.clone())),
+                        Instruction::new(InstructionKind::If { condition: true_cond(), body: vec![Instruction::new(InstructionKind::Return(Value::number(42.0)))] }),
                         // Never reached if the branch's Return correctly halted the body.
-                        Instruction::Return(Value::number(0.0)),
+                        Instruction::new(InstructionKind::Return(Value::number(0.0))),
                     ],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
             settings: crate::macros::MacroSettings::default(),
@@ -1374,10 +1374,10 @@ mod tests {
     fn repeat_runs_body_n_times() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::Repeat {
+            vec![Instruction::new(InstructionKind::Repeat {
                 count: Value::number(5.0),
-                body: vec![Instruction::ChangeVariable("x".to_string(), Value::number(1.0))],
-            }],
+                body: vec![Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(1.0)))],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(5.0)));
@@ -1387,10 +1387,10 @@ mod tests {
     fn repeat_with_zero_or_negative_count_never_runs_body() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::Repeat {
+            vec![Instruction::new(InstructionKind::Repeat {
                 count: Value::number(-3.0),
-                body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))],
-            }],
+                body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), None);
@@ -1400,13 +1400,13 @@ mod tests {
     fn escape_loop_stops_repeat_early() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::Repeat {
+            vec![Instruction::new(InstructionKind::Repeat {
                 count: Value::number(10.0),
                 body: vec![
-                    Instruction::ChangeVariable("x".to_string(), Value::number(1.0)),
-                    Instruction::If { condition: true_cond(), body: vec![Instruction::EscapeLoop] },
+                    Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(1.0))),
+                    Instruction::new(InstructionKind::If { condition: true_cond(), body: vec![Instruction::new(InstructionKind::EscapeLoop)] }),
                 ],
-            }],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(1.0)));
@@ -1416,15 +1416,15 @@ mod tests {
     fn continue_loop_skips_rest_of_iteration_but_keeps_looping() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::Repeat {
+            vec![Instruction::new(InstructionKind::Repeat {
                 count: Value::number(3.0),
                 body: vec![
-                    Instruction::ChangeVariable("x".to_string(), Value::number(1.0)),
-                    Instruction::ContinueLoop,
+                    Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(1.0))),
+                    Instruction::new(InstructionKind::ContinueLoop),
                     // Never reached — proves ContinueLoop halted this iteration.
-                    Instruction::ChangeVariable("x".to_string(), Value::number(100.0)),
+                    Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(100.0))),
                 ],
-            }],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(3.0)));
@@ -1435,14 +1435,14 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(0.0));
         run_instructions(
-            vec![Instruction::While {
+            vec![Instruction::new(InstructionKind::While {
                 condition: Value::Op {
                     op: crate::input::value::Op::Lt,
                     args: vec![Value::Var { name: "x".to_string() }, Value::number(5.0)],
                     saved: Box::new(Value::Bool),
                 },
-                body: vec![Instruction::ChangeVariable("x".to_string(), Value::number(1.0))],
-            }],
+                body: vec![Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(1.0)))],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(5.0)));
@@ -1452,7 +1452,7 @@ mod tests {
     fn while_loop_with_false_condition_never_runs_body() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::While { condition: false_cond(), body: vec![Instruction::SetVariable("x".to_string(), Value::number(1.0))] }],
+            vec![Instruction::new(InstructionKind::While { condition: false_cond(), body: vec![Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))] })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), None);
@@ -1463,20 +1463,20 @@ mod tests {
         let vars = empty_vars();
         vars.lock().unwrap().insert("x".to_string(), Evaluated::Number(0.0));
         run_instructions(
-            vec![Instruction::Forever {
+            vec![Instruction::new(InstructionKind::Forever {
                 body: vec![
-                    Instruction::ChangeVariable("x".to_string(), Value::number(1.0)),
-                    Instruction::IfElse {
+                    Instruction::new(InstructionKind::ChangeVariable("x".to_string(), Value::number(1.0))),
+                    Instruction::new(InstructionKind::IfElse {
                         condition: Value::Op {
                             op: crate::input::value::Op::Gte,
                             args: vec![Value::Var { name: "x".to_string() }, Value::number(3.0)],
                             saved: Box::new(Value::Bool),
                         },
-                        then_body: vec![Instruction::EscapeLoop],
+                        then_body: vec![Instruction::new(InstructionKind::EscapeLoop)],
                         else_body: vec![],
-                    },
+                    }),
                 ],
-            }],
+            })],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(3.0)));
@@ -1494,7 +1494,7 @@ mod tests {
         });
         let start = Instant::now();
         run_instructions(
-            vec![Instruction::Forever { body: vec![] }],
+            vec![Instruction::new(InstructionKind::Forever { body: vec![] })],
             noop_emulator(), Some(stop_flag), 1.0, empty_vars(),
         );
         assert!(start.elapsed() < Duration::from_millis(1000), "forever loop wasn't stopped by the stop flag");
@@ -1517,11 +1517,11 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::WhenRan,
-                        Instruction::SetVariable(
+                        Instruction::new(InstructionKind::WhenRan),
+                        Instruction::new(InstructionKind::SetVariable(
                             "x".to_string(),
                             Value::Call { block_id: block_id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
-                        ),
+                        )),
                     ],
                 },
                 Strand {
@@ -1529,16 +1529,16 @@ mod tests {
                     x: 0,
                     y: 0,
                     instructions: vec![
-                        Instruction::BlockHeader(block_id.clone()),
-                        Instruction::Repeat { count: Value::number(10.0), body: vec![Instruction::Return(Value::number(7.0))] },
+                        Instruction::new(InstructionKind::BlockHeader(block_id.clone())),
+                        Instruction::new(InstructionKind::Repeat { count: Value::number(10.0), body: vec![Instruction::new(InstructionKind::Return(Value::number(7.0)))] }),
                         // Never reached if Return correctly halted the loop and the body.
-                        Instruction::Return(Value::number(0.0)),
+                        Instruction::new(InstructionKind::Return(Value::number(0.0))),
                     ],
                 },
             ],
             recording_target: None,
             speed_multiplier: 1.0,
-            floating_values: vec![],
+            floating_values: vec![], comments: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
             settings: crate::macros::MacroSettings::default(),
@@ -1555,7 +1555,7 @@ mod tests {
     fn escape_loop_with_no_enclosing_loop_is_a_harmless_no_op() {
         let vars = empty_vars();
         run_instructions(
-            vec![Instruction::EscapeLoop, Instruction::SetVariable("x".to_string(), Value::number(1.0))],
+            vec![Instruction::new(InstructionKind::EscapeLoop), Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(1.0)))],
             noop_emulator(), None, 1.0, Arc::clone(&vars),
         );
         // EscapeLoop with nothing to catch it halts the whole strand, same as

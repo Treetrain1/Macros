@@ -6,6 +6,7 @@ import { attachValueDragListeners } from '../valueDrag';
 import { openCanvasMenu } from '../contextMenu';
 import StrandCard from './StrandCard.vue';
 import FloatingValueCard from './FloatingValueCard.vue';
+import CommentCard from './CommentCard.vue';
 import ContextMenu from './ContextMenu.vue';
 
 defineProps<{ recording: boolean }>();
@@ -30,7 +31,7 @@ onMounted(() => {
 // binding: `flush: 'post'` guarantees the v-for'd .strand-card/
 // .value-floating-card elements already exist in the DOM when it runs.
 watch(
-  () => [state.current_macro?.strands, state.current_macro?.floating_values],
+  () => [state.current_macro?.strands, state.current_macro?.floating_values, state.current_macro?.comments],
   () => positionCanvas(state.current_macro),
   { flush: 'post', deep: true },
 );
@@ -41,11 +42,17 @@ watch(
     <div class="canvas-scroll" id="canvas-scroll" @contextmenu.prevent="onCanvasContextMenu">
       <div class="canvas-sizer" id="canvas-sizer">
         <div class="canvas-inner" id="canvas-inner">
+          <svg id="comment-connector-layer" class="comment-connector-layer"></svg>
           <StrandCard v-for="strand in state.current_macro?.strands ?? []" :key="strand.id" :strand="strand" />
           <FloatingValueCard
             v-for="fv in state.current_macro?.floating_values ?? []"
             :key="fv.id"
             :floating-value="fv"
+          />
+          <CommentCard
+            v-for="comment in state.current_macro?.comments ?? []"
+            :key="comment.id"
+            :comment="comment"
           />
         </div>
       </div>

@@ -19,7 +19,7 @@
 use crate::scheduled_run;
 use crate::state::SharedState;
 use chrono::{Local, NaiveDate};
-use macros_core::macros::Instruction;
+use macros_core::macros::InstructionKind;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +66,7 @@ fn run<R: Runtime>(shared_state: SharedState, app: AppHandle<R>) {
                 continue;
             }
             for strand in &mac.strands {
-                let Some(Instruction::WhenTime(schedule)) = strand.instructions.first() else { continue };
+                let Some(InstructionKind::WhenTime(schedule)) = strand.instructions.first().map(|i| &i.kind) else { continue };
 
                 let key = (mac.id.clone(), strand.id.clone());
                 let already_fired_today = last_fired.get(&key) == Some(&today);

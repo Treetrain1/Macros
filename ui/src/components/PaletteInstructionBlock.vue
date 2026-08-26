@@ -28,7 +28,6 @@ import PaletteScrollFields from './fields/palette/PaletteScrollFields.vue';
 import PaletteCommandFields from './fields/palette/PaletteCommandFields.vue';
 import PaletteOpenAppFields from './fields/palette/PaletteOpenAppFields.vue';
 import PaletteCloseAppFields from './fields/palette/PaletteCloseAppFields.vue';
-import PaletteCommentFields from './fields/palette/PaletteCommentFields.vue';
 import PaletteSetVariableFields from './fields/palette/PaletteSetVariableFields.vue';
 import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableFields.vue';
 import PaletteReturnFields from './fields/palette/PaletteReturnFields.vue';
@@ -44,13 +43,14 @@ import PaletteContinueLoopFields from './fields/palette/PaletteContinueLoopField
 // the sidebar at all (only ever created via the "Make a Block" dialog), and
 // a call's prototype is per-block-id/dynamic (see PaletteCallBlock.vue in
 // the "My Blocks" section) rather than one fixed shape this generic prefab
-// could render.
-const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'CallBlock'> }>();
+// could render. `Comment` is excluded too — comments are floating notes now
+// (right-click canvas/a block), not a sidebar prefab; see CommentCard.vue.
+const props = defineProps<{ type: Exclude<InstructionType, 'BlockHeader' | 'CallBlock' | 'Comment'> }>();
 
 // If/IfElse/Repeat/Forever/While are wrap/C-blocks, rendered separately
 // below (mirrors InstructionRow.vue's own real-canvas split) — a flattened
 // single-line `.instruction-content` can't show a bracket shape.
-type ExcludedType = 'BlockHeader' | 'CallBlock' | 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
+type ExcludedType = 'BlockHeader' | 'CallBlock' | 'Comment' | 'If' | 'IfElse' | 'Repeat' | 'Forever' | 'While';
 const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Component> = {
   WhenRan: PaletteWhenRanFields,
   WhenBatteryDischargedTo: PaletteWhenBatteryDischargedToFields,
@@ -67,7 +67,6 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Co
   Command: PaletteCommandFields,
   OpenApp: PaletteOpenAppFields,
   CloseApp: PaletteCloseAppFields,
-  Comment: PaletteCommentFields,
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
   Return: PaletteReturnFields,

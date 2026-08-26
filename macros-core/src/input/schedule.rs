@@ -1,7 +1,7 @@
-//! `TimeSchedule` — the payload of `Instruction::WhenTime`: a recurring
+//! `TimeSchedule` — the payload of `InstructionKind::WhenTime`: a recurring
 //! point in local time (daily, weekly, monthly, or yearly) plus a
 //! time-of-day. Backs the background time watcher (e.g. src-tauri's
-//! `time_watch` module), the same way `Instruction::WhenBatteryDischargedTo`/
+//! `time_watch` module), the same way `InstructionKind::WhenBatteryDischargedTo`/
 //! `WhenBatteryChargedTo` back the battery watcher.
 
 use chrono::{DateTime, Datelike, Local, Timelike};
@@ -33,7 +33,7 @@ impl Weekday {
     }
 }
 
-/// A recurring point in local time — the payload of `Instruction::WhenTime`.
+/// A recurring point in local time — the payload of `InstructionKind::WhenTime`.
 /// `hour`/`minute` are always 24-hour (0-23/0-59); which clock format the UI
 /// shows them in is purely a display concern, not part of the saved shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

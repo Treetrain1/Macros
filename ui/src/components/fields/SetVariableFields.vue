@@ -12,7 +12,7 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extr
 const variableNames = computed(() => sortedVariableNames(state.current_macro));
 
 function onNameChange(name: string) {
-  editInstruction(props.strandId, props.path, { type: 'SetVariable', name, value: props.instruction.value });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'SetVariable', name, value: props.instruction.value });
 }
 </script>
 

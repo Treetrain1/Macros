@@ -13,7 +13,7 @@ const isCapturing = computed(() =>
 );
 
 function onDirectionChange(dir: string) {
-  editInstruction(props.strandId, props.path, { type: 'Key', key: props.instruction.key, direction: dir as KeyDirection });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'Key', key: props.instruction.key, direction: dir as KeyDirection });
 }
 </script>
 

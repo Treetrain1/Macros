@@ -183,6 +183,7 @@ function onRowPointerLeave() {
     class="instruction-row instruction-row-wrap"
     :class="{ 'row-first': isFirst, 'row-last': isLast, 'wrap-spine-hover': spineHovered }"
     :data-index="index"
+    :data-instr-id="instruction.id"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"
     @pointerover="onRowPointerOver"
@@ -208,6 +209,7 @@ function onRowPointerLeave() {
     class="instruction-row"
     :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': isEntryTriggerType(instruction.type), 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
     :data-index="index"
+    :data-instr-id="instruction.id"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"
   >

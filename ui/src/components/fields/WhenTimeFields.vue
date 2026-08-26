@@ -9,7 +9,7 @@ import type { InstrPath, InstructionDto, TimeScheduleDto, WeekdayDto } from '../
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'WhenTime' }> }>();
 
 function commit(schedule: TimeScheduleDto) {
-  editInstruction(props.strandId, props.path, { type: 'WhenTime', schedule });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'WhenTime', schedule });
 }
 
 function onModeChange(v: string) {

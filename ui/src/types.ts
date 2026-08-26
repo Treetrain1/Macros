@@ -182,12 +182,28 @@ export interface FloatingValueDto {
   value: ValueDto;
 }
 
+// A floating, collapsible note — freestanding (`attached_to: null`, `x`/`y`
+// an absolute canvas position, same convention as FloatingValueDto) or
+// pinned to an instruction (`attached_to` its id, `x`/`y` an *offset* from
+// that instruction's on-screen position instead — canvasDrag.ts's
+// positionCanvas resolves the absolute position at render time, since only
+// the frontend's own DOM measurement knows where a given instruction row
+// actually renders).
+export interface CommentDto {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  collapsed: boolean;
+  attached_to: string | null;
+}
+
 // Root-of-field location for the field components under ui/src/components/fields/.
 export function fieldLocation(strandId: string, instrPath: InstrPath, fieldId: string): ValueLocationDto {
   return { kind: 'Field', strand_id: strandId, index: instrPath, field_id: fieldId, path: [] };
 }
 
-export type InstructionDto =
+export type InstructionDto = { id: string } & (
   | { type: 'Wait'; duration: ValueDto }
   | { type: 'Text'; text: ValueDto }
   | { type: 'Key'; key: string; direction: KeyDirection }
@@ -195,6 +211,9 @@ export type InstructionDto =
   | { type: 'MoveMouse'; x: ValueDto; y: ValueDto; coordinate: Coordinate }
   | { type: 'Scroll'; amount: ValueDto; axis: ScrollAxis }
   | { type: 'Command'; command: string }
+  // Legacy-only: an old inline comment instruction, or the placeholder shown
+  // for a raw/unmapped recorded keycode. No longer user-creatable — see
+  // Comment (the floating-note type) and store.ts's comments list instead.
   | { type: 'Comment'; comment: string }
   | { type: 'WhenRan' }
   | { type: 'WhenBatteryDischargedTo'; threshold: ValueDto }
@@ -215,44 +234,69 @@ export type InstructionDto =
   | { type: 'Forever'; body: InstructionDto[] }
   | { type: 'While'; condition: ValueDto; body: InstructionDto[] }
   | { type: 'EscapeLoop' }
-  | { type: 'ContinueLoop' };
+  | { type: 'ContinueLoop' }
+);
 
 export type InstructionType = InstructionDto['type'];
+
+// A fresh id for a brand-new instruction/comment — same fallback pattern as
+// MakeBlockDialog.vue's piece ids, for a webview without `crypto.randomUUID`.
+export function newId(): string {
+  return crypto.randomUUID?.() ?? `i${Math.random().toString(36).slice(2)}`;
+}
 
 // Fresh instruction for a given type — mirrors src-tauri/src/commands.rs's
 // defaults. Seeds both a brand-new sidebar drop and a prefab's editable state.
 export function defaultInstruction(type: InstructionType): InstructionDto {
+  const id = newId();
   switch (type) {
-    case 'WhenRan': return { type: 'WhenRan' };
-    case 'WhenBatteryDischargedTo': return { type: 'WhenBatteryDischargedTo', threshold: numberValue(20) };
-    case 'WhenBatteryChargedTo': return { type: 'WhenBatteryChargedTo', threshold: numberValue(100) };
-    case 'WhenTime': return { type: 'WhenTime', schedule: { kind: 'Daily', hour: 9, minute: 0 } };
-    case 'WhenPowerPluggedIn': return { type: 'WhenPowerPluggedIn' };
-    case 'WhenPowerUnplugged': return { type: 'WhenPowerUnplugged' };
-    case 'OpenApp': return { type: 'OpenApp', command: '', name: '', icon: null };
-    case 'CloseApp': return { type: 'CloseApp', command: '', name: '', icon: null };
-    case 'Wait': return { type: 'Wait', duration: numberValue(1000) };
-    case 'Text': return { type: 'Text', text: textValue('text') };
-    case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
-    case 'Button': return { type: 'Button', button: 'Left', direction: 'Click' };
-    case 'MoveMouse': return { type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };
-    case 'Scroll': return { type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
-    case 'Command': return { type: 'Command', command: '' };
-    case 'Comment': return { type: 'Comment', comment: '' };
-    case 'SetVariable': return { type: 'SetVariable', name: '', value: numberValue(0) };
-    case 'ChangeVariable': return { type: 'ChangeVariable', name: '', value: numberValue(0) };
-    case 'BlockHeader': return { type: 'BlockHeader', block_id: '' };
-    case 'CallBlock': return { type: 'CallBlock', block_id: '', args: [] };
-    case 'Return': return { type: 'Return', value: numberValue(0) };
-    case 'If': return { type: 'If', condition: blankBoolValue(), body: [] };
-    case 'IfElse': return { type: 'IfElse', condition: blankBoolValue(), then_body: [], else_body: [] };
-    case 'Repeat': return { type: 'Repeat', count: numberValue(10), body: [] };
-    case 'Forever': return { type: 'Forever', body: [] };
-    case 'While': return { type: 'While', condition: blankBoolValue(), body: [] };
-    case 'EscapeLoop': return { type: 'EscapeLoop' };
-    case 'ContinueLoop': return { type: 'ContinueLoop' };
-    default: return { type: 'Comment', comment: '' };
+    case 'WhenRan': return { id, type: 'WhenRan' };
+    case 'WhenBatteryDischargedTo': return { id, type: 'WhenBatteryDischargedTo', threshold: numberValue(20) };
+    case 'WhenBatteryChargedTo': return { id, type: 'WhenBatteryChargedTo', threshold: numberValue(100) };
+    case 'WhenTime': return { id, type: 'WhenTime', schedule: { kind: 'Daily', hour: 9, minute: 0 } };
+    case 'WhenPowerPluggedIn': return { id, type: 'WhenPowerPluggedIn' };
+    case 'WhenPowerUnplugged': return { id, type: 'WhenPowerUnplugged' };
+    case 'OpenApp': return { id, type: 'OpenApp', command: '', name: '', icon: null };
+    case 'CloseApp': return { id, type: 'CloseApp', command: '', name: '', icon: null };
+    case 'Wait': return { id, type: 'Wait', duration: numberValue(1000) };
+    case 'Text': return { id, type: 'Text', text: textValue('text') };
+    case 'Key': return { id, type: 'Key', key: 'a', direction: 'Click' };
+    case 'Button': return { id, type: 'Button', button: 'Left', direction: 'Click' };
+    case 'MoveMouse': return { id, type: 'MoveMouse', x: numberValue(0), y: numberValue(0), coordinate: 'Relative' };
+    case 'Scroll': return { id, type: 'Scroll', amount: numberValue(4), axis: 'Vertical' };
+    case 'Command': return { id, type: 'Command', command: '' };
+    case 'Comment': return { id, type: 'Comment', comment: '' };
+    case 'SetVariable': return { id, type: 'SetVariable', name: '', value: numberValue(0) };
+    case 'ChangeVariable': return { id, type: 'ChangeVariable', name: '', value: numberValue(0) };
+    case 'BlockHeader': return { id, type: 'BlockHeader', block_id: '' };
+    case 'CallBlock': return { id, type: 'CallBlock', block_id: '', args: [] };
+    case 'Return': return { id, type: 'Return', value: numberValue(0) };
+    case 'If': return { id, type: 'If', condition: blankBoolValue(), body: [] };
+    case 'IfElse': return { id, type: 'IfElse', condition: blankBoolValue(), then_body: [], else_body: [] };
+    case 'Repeat': return { id, type: 'Repeat', count: numberValue(10), body: [] };
+    case 'Forever': return { id, type: 'Forever', body: [] };
+    case 'While': return { id, type: 'While', condition: blankBoolValue(), body: [] };
+    case 'EscapeLoop': return { id, type: 'EscapeLoop' };
+    case 'ContinueLoop': return { id, type: 'ContinueLoop' };
+    default: return { id, type: 'Comment', comment: '' };
   }
+}
+
+// Deep-clones an instruction (and, for a wrap block, everything nested in its
+// body/then_body/else_body) with a fresh id at every level — duplicating or
+// pasting an existing instruction must never leave two live instructions
+// sharing an id, since Comment.attached_to and the connecting-line rendering
+// resolve "the instruction" by id alone.
+export function regenerateInstructionIds(ins: InstructionDto): InstructionDto {
+  const copy: InstructionDto = { ...ins, id: newId() };
+  if (copy.type === 'If') return { ...copy, body: copy.body.map(regenerateInstructionIds) };
+  if (copy.type === 'IfElse') {
+    return { ...copy, then_body: copy.then_body.map(regenerateInstructionIds), else_body: copy.else_body.map(regenerateInstructionIds) };
+  }
+  if (copy.type === 'Repeat' || copy.type === 'Forever' || copy.type === 'While') {
+    return { ...copy, body: copy.body.map(regenerateInstructionIds) };
+  }
+  return copy;
 }
 
 export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged']);
@@ -311,6 +355,8 @@ export interface MacroDto {
   recording_target_strand_id: string | null;
   speed_multiplier: number;
   floating_values: FloatingValueDto[];
+  /** Floating/attached notes — see CommentDto. */
+  comments: CommentDto[];
   /** Declared variable names only — no current-value "watcher" UI. Insertion
    * order; use `sortedVariableNames` for display. */
   variables: string[];

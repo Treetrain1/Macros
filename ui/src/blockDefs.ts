@@ -5,7 +5,7 @@
 // block id, resized when inputs change) rather than a fixed Record.
 import { reactive, watch } from 'vue';
 import { state } from './store';
-import { numberValue, blockInputNames, findBlockDef } from './types';
+import { numberValue, blockInputNames, findBlockDef, newId } from './types';
 import type { InstructionDto, ValueDto } from './types';
 
 export const paletteCallArgs = reactive<Record<string, ValueDto[]>>({});
@@ -43,5 +43,5 @@ export function paletteCallValueFor(blockId: string): ValueDto {
 /** The `InstructionDto` a "My Blocks" command prefab represents —
  * counterpart to `paletteCallValueFor`, for per-block-id `CallBlock`s. */
 export function paletteCallInstructionFor(blockId: string): InstructionDto {
-  return { type: 'CallBlock', block_id: blockId, args: currentArgs(blockId) };
+  return { id: newId(), type: 'CallBlock', block_id: blockId, args: currentArgs(blockId) };
 }

@@ -9,7 +9,7 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extr
 
 function onCoordinateChange(v: string) {
   editInstruction(props.strandId, props.path, {
-    type: 'MoveMouse', x: props.instruction.x, y: props.instruction.y, coordinate: v as Coordinate,
+    id: props.instruction.id, type: 'MoveMouse', x: props.instruction.x, y: props.instruction.y, coordinate: v as Coordinate,
   });
 }
 </script>

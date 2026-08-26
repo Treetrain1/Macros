@@ -3,11 +3,11 @@
 // reactive/declarative rewrite — it's a real-time pointer/DOM-measurement
 // state machine Vue's reactivity graph has no visibility into.
 import { state } from './store';
-import { addInstruction, addStrand, deleteBlock, mergeStrand, moveStrand, removeStrand, splitStrand } from './tauri';
+import { addInstruction, addStrand, deleteBlock, mergeStrand, moveComment, moveStrand, removeStrand, splitStrand } from './tauri';
 import { clonePaletteInstruction } from './paletteState';
 import { closeAllDropdowns } from './dropdownRegistry';
 import { paletteCallInstructionFor } from './blockDefs';
-import type { InstrPath, InstructionDto, MacroDto, PathStep } from './types';
+import type { CommentDto, InstrPath, InstructionDto, MacroDto, PathStep } from './types';
 import { isCapType, isHeaderType, resolveInstructionList } from './types';
 
 // Structural equality for two path *prefixes* (a basePath, not necessarily a
@@ -53,6 +53,89 @@ function findStrand(strandId: string) {
   return state.current_macro?.strands?.find(st => st.id === strandId);
 }
 
+// ── Comment anchoring ───────────────────────────────────────────────────────
+// An attached comment's stored (x, y) is an *offset* from its instruction's
+// current on-screen position (see types.ts's CommentDto) — the backend has
+// no idea where a given instruction row renders (that depends on sibling
+// field widths, nesting, etc.), so resolving "where does this comment sit"
+// is purely a frontend DOM-measurement concern, same spirit as everything
+// else in this file.
+
+/** Sums `offsetLeft`/`offsetTop` from `el` up to (but not including)
+ * `ancestor`, walking the `offsetParent` chain — `el`'s position relative to
+ * `ancestor`, in the same unscaled layout-pixel space `strand.x`/`y` use. */
+function offsetWithin(el: HTMLElement, ancestor: HTMLElement): [number, number] {
+  let x = 0, y = 0;
+  let node: HTMLElement | null = el;
+  while (node && node !== ancestor) {
+    x += node.offsetLeft;
+    y += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+  }
+  return [x, y];
+}
+
+/** Canvas-space (x, y) the instruction `instructionId` currently renders at
+ * — the anchor an attached comment's stored offset is added to. `null` if
+ * that instruction isn't currently rendered (e.g. its strand card hasn't
+ * mounted yet this frame) or its strand can't be found. */
+function attachedInstructionAnchor(instructionId: string): [number, number] | null {
+  const inner = document.getElementById('canvas-inner');
+  const rowEl = inner?.querySelector<HTMLElement>(`[data-instr-id="${cssEscape(instructionId)}"]`);
+  if (!rowEl) return null;
+  const cardEl = rowEl.closest<HTMLElement>('.strand-card');
+  const strandId = cardEl?.dataset.strandId;
+  const strand = strandId ? findStrand(strandId) : null;
+  if (!cardEl || !strand) return null;
+  const [offX, offY] = offsetWithin(rowEl, cardEl);
+  return [strand.x + offX, strand.y + offY];
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Draws (or removes) the callout line between each attached comment and its
+ * instruction, in `#comment-connector-layer` — a plain SVG overlay sized to
+ * match `#canvas-inner` exactly, so its own coordinates are already in the
+ * same shifted canvas-inner space `commentBase`/`minX`/`minY` produce. Reuses
+ * one `<line>` per comment id across calls instead of tearing down and
+ * rebuilding the whole layer every frame. */
+function updateCommentConnectors(
+  comments: CommentDto[],
+  commentCardEls: Map<string, HTMLElement>,
+  commentBase: Map<string, [number, number]>,
+  minX: number,
+  minY: number,
+) {
+  const svg = document.getElementById('comment-connector-layer');
+  if (!svg) return;
+  const seen = new Set<string>();
+  for (const c of comments) {
+    if (!c.attached_to) continue;
+    const card = commentCardEls.get(c.id);
+    const base = commentBase.get(c.id);
+    const anchor = attachedInstructionAnchor(c.attached_to);
+    if (!card || !base || !anchor) continue;
+    seen.add(c.id);
+    let line = svg.querySelector<SVGLineElement>(`line[data-comment-id="${cssEscape(c.id)}"]`);
+    if (!line) {
+      line = document.createElementNS(SVG_NS, 'line');
+      line.dataset.commentId = c.id;
+      line.setAttribute('class', 'comment-connector-line');
+      svg.appendChild(line);
+    }
+    const rowEl = document.getElementById('canvas-inner')?.querySelector<HTMLElement>(`[data-instr-id="${cssEscape(c.attached_to)}"]`);
+    const rowW = rowEl?.offsetWidth ?? 0;
+    const rowH = rowEl?.offsetHeight ?? 0;
+    line.setAttribute('x1', `${anchor[0] + rowW / 2 - minX + CANVAS_PAD}`);
+    line.setAttribute('y1', `${anchor[1] + rowH / 2 - minY + CANVAS_PAD}`);
+    line.setAttribute('x2', `${base[0] + card.offsetWidth / 2 - minX + CANVAS_PAD}`);
+    line.setAttribute('y2', `${base[1] + card.offsetHeight / 2 - minY + CANVAS_PAD}`);
+  }
+  for (const line of Array.from(svg.querySelectorAll<SVGLineElement>('line[data-comment-id]'))) {
+    if (!seen.has(line.dataset.commentId ?? '')) line.remove();
+  }
+}
+
 // ── Zoom (ctrl+scroll) ──────────────────────────────────────────────────────
 // canvas-inner stays laid out at unscaled coordinates and is visually scaled
 // via CSS transform; canvas-sizer's box matches the zoomed footprint so
@@ -82,6 +165,7 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
 
   const strands = macro?.strands ?? [];
   const floatingValues = macro?.floating_values ?? [];
+  const comments = macro?.comments ?? [];
   const macroId = macro?.id ?? null;
   if (macroId !== currentMacroId) canvasZoom = 1;
 
@@ -94,6 +178,25 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
   for (const fv of floatingValues) {
     const el = inner.querySelector<HTMLElement>(`.value-floating-card[data-floating-id="${cssEscape(fv.id)}"]`);
     if (el) floatingCardEls.set(fv.id, el);
+  }
+  const commentCardEls = new Map<string, HTMLElement>();
+  // Raw canvas-space (x, y) each comment resolves to this frame — an
+  // attached comment's own stored (x, y) is only the offset (see
+  // attachedInstructionAnchor's doc comment), so this is computed once here
+  // and reused for both the bounds pass below and the connector-line pass
+  // at the end, rather than re-deriving it twice.
+  const commentBase = new Map<string, [number, number]>();
+  for (const c of comments) {
+    const el = inner.querySelector<HTMLElement>(`.comment-card[data-comment-id="${cssEscape(c.id)}"]`);
+    if (!el) continue;
+    commentCardEls.set(c.id, el);
+    if (c.attached_to) {
+      const anchor = attachedInstructionAnchor(c.attached_to);
+      if (!anchor) continue; // block not rendered this frame — skip, keep last position
+      commentBase.set(c.id, [anchor[0] + c.x, anchor[1] + c.y]);
+    } else {
+      commentBase.set(c.id, [c.x, c.y]);
+    }
   }
 
   const prevMinX = lastBounds.minX;
@@ -114,6 +217,15 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     minY = Math.min(minY, fv.y);
     maxX = Math.max(maxX, fv.x + card.offsetWidth);
     maxY = Math.max(maxY, fv.y + card.offsetHeight);
+  }
+  for (const c of comments) {
+    const card = commentCardEls.get(c.id);
+    const base = commentBase.get(c.id);
+    if (!card || !base) continue;
+    minX = Math.min(minX, base[0]);
+    minY = Math.min(minY, base[1]);
+    maxX = Math.max(maxX, base[0] + card.offsetWidth);
+    maxY = Math.max(maxY, base[1] + card.offsetHeight);
   }
   lastBounds = { minX, minY };
 
@@ -143,6 +255,14 @@ export function positionCanvas(macro: MacroDto | null | undefined) {
     card.style.left = `${fv.x - minX + CANVAS_PAD}px`;
     card.style.top = `${fv.y - minY + CANVAS_PAD}px`;
   }
+  for (const c of comments) {
+    const card = commentCardEls.get(c.id);
+    const base = commentBase.get(c.id);
+    if (!card || !base) continue;
+    card.style.left = `${base[0] - minX + CANVAS_PAD}px`;
+    card.style.top = `${base[1] - minY + CANVAS_PAD}px`;
+  }
+  updateCommentConnectors(comments, commentCardEls, commentBase, minX, minY);
 
   // A split-drag's new strand can render as a real, visible card at the split
   // point before drop — hide it for the drag's duration (same idea as the
@@ -270,20 +390,20 @@ function beginPan(e: PointerEvent) {
   if (e.button !== 1 && e.button !== 0) return;
   if (!(e.target as Element)?.closest?.('#canvas-scroll')) return;
   // A left-click only pans when it lands on genuinely empty canvas space —
-  // an actual instruction row (or the strand's empty-strand hint) or a
-  // floating value card is left alone so beginPickup/value-drag pointerdown
-  // handlers (bound deeper in those trees) keep working as normal
-  // left-click-drags. This deliberately checks for real row content rather
-  // than `.strand-card` as a whole: a card's bounding box is only as wide as
-  // its widest row (`.strand-body` uses `align-items: flex-start`, so
-  // narrower rows don't stretch to match), so a card with rows of differing
-  // widths has genuinely blank space inside its box, to the right of any
-  // narrower row — e.g. right of a short "forever" header when a wider
-  // block sits in its body/siblings. That gutter isn't covered by any row's
-  // own pointerdown handler, so excluding all of `.strand-card` left it
-  // dead: no pan, and no preventDefault() either, so the browser fell back
-  // to its native text-selection drag.
-  if (e.button === 0 && (e.target as Element)?.closest?.('.instruction-row, .strand-empty-hint, .value-floating-card')) return;
+  // an actual instruction row (or the strand's empty-strand hint), a
+  // floating value card, or a comment card is left alone so beginPickup/
+  // value-drag/beginCommentDrag pointerdown handlers (bound deeper in those
+  // trees) keep working as normal left-click-drags. This deliberately checks
+  // for real row content rather than `.strand-card` as a whole: a card's
+  // bounding box is only as wide as its widest row (`.strand-body` uses
+  // `align-items: flex-start`, so narrower rows don't stretch to match), so a
+  // card with rows of differing widths has genuinely blank space inside its
+  // box, to the right of any narrower row — e.g. right of a short "forever"
+  // header when a wider block sits in its body/siblings. That gutter isn't
+  // covered by any row's own pointerdown handler, so excluding all of
+  // `.strand-card` left it dead: no pan, and no preventDefault() either, so
+  // the browser fell back to its native text-selection drag.
+  if (e.button === 0 && (e.target as Element)?.closest?.('.instruction-row, .strand-empty-hint, .value-floating-card, .comment-card')) return;
   // preventDefault() below suppresses the compatibility `mousedown` event a
   // mouse pointerdown would otherwise fire — that's what the context menu
   // and other dropdowns listen for to close on an outside click, so without
@@ -378,6 +498,49 @@ interface PaletteDragState {
 }
 let paletteDrag: PaletteDragState | null = null;
 
+// ── Comment drag (drag by its own title bar only) ───────────────────────────
+interface CommentDragState {
+  pointerId: number;
+  commentId: string;
+  offsetX: number;
+  offsetY: number;
+  ghostEl: HTMLElement;
+  restoreCard: { el: HTMLElement; parent: Node; next: Node | null };
+}
+let commentDrag: CommentDragState | null = null;
+
+/** Starts dragging a comment card — called from its own title-bar
+ * pointerdown handler (CommentCard.vue), never from anywhere else on the
+ * card, per the "drag by the top" spec. Moves the real card into a ghost
+ * (same technique as a whole-strand grab in `startDrag`) so it visually
+ * follows the pointer without touching reactive state mid-drag; the actual
+ * `moveComment` call happens once, on drop. */
+export function beginCommentDrag(e: PointerEvent, commentId: string) {
+  if (e.button !== undefined && e.button !== 0) return;
+  const cardEl = document.querySelector<HTMLElement>(`.comment-card[data-comment-id="${cssEscape(commentId)}"]`);
+  if (!cardEl) return;
+  e.preventDefault();
+  capturePointer(e);
+  const rect = cardEl.getBoundingClientRect();
+  const ghost = document.createElement('div');
+  ghost.className = 'comment-drag-ghost';
+  const restoreCard = { el: cardEl, parent: cardEl.parentNode as Node, next: cardEl.nextSibling };
+  cardEl.style.position = 'static';
+  cardEl.style.left = '';
+  cardEl.style.top = '';
+  ghost.appendChild(cardEl);
+  document.body.appendChild(ghost);
+  commentDrag = {
+    pointerId: e.pointerId,
+    commentId,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+    ghostEl: ghost,
+    restoreCard,
+  };
+  positionGhost(e);
+}
+
 export function beginPickup(e: PointerEvent, strandId: string, path: InstrPath) {
   if (state.recording_phase.phase === 'Active') return;
   if (e.button !== undefined && e.button !== 0) return;
@@ -425,7 +588,7 @@ function positionGhost(e: PointerEvent) {
   ghostRafPending = true;
   requestAnimationFrame(() => {
     ghostRafPending = false;
-    const active = drag ?? paletteDrag;
+    const active = drag ?? paletteDrag ?? commentDrag;
     if (!active || !lastPointerEvent) return;
     const tx = lastPointerEvent.clientX - active.offsetX;
     const ty = lastPointerEvent.clientY - active.offsetY;
@@ -661,6 +824,10 @@ function onPointerMove(e: PointerEvent) {
     }
     return;
   }
+  if (commentDrag && e.pointerId === commentDrag.pointerId) {
+    positionGhost(e);
+    return;
+  }
   if (paletteDrag && e.pointerId === paletteDrag.pointerId) {
     positionGhost(e);
     // A brand-new "When Ran" always becomes its own detached strand — it
@@ -716,6 +883,28 @@ function onPointerUp(e: PointerEvent) {
   }
   if (dragCandidate && dragCandidate.pointerId === e.pointerId) {
     dragCandidate = null;
+  }
+
+  if (commentDrag && commentDrag.pointerId === e.pointerId) {
+    const finished = commentDrag;
+    commentDrag = null;
+    finished.restoreCard.el.style.position = '';
+    finished.restoreCard.parent.insertBefore(finished.restoreCard.el, finished.restoreCard.next);
+    finished.ghostEl.remove();
+
+    const [absX, absY] = clientToCanvas(e.clientX - finished.offsetX, e.clientY - finished.offsetY);
+    const comment = state.current_macro?.comments?.find(c => c.id === finished.commentId);
+    if (comment) {
+      // Freestanding: stored (x, y) is the absolute canvas position, same as
+      // a floating value. Attached: stored (x, y) is an offset from the
+      // instruction's current position, so subtract that anchor back out.
+      const anchor = comment.attached_to ? attachedInstructionAnchor(comment.attached_to) : null;
+      const [x, y] = anchor ? [absX - anchor[0], absY - anchor[1]] : [absX, absY];
+      comment.x = x;
+      comment.y = y;
+      void moveComment(finished.commentId, x, y);
+    }
+    return;
   }
 
   if (paletteDrag && paletteDrag.pointerId === e.pointerId) {

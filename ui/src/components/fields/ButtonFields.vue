@@ -6,10 +6,10 @@ import type { InstrPath, InstructionDto, KeyDirection, MouseButton } from '../..
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Button' }> }>();
 
 function onButtonChange(v: string) {
-  editInstruction(props.strandId, props.path, { type: 'Button', button: v as MouseButton, direction: props.instruction.direction });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'Button', button: v as MouseButton, direction: props.instruction.direction });
 }
 function onDirectionChange(dir: string) {
-  editInstruction(props.strandId, props.path, { type: 'Button', button: props.instruction.button, direction: dir as KeyDirection });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'Button', button: props.instruction.button, direction: dir as KeyDirection });
 }
 </script>
 

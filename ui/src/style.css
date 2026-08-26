@@ -1845,6 +1845,107 @@ body.sidebar-resizing {
   position: absolute;
 }
 
+/* ── Comments (floating/attached notes) ──────────────────────────────────── */
+/* Positioning container, same idea as .value-floating-card — left/top set
+   imperatively by positionCanvas(). Sized to its content, not the whole
+   canvas, and capped so a long note doesn't sprawl. */
+.comment-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  border-radius: var(--radius);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.comment-card-collapsed { width: auto; }
+
+.comment-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 8px;
+  cursor: grab;
+  color: var(--text-dim);
+  user-select: none;
+}
+.comment-card-header:active { cursor: grabbing; }
+.comment-card-icon { width: 14px; height: 14px; flex-shrink: 0; }
+.comment-card-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.comment-card-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  min-height: unset;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+}
+.comment-card-btn:hover { background: var(--hover-overlay); color: var(--text); }
+.comment-card-btn svg { width: 14px; height: 14px; }
+.comment-card-delete:hover { color: var(--red); }
+
+.comment-card-body {
+  resize: none;
+  border: none;
+  border-top: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px;
+  min-height: 1.4em;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.comment-card-body:focus { outline: none; }
+.comment-card-body::placeholder { color: var(--text-dim); }
+
+/* Bare wrapper for a dragged comment card — same technique as
+   .strand-drag-ghost, but the card keeps its own look at rest. */
+.comment-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+/* SVG overlay sized to fill #canvas-inner exactly, so a line's own
+   coordinates already share canvas-inner's shifted coordinate space —
+   see updateCommentConnectors() in canvasDrag.ts. Drawn first among
+   canvas-inner's children so cards render on top of it. */
+.comment-connector-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.comment-connector-line {
+  stroke: var(--border);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 3;
+}
+
 /* Marks the top block of whichever strand is the current recording target
    (see "Set Recording Target" in the block context menu). */
 .recording-target-dot {

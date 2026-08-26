@@ -3,13 +3,13 @@
 // touches the backend or persists, and isn't macro-scoped. Cloned onto the
 // canvas via clonePaletteInstruction/paletteValueFor when dragged out.
 import { reactive } from 'vue';
-import { defaultInstruction, defaultValueForKind, numberValue, textValue } from './types';
+import { defaultInstruction, defaultValueForKind, newId, numberValue, textValue } from './types';
 import type { InstructionDto, InstructionType, ValueDto, ValueKind } from './types';
 import { OPERATOR_KINDS, specForKind } from './valueOps';
 import type { OperatorKindSpec, OperatorValueKind } from './valueOps';
 
 const INSTRUCTION_TYPES: InstructionType[] = [
-  'WhenRan', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'OpenApp', 'CloseApp', 'Comment',
+  'WhenRan', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged', 'Wait', 'Text', 'Key', 'Button', 'MoveMouse', 'Scroll', 'Command', 'OpenApp', 'CloseApp',
   'SetVariable', 'ChangeVariable', 'Return', 'If', 'IfElse',
   'Repeat', 'Forever', 'While', 'EscapeLoop', 'ContinueLoop',
 ];
@@ -21,7 +21,7 @@ export const paletteInstructions: Record<InstructionType, InstructionDto> = reac
 /** Deep snapshot of a prefab's current state — later palette edits must not
  * retroactively mutate blocks already dropped onto the canvas. */
 export function clonePaletteInstruction(type: InstructionType): InstructionDto {
-  return JSON.parse(JSON.stringify(paletteInstructions[type]));
+  return { ...JSON.parse(JSON.stringify(paletteInstructions[type])), id: newId() };
 }
 
 function argsFor(spec: OperatorKindSpec): (number | string)[] {

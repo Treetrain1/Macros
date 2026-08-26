@@ -27,7 +27,7 @@
 
 use crate::scheduled_run;
 use crate::state::SharedState;
-use macros_core::macros::Instruction;
+use macros_core::macros::InstructionKind;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,8 +98,8 @@ fn run<R: Runtime>(shared_state: SharedState, app: AppHandle<R>) {
                 continue;
             }
             for strand in &mac.strands {
-                let holds = match strand.instructions.first() {
-                    Some(Instruction::WhenBatteryDischargedTo(v)) => {
+                let holds = match strand.instructions.first().map(|i| &i.kind) {
+                    Some(InstructionKind::WhenBatteryDischargedTo(v)) => {
                         let Some(level) = level else { continue };
                         // Only resolves plain numbers/operators — a threshold
                         // that reads a macro variable has no live value here
@@ -109,13 +109,13 @@ fn run<R: Runtime>(shared_state: SharedState, app: AppHandle<R>) {
                         let Ok(threshold) = v.resolve_vars(&HashMap::new()).eval_number() else { continue };
                         level <= threshold
                     }
-                    Some(Instruction::WhenBatteryChargedTo(v)) => {
+                    Some(InstructionKind::WhenBatteryChargedTo(v)) => {
                         let Some(level) = level else { continue };
                         let Ok(threshold) = v.resolve_vars(&HashMap::new()).eval_number() else { continue };
                         level >= threshold
                     }
-                    Some(Instruction::WhenPowerPluggedIn) => plugged_in,
-                    Some(Instruction::WhenPowerUnplugged) => !plugged_in,
+                    Some(InstructionKind::WhenPowerPluggedIn) => plugged_in,
+                    Some(InstructionKind::WhenPowerUnplugged) => !plugged_in,
                     _ => continue,
                 };
 

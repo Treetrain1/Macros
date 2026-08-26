@@ -5,7 +5,7 @@ use macros_core::input::value::{Evaluated, Op, Value};
 use macros_core::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use macros_core::macros::backend::InputBackend;
 use macros_core::macros::thread_pool::ThreadPool;
-use macros_core::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, MacroSettings, Strand};
+use macros_core::macros::{BlockDef, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, MacroSettings, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -142,6 +142,7 @@ pub(crate) enum KeyCaptureTarget {
 pub(crate) struct MacroSnapshot {
     pub(crate) strands: Vec<Strand>,
     pub(crate) floating_values: Vec<FloatingValue>,
+    pub(crate) comments: Vec<Comment>,
     pub(crate) block_defs: Vec<BlockDef>,
 }
 
@@ -236,6 +237,8 @@ pub(crate) struct MacroDto {
     pub(crate) recording_target_strand_id: Option<String>,
     pub(crate) speed_multiplier: f64,
     pub(crate) floating_values: Vec<FloatingValueDto>,
+    /// Floating/attached notes — see `CommentDto`.
+    pub(crate) comments: Vec<CommentDto>,
     /// Declared variable names only, for the sidebar/dropdowns — current
     /// values aren't surfaced to the frontend.
     pub(crate) variables: Vec<String>,
@@ -387,6 +390,7 @@ impl ValueLocation {
 pub(crate) enum TextEditSession {
     Value(ValueLocation),
     Instruction { strand_id: String, index: InstrPath },
+    Comment { comment_id: String },
 }
 
 /// Wire shape for `ValueLocation`, used for both incoming command params and
@@ -431,38 +435,49 @@ pub(crate) fn location_to_dto(loc: &ValueLocation) -> ValueLocationDto {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub(crate) enum InstructionDto {
-    Wait { duration: ValueDto },
-    Text { text: ValueDto },
-    Key { key: String, direction: String },
-    Button { button: String, direction: String },
-    MoveMouse { x: ValueDto, y: ValueDto, coordinate: String },
-    Scroll { amount: ValueDto, axis: String },
-    Command { command: String },
-    Comment { comment: String },
-    WhenRan,
-    WhenBatteryDischargedTo { threshold: ValueDto },
-    WhenBatteryChargedTo { threshold: ValueDto },
-    WhenTime { schedule: TimeSchedule },
-    WhenPowerPluggedIn,
-    WhenPowerUnplugged,
-    OpenApp { command: String, name: String, icon: Option<String> },
-    CloseApp { command: String, name: String, icon: Option<String> },
-    SetVariable { name: String, value: ValueDto },
-    ChangeVariable { name: String, value: ValueDto },
-    BlockHeader { block_id: String },
-    CallBlock { block_id: String, args: Vec<ValueDto> },
-    Return { value: ValueDto },
-    If { condition: ValueDto, body: Vec<InstructionDto> },
-    IfElse { condition: ValueDto, then_body: Vec<InstructionDto>, else_body: Vec<InstructionDto> },
-    Repeat { count: ValueDto, body: Vec<InstructionDto> },
-    Forever { body: Vec<InstructionDto> },
-    While { condition: ValueDto, body: Vec<InstructionDto> },
-    EscapeLoop,
-    ContinueLoop,
+    Wait { id: String, duration: ValueDto },
+    Text { id: String, text: ValueDto },
+    Key { id: String, key: String, direction: String },
+    Button { id: String, button: String, direction: String },
+    MoveMouse { id: String, x: ValueDto, y: ValueDto, coordinate: String },
+    Scroll { id: String, amount: ValueDto, axis: String },
+    Command { id: String, command: String },
+    Comment { id: String, comment: String },
+    WhenRan { id: String },
+    WhenBatteryDischargedTo { id: String, threshold: ValueDto },
+    WhenBatteryChargedTo { id: String, threshold: ValueDto },
+    WhenTime { id: String, schedule: TimeSchedule },
+    WhenPowerPluggedIn { id: String },
+    WhenPowerUnplugged { id: String },
+    OpenApp { id: String, command: String, name: String, icon: Option<String> },
+    CloseApp { id: String, command: String, name: String, icon: Option<String> },
+    SetVariable { id: String, name: String, value: ValueDto },
+    ChangeVariable { id: String, name: String, value: ValueDto },
+    BlockHeader { id: String, block_id: String },
+    CallBlock { id: String, block_id: String, args: Vec<ValueDto> },
+    Return { id: String, value: ValueDto },
+    If { id: String, condition: ValueDto, body: Vec<InstructionDto> },
+    IfElse { id: String, condition: ValueDto, then_body: Vec<InstructionDto>, else_body: Vec<InstructionDto> },
+    Repeat { id: String, count: ValueDto, body: Vec<InstructionDto> },
+    Forever { id: String, body: Vec<InstructionDto> },
+    While { id: String, condition: ValueDto, body: Vec<InstructionDto> },
+    EscapeLoop { id: String },
+    ContinueLoop { id: String },
+}
+
+/// A floating/attached note — see `macros_core::macros::Comment`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub(crate) struct CommentDto {
+    pub(crate) id: String,
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) text: String,
+    pub(crate) collapsed: bool,
+    pub(crate) attached_to: Option<String>,
 }
 
 /// One entry in the "Open App" picker's list — see `installed_apps`.
-/// `command` is the ready-to-launch string an `Instruction::OpenApp` stores
+/// `command` is the ready-to-launch string an `InstructionKind::OpenApp` stores
 /// as-is; `icon`, when present, is a `data:` URI.
 #[derive(Serialize, Clone)]
 pub(crate) struct AppEntryDto {
@@ -610,126 +625,133 @@ pub(crate) fn dto_to_value(dto: &ValueDto) -> Value {
 }
 
 pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
-    match ins {
-        Instruction::Wait(dur) => InstructionDto::Wait { duration: value_to_dto(dur) },
-        Instruction::Command(cmd) => InstructionDto::Command { command: cmd.clone() },
-        Instruction::Comment(c) => InstructionDto::Comment { comment: c.clone() },
-        Instruction::WhenRan => InstructionDto::WhenRan,
-        Instruction::WhenBatteryDischargedTo(threshold) => InstructionDto::WhenBatteryDischargedTo { threshold: value_to_dto(threshold) },
-        Instruction::WhenBatteryChargedTo(threshold) => InstructionDto::WhenBatteryChargedTo { threshold: value_to_dto(threshold) },
-        Instruction::WhenTime(schedule) => InstructionDto::WhenTime { schedule: *schedule },
-        Instruction::WhenPowerPluggedIn => InstructionDto::WhenPowerPluggedIn,
-        Instruction::WhenPowerUnplugged => InstructionDto::WhenPowerUnplugged,
-        Instruction::OpenApp { command, name, icon } => InstructionDto::OpenApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
-        Instruction::CloseApp { command, name, icon } => InstructionDto::CloseApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
-        Instruction::SetVariable(name, value) => InstructionDto::SetVariable { name: name.clone(), value: value_to_dto(value) },
-        Instruction::ChangeVariable(name, value) => InstructionDto::ChangeVariable { name: name.clone(), value: value_to_dto(value) },
-        Instruction::BlockHeader(block_id) => InstructionDto::BlockHeader { block_id: block_id.clone() },
-        Instruction::CallBlock { block_id, args } => {
-            InstructionDto::CallBlock { block_id: block_id.clone(), args: args.iter().map(value_to_dto).collect() }
+    let id = ins.id.clone();
+    match &ins.kind {
+        InstructionKind::Wait(dur) => InstructionDto::Wait { id, duration: value_to_dto(dur) },
+        InstructionKind::Command(cmd) => InstructionDto::Command { id, command: cmd.clone() },
+        InstructionKind::Comment(c) => InstructionDto::Comment { id, comment: c.clone() },
+        InstructionKind::WhenRan => InstructionDto::WhenRan { id },
+        InstructionKind::WhenBatteryDischargedTo(threshold) => InstructionDto::WhenBatteryDischargedTo { id, threshold: value_to_dto(threshold) },
+        InstructionKind::WhenBatteryChargedTo(threshold) => InstructionDto::WhenBatteryChargedTo { id, threshold: value_to_dto(threshold) },
+        InstructionKind::WhenTime(schedule) => InstructionDto::WhenTime { id, schedule: *schedule },
+        InstructionKind::WhenPowerPluggedIn => InstructionDto::WhenPowerPluggedIn { id },
+        InstructionKind::WhenPowerUnplugged => InstructionDto::WhenPowerUnplugged { id },
+        InstructionKind::OpenApp { command, name, icon } => InstructionDto::OpenApp { id, command: command.clone(), name: name.clone(), icon: icon.clone() },
+        InstructionKind::CloseApp { command, name, icon } => InstructionDto::CloseApp { id, command: command.clone(), name: name.clone(), icon: icon.clone() },
+        InstructionKind::SetVariable(name, value) => InstructionDto::SetVariable { id, name: name.clone(), value: value_to_dto(value) },
+        InstructionKind::ChangeVariable(name, value) => InstructionDto::ChangeVariable { id, name: name.clone(), value: value_to_dto(value) },
+        InstructionKind::BlockHeader(block_id) => InstructionDto::BlockHeader { id, block_id: block_id.clone() },
+        InstructionKind::CallBlock { block_id, args } => {
+            InstructionDto::CallBlock { id, block_id: block_id.clone(), args: args.iter().map(value_to_dto).collect() }
         }
-        Instruction::Return(value) => InstructionDto::Return { value: value_to_dto(value) },
-        Instruction::If { condition, body } => {
-            InstructionDto::If { condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
+        InstructionKind::Return(value) => InstructionDto::Return { id, value: value_to_dto(value) },
+        InstructionKind::If { condition, body } => {
+            InstructionDto::If { id, condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
         }
-        Instruction::IfElse { condition, then_body, else_body } => InstructionDto::IfElse {
+        InstructionKind::IfElse { condition, then_body, else_body } => InstructionDto::IfElse {
+            id,
             condition: value_to_dto(condition),
             then_body: then_body.iter().map(instruction_to_dto).collect(),
             else_body: else_body.iter().map(instruction_to_dto).collect(),
         },
-        Instruction::Repeat { count, body } => {
-            InstructionDto::Repeat { count: value_to_dto(count), body: body.iter().map(instruction_to_dto).collect() }
+        InstructionKind::Repeat { count, body } => {
+            InstructionDto::Repeat { id, count: value_to_dto(count), body: body.iter().map(instruction_to_dto).collect() }
         }
-        Instruction::Forever { body } => InstructionDto::Forever { body: body.iter().map(instruction_to_dto).collect() },
-        Instruction::While { condition, body } => {
-            InstructionDto::While { condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
+        InstructionKind::Forever { body } => InstructionDto::Forever { id, body: body.iter().map(instruction_to_dto).collect() },
+        InstructionKind::While { condition, body } => {
+            InstructionDto::While { id, condition: value_to_dto(condition), body: body.iter().map(instruction_to_dto).collect() }
         }
-        Instruction::EscapeLoop => InstructionDto::EscapeLoop,
-        Instruction::ContinueLoop => InstructionDto::ContinueLoop,
-        Instruction::Token(token) => match token {
-            InputToken::Text(t) => InstructionDto::Text { text: value_to_dto(t) },
+        InstructionKind::EscapeLoop => InstructionDto::EscapeLoop { id },
+        InstructionKind::ContinueLoop => InstructionDto::ContinueLoop { id },
+        InstructionKind::Token(token) => match token {
+            InputToken::Text(t) => InstructionDto::Text { id, text: value_to_dto(t) },
             InputToken::Key(k, d) => InstructionDto::Key {
+                id,
                 key: key_to_string(k).unwrap_or("Unknown").to_string(),
                 direction: direction_to_str(d).to_string(),
             },
             InputToken::Button(b, d) => InstructionDto::Button {
+                id,
                 button: get_mouse_button_names()[mouse_button_to_index(b)].to_string(),
                 direction: direction_to_str(d).to_string(),
             },
             InputToken::MoveMouse(x, y, coord) => InstructionDto::MoveMouse {
+                id,
                 x: value_to_dto(x),
                 y: value_to_dto(y),
                 coordinate: coordinate_to_str(coord).to_string(),
             },
             InputToken::Scroll(amt, axis) => InstructionDto::Scroll {
+                id,
                 amount: value_to_dto(amt),
                 axis: axis_to_str(axis).to_string(),
             },
-            InputToken::Raw(_, _) => InstructionDto::Comment { comment: "(raw keycode)".to_string() },
+            InputToken::Raw(_, _) => InstructionDto::Comment { id, comment: "(raw keycode)".to_string() },
         },
     }
 }
 
 pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
     use macros_core::input::{index_to_mouse_button, key_names::string_to_key};
-    Some(match dto {
-        InstructionDto::Wait { duration } => Instruction::Wait(dto_to_value(duration)),
-        InstructionDto::Text { text } => Instruction::Token(InputToken::Text(dto_to_value(text))),
-        InstructionDto::Key { key, direction } => {
+    let (id, kind) = match dto {
+        InstructionDto::Wait { id, duration } => (id, InstructionKind::Wait(dto_to_value(duration))),
+        InstructionDto::Text { id, text } => (id, InstructionKind::Token(InputToken::Text(dto_to_value(text)))),
+        InstructionDto::Key { id, key, direction } => {
             let mk = string_to_key(key).ok()?;
-            Instruction::Token(InputToken::Key(mk, str_to_direction(direction)))
+            (id, InstructionKind::Token(InputToken::Key(mk, str_to_direction(direction))))
         }
-        InstructionDto::Button { button, direction } => {
+        InstructionDto::Button { id, button, direction } => {
             let names = get_mouse_button_names();
             let idx = names.iter().position(|&n| n == button.as_str()).unwrap_or(0);
-            Instruction::Token(InputToken::Button(index_to_mouse_button(idx), str_to_direction(direction)))
+            (id, InstructionKind::Token(InputToken::Button(index_to_mouse_button(idx), str_to_direction(direction))))
         }
-        InstructionDto::MoveMouse { x, y, coordinate } => {
-            Instruction::Token(InputToken::MoveMouse(dto_to_value(x), dto_to_value(y), str_to_coordinate(coordinate)))
+        InstructionDto::MoveMouse { id, x, y, coordinate } => {
+            (id, InstructionKind::Token(InputToken::MoveMouse(dto_to_value(x), dto_to_value(y), str_to_coordinate(coordinate))))
         }
-        InstructionDto::Scroll { amount, axis } => {
-            Instruction::Token(InputToken::Scroll(dto_to_value(amount), str_to_axis(axis)))
+        InstructionDto::Scroll { id, amount, axis } => {
+            (id, InstructionKind::Token(InputToken::Scroll(dto_to_value(amount), str_to_axis(axis))))
         }
-        InstructionDto::Command { command } => Instruction::Command(command.clone()),
-        InstructionDto::Comment { comment } => Instruction::Comment(comment.clone()),
-        InstructionDto::WhenRan => Instruction::WhenRan,
-        InstructionDto::WhenBatteryDischargedTo { threshold } => Instruction::WhenBatteryDischargedTo(dto_to_value(threshold)),
-        InstructionDto::WhenBatteryChargedTo { threshold } => Instruction::WhenBatteryChargedTo(dto_to_value(threshold)),
-        InstructionDto::WhenTime { schedule } => Instruction::WhenTime(*schedule),
-        InstructionDto::WhenPowerPluggedIn => Instruction::WhenPowerPluggedIn,
-        InstructionDto::WhenPowerUnplugged => Instruction::WhenPowerUnplugged,
-        InstructionDto::OpenApp { command, name, icon } => Instruction::OpenApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
-        InstructionDto::CloseApp { command, name, icon } => Instruction::CloseApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
-        InstructionDto::SetVariable { name, value } => Instruction::SetVariable(name.clone(), dto_to_value(value)),
-        InstructionDto::ChangeVariable { name, value } => Instruction::ChangeVariable(name.clone(), dto_to_value(value)),
-        InstructionDto::BlockHeader { block_id } => Instruction::BlockHeader(block_id.clone()),
-        InstructionDto::CallBlock { block_id, args } => {
-            Instruction::CallBlock { block_id: block_id.clone(), args: args.iter().map(dto_to_value).collect() }
+        InstructionDto::Command { id, command } => (id, InstructionKind::Command(command.clone())),
+        InstructionDto::Comment { id, comment } => (id, InstructionKind::Comment(comment.clone())),
+        InstructionDto::WhenRan { id } => (id, InstructionKind::WhenRan),
+        InstructionDto::WhenBatteryDischargedTo { id, threshold } => (id, InstructionKind::WhenBatteryDischargedTo(dto_to_value(threshold))),
+        InstructionDto::WhenBatteryChargedTo { id, threshold } => (id, InstructionKind::WhenBatteryChargedTo(dto_to_value(threshold))),
+        InstructionDto::WhenTime { id, schedule } => (id, InstructionKind::WhenTime(*schedule)),
+        InstructionDto::WhenPowerPluggedIn { id } => (id, InstructionKind::WhenPowerPluggedIn),
+        InstructionDto::WhenPowerUnplugged { id } => (id, InstructionKind::WhenPowerUnplugged),
+        InstructionDto::OpenApp { id, command, name, icon } => (id, InstructionKind::OpenApp { command: command.clone(), name: name.clone(), icon: icon.clone() }),
+        InstructionDto::CloseApp { id, command, name, icon } => (id, InstructionKind::CloseApp { command: command.clone(), name: name.clone(), icon: icon.clone() }),
+        InstructionDto::SetVariable { id, name, value } => (id, InstructionKind::SetVariable(name.clone(), dto_to_value(value))),
+        InstructionDto::ChangeVariable { id, name, value } => (id, InstructionKind::ChangeVariable(name.clone(), dto_to_value(value))),
+        InstructionDto::BlockHeader { id, block_id } => (id, InstructionKind::BlockHeader(block_id.clone())),
+        InstructionDto::CallBlock { id, block_id, args } => {
+            (id, InstructionKind::CallBlock { block_id: block_id.clone(), args: args.iter().map(dto_to_value).collect() })
         }
-        InstructionDto::Return { value } => Instruction::Return(dto_to_value(value)),
-        InstructionDto::If { condition, body } => Instruction::If {
+        InstructionDto::Return { id, value } => (id, InstructionKind::Return(dto_to_value(value))),
+        InstructionDto::If { id, condition, body } => (id, InstructionKind::If {
             condition: dto_to_value(condition),
             body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
-        },
-        InstructionDto::IfElse { condition, then_body, else_body } => Instruction::IfElse {
+        }),
+        InstructionDto::IfElse { id, condition, then_body, else_body } => (id, InstructionKind::IfElse {
             condition: dto_to_value(condition),
             then_body: then_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
             else_body: else_body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
-        },
-        InstructionDto::Repeat { count, body } => Instruction::Repeat {
+        }),
+        InstructionDto::Repeat { id, count, body } => (id, InstructionKind::Repeat {
             count: dto_to_value(count),
             body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
-        },
-        InstructionDto::Forever { body } => {
-            Instruction::Forever { body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()? }
+        }),
+        InstructionDto::Forever { id, body } => {
+            (id, InstructionKind::Forever { body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()? })
         }
-        InstructionDto::While { condition, body } => Instruction::While {
+        InstructionDto::While { id, condition, body } => (id, InstructionKind::While {
             condition: dto_to_value(condition),
             body: body.iter().map(dto_to_instruction).collect::<Option<Vec<_>>>()?,
-        },
-        InstructionDto::EscapeLoop => Instruction::EscapeLoop,
-        InstructionDto::ContinueLoop => Instruction::ContinueLoop,
-    })
+        }),
+        InstructionDto::EscapeLoop { id } => (id, InstructionKind::EscapeLoop),
+        InstructionDto::ContinueLoop { id } => (id, InstructionKind::ContinueLoop),
+    };
+    Some(Instruction { id: id.clone(), kind })
 }
 
 fn strand_to_dto(strand: &Strand) -> StrandDto {
@@ -745,6 +767,10 @@ fn floating_value_to_dto(fv: &FloatingValue) -> FloatingValueDto {
     FloatingValueDto { id: fv.id.clone(), x: fv.x, y: fv.y, value: value_to_dto(&fv.value) }
 }
 
+fn comment_to_dto(c: &Comment) -> CommentDto {
+    CommentDto { id: c.id.clone(), x: c.x, y: c.y, text: c.text.clone(), collapsed: c.collapsed, attached_to: c.attached_to.clone() }
+}
+
 fn macro_to_dto(mac: &Macro) -> MacroDto {
     MacroDto {
         id: mac.id.clone(),
@@ -754,6 +780,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         recording_target_strand_id: mac.recording_target_id(),
         speed_multiplier: mac.speed_multiplier,
         floating_values: mac.floating_values.iter().map(floating_value_to_dto).collect(),
+        comments: mac.comments.iter().map(comment_to_dto).collect(),
         variables: mac.variables.iter().map(|v| v.name.clone()).collect(),
         block_defs: mac.block_defs.iter().map(block_def_to_dto).collect(),
         settings: macro_settings_to_dto(&mac.settings),

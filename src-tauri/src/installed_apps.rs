@@ -1,6 +1,6 @@
 //! Enumerates locally installed applications for the "Open App" instruction's
 //! picker popup — desktop-app-only concern (unlike the cross-platform
-//! `Instruction::OpenApp` itself, which just launches whatever `command`
+//! `InstructionKind::OpenApp` itself, which just launches whatever `command`
 //! string this produced and never re-scans anything), so this lives here
 //! rather than in `macros-core`.
 //!

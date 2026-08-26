@@ -3,12 +3,18 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { state } from '../store';
 import { contextMenu, closeContextMenu } from '../contextMenu';
 import { copyAll, copyBlock, clipboardContents, hasClipboard } from '../clipboard';
-import { addInstruction, clearInstructions, deleteBlock, deleteInstruction, deleteVariable, pasteInstructions, setRecordingTarget } from '../tauri';
+import { addInstruction, clearInstructions, createAttachedComment, createComment, deleteBlock, deleteInstruction, deleteVariable, pasteInstructions, setCommentCollapsed, setRecordingTarget } from '../tauri';
 import { clientToCanvas } from '../canvasDrag';
+import { focusCommentOnMount } from '../commentFocus';
 import { ICONS } from '../icons';
 import { openRenameVariableDialog } from '../variableDialogs';
 import { openEditBlockDialog } from '../blockDialogs';
-import { findBlockDef, nextSiblingPath, resolveInstructionAt } from '../types';
+import { findBlockDef, nextSiblingPath, regenerateInstructionIds, resolveInstructionAt } from '../types';
+
+// Default offset (canvas units) a freshly-attached comment spawns at,
+// relative to its block — clear of the block itself, matching the spirit of
+// commands.rs's next_strand_position ("offset from the existing thing").
+const ATTACHED_COMMENT_OFFSET = { dx: 220, dy: 0 };
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' });
@@ -16,6 +22,14 @@ const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' 
 const strand = computed(() => state.current_macro?.strands.find(s => s.id === contextMenu.strandId) ?? null);
 const instruction = computed(() => resolveInstructionAt(strand.value, contextMenu.path));
 const headerBlockId = computed(() => (instruction.value?.type === 'BlockHeader' ? instruction.value.block_id : null));
+// A block/header can carry at most one attached comment (Scratch-style) —
+// this is that comment, if one already exists, so the menu can offer
+// "Comment" (focus it) instead of creating a duplicate.
+const attachedComment = computed(() => {
+  const id = instruction.value?.id;
+  if (!id) return null;
+  return state.current_macro?.comments?.find(c => c.attached_to === id) ?? null;
+});
 const isRecordingTarget = computed(
   () => contextMenu.strandId !== '' && contextMenu.strandId === state.current_macro?.recording_target_strand_id,
 );
@@ -108,7 +122,22 @@ function onCutBlock() {
 }
 function onDuplicateBlock() {
   const ins = instruction.value;
-  if (ins) addInstruction(contextMenu.strandId, nextSiblingPath(contextMenu.path), { ...ins });
+  if (ins) addInstruction(contextMenu.strandId, nextSiblingPath(contextMenu.path), regenerateInstructionIds(ins));
+  closeContextMenu();
+}
+async function onAddOrFocusComment() {
+  const existing = attachedComment.value;
+  if (existing) {
+    if (existing.collapsed) await setCommentCollapsed(existing.id, false);
+    focusCommentOnMount(existing.id);
+  } else {
+    const id = instruction.value?.id;
+    if (id) focusCommentOnMount(await createAttachedComment(id, ATTACHED_COMMENT_OFFSET.dx, ATTACHED_COMMENT_OFFSET.dy, ''));
+  }
+  closeContextMenu();
+}
+async function onAddCanvasComment() {
+  focusCommentOnMount(await createComment(contextMenu.canvasX, contextMenu.canvasY, ''));
   closeContextMenu();
 }
 function onDeleteAllBlocks() {
@@ -121,7 +150,7 @@ function onDeleteAllBlocks() {
 }
 function onPaste() {
   const contents = clipboardContents();
-  if (contents) pasteInstructions(contextMenu.canvasX, contextMenu.canvasY, contents);
+  if (contents) pasteInstructions(contextMenu.canvasX, contextMenu.canvasY, contents.map(regenerateInstructionIds));
   closeContextMenu();
 }
 function onRenameVariable() {
@@ -176,6 +205,10 @@ function onDeleteBlockDef() {
           <span class="context-menu-item-icon"><component :is="ICONS.scissors" /></span>
           <span>Cut block</span>
         </button>
+        <button type="button" class="context-menu-item" role="menuitem" @click="onAddOrFocusComment">
+          <span class="context-menu-item-icon"><component :is="ICONS['message-square']" /></span>
+          <span>{{ attachedComment ? 'Comment' : 'Add Comment' }}</span>
+        </button>
         <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteBlock">
           <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
           <span>Delete block</span>
@@ -195,6 +228,10 @@ function onDeleteBlockDef() {
         <button type="button" class="context-menu-item" role="menuitem" :disabled="!hasClipboard()" @click="onPaste">
           <span class="context-menu-item-icon"><component :is="ICONS['clipboard-paste']" /></span>
           <span>Paste</span>
+        </button>
+        <button type="button" class="context-menu-item" role="menuitem" @click="onAddCanvasComment">
+          <span class="context-menu-item-icon"><component :is="ICONS['message-square']" /></span>
+          <span>Add Comment</span>
         </button>
       </template>
       <template v-else-if="contextMenu.type === 'variable'">

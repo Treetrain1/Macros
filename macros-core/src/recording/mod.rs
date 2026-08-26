@@ -2,7 +2,7 @@ use crate::hotkey_types::{HotkeyAction, HotkeyBinding};
 use crate::input::types::{Axis, Coordinate, Direction, InputToken, MacroKey};
 use crate::input::value::Value;
 use crate::macros::backend::{self, CaptureDecision, CaptureEvent, CaptureTimestamp};
-use crate::macros::Instruction;
+use crate::macros::{Instruction, InstructionKind};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -284,7 +284,7 @@ pub fn build_capture_callback() -> Box<dyn FnMut(CaptureEvent, CaptureTimestamp)
                             if let Some(prev_elapsed) = prev {
                                 let elapsed_ms = elapsed.saturating_sub(prev_elapsed).as_secs_f64() * 1000.0;
                                 if elapsed_ms > 0.0 {
-                                    q.push_back(Instruction::Wait(Value::number(elapsed_ms)));
+                                    q.push_back(Instruction::new(InstructionKind::Wait(Value::number(elapsed_ms))));
                                 }
                             }
                             q.push_back(instr);
@@ -341,24 +341,24 @@ pub fn start_grab_thread() {
 }
 
 fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
-    Some(match event {
+    Some(Instruction::new(match event {
         CaptureEvent::KeyPress(key) => {
-            Instruction::Token(InputToken::Key(key.clone(), Direction::Press))
+            InstructionKind::Token(InputToken::Key(key.clone(), Direction::Press))
         }
         CaptureEvent::KeyRelease(key) => {
-            Instruction::Token(InputToken::Key(key.clone(), Direction::Release))
+            InstructionKind::Token(InputToken::Key(key.clone(), Direction::Release))
         }
         CaptureEvent::ButtonPress(btn) => {
-            Instruction::Token(InputToken::Button(btn.clone(), Direction::Press))
+            InstructionKind::Token(InputToken::Button(btn.clone(), Direction::Press))
         }
         CaptureEvent::ButtonRelease(btn) => {
-            Instruction::Token(InputToken::Button(btn.clone(), Direction::Release))
+            InstructionKind::Token(InputToken::Button(btn.clone(), Direction::Release))
         }
         CaptureEvent::Scroll(h, v) => {
             if *v != 0 {
-                Instruction::Token(InputToken::Scroll(Value::number(*v as f64), Axis::Vertical))
+                InstructionKind::Token(InputToken::Scroll(Value::number(*v as f64), Axis::Vertical))
             } else if *h != 0 {
-                Instruction::Token(InputToken::Scroll(Value::number(*h as f64), Axis::Horizontal))
+                InstructionKind::Token(InputToken::Scroll(Value::number(*h as f64), Axis::Horizontal))
             } else {
                 return None;
             }
@@ -370,10 +370,10 @@ fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
             if *dx == 0 && *dy == 0 {
                 return None;
             }
-            Instruction::Token(InputToken::MoveMouse(Value::number(*dx as f64), Value::number(*dy as f64), Coordinate::Rel))
+            InstructionKind::Token(InputToken::MoveMouse(Value::number(*dx as f64), Value::number(*dy as f64), Coordinate::Rel))
         }
         CaptureEvent::MouseMoveAbs(x, y) => {
-            Instruction::Token(InputToken::MoveMouse(Value::number(*x), Value::number(*y), Coordinate::Abs))
+            InstructionKind::Token(InputToken::MoveMouse(Value::number(*x), Value::number(*y), Coordinate::Abs))
         }
-    })
+    }))
 }

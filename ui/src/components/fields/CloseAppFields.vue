@@ -10,7 +10,7 @@ const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extr
 const showDialog = ref(false);
 
 function onSelect(app: AppEntryDto) {
-  editInstruction(props.strandId, props.path, { type: 'CloseApp', command: app.command, name: app.name, icon: app.icon });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'CloseApp', command: app.command, name: app.name, icon: app.icon });
   showDialog.value = false;
 }
 </script>

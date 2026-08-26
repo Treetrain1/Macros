@@ -6,7 +6,7 @@ import type { InstrPath, InstructionDto } from '../../types';
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Command' }> }>();
 
 function onChange(v: string) {
-  editInstruction(props.strandId, props.path, { type: 'Command', command: v });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'Command', command: v });
 }
 </script>
 

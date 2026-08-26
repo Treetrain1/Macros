@@ -18,11 +18,12 @@ import { blockDialog, closeBlockDialog, openCreateBlockDialog } from '../blockDi
 
 // SetVariable/ChangeVariable render in the Variables section below and
 // Return in the "My Blocks" section, not here; BlockHeader/CallBlock are
-// never dragged from a fixed prefab at all (see PaletteInstructionBlock.vue)
-// — all filtered out of the generic "Instruction" group.
+// never dragged from a fixed prefab at all (see PaletteInstructionBlock.vue);
+// Comment is a floating note now (right-click canvas/a block), not a sidebar
+// prefab — all filtered out of the generic "Instruction" group.
 const instructionTypes = (Object.keys(INSTRUCTION_TYPE_LABELS) as InstructionDto['type'][])
-  .filter((t): t is Exclude<InstructionDto['type'], 'SetVariable' | 'ChangeVariable' | 'BlockHeader' | 'CallBlock' | 'Return'> =>
-    t !== 'SetVariable' && t !== 'ChangeVariable' && t !== 'BlockHeader' && t !== 'CallBlock' && t !== 'Return');
+  .filter((t): t is Exclude<InstructionDto['type'], 'SetVariable' | 'ChangeVariable' | 'BlockHeader' | 'CallBlock' | 'Return' | 'Comment'> =>
+    t !== 'SetVariable' && t !== 'ChangeVariable' && t !== 'BlockHeader' && t !== 'CallBlock' && t !== 'Return' && t !== 'Comment');
 
 const commandBlocks = computed(() => (state.current_macro?.block_defs ?? []).filter(b => !b.returns_value));
 const reporterBlocks = computed(() => (state.current_macro?.block_defs ?? []).filter(b => b.returns_value));

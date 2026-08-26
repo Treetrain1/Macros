@@ -8,7 +8,7 @@ import type { InstrPath, InstructionDto, ScrollAxis } from '../../types';
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Scroll' }> }>();
 
 function onAxisChange(v: string) {
-  editInstruction(props.strandId, props.path, { type: 'Scroll', amount: props.instruction.amount, axis: v as ScrollAxis });
+  editInstruction(props.strandId, props.path, { id: props.instruction.id, type: 'Scroll', amount: props.instruction.amount, axis: v as ScrollAxis });
 }
 </script>
 

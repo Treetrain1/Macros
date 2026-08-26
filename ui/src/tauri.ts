@@ -65,6 +65,20 @@ export const moveFloatingValue = (floatingId: string, x: number, y: number) =>
   invoke<void>('move_floating_value', { floatingId, x, y });
 export const removeFloatingValue = (floatingId: string) =>
   invoke<void>('remove_floating_value', { floatingId });
+
+// ─── Comments (floating/attached notes) ────────────────────────────────────
+export const createComment = (x: number, y: number, text: string) =>
+  invoke<string>('create_comment', { x, y, text });
+export const createAttachedComment = (instructionId: string, dx: number, dy: number, text: string) =>
+  invoke<string>('create_attached_comment', { instructionId, dx, dy, text });
+export const moveComment = (commentId: string, x: number, y: number) =>
+  invoke<void>('move_comment', { commentId, x, y });
+export const removeComment = (commentId: string) =>
+  invoke<void>('remove_comment', { commentId });
+export const editCommentText = (commentId: string, text: string) =>
+  invoke<void>('edit_comment_text', { commentId, text });
+export const setCommentCollapsed = (commentId: string, collapsed: boolean) =>
+  invoke<void>('set_comment_collapsed', { commentId, collapsed });
 export const removeInstruction = (strandId: string, path: InstrPath) =>
   invoke<void>('remove_instruction', { strandId, path });
 export const reorderInstruction = (strandId: string, path: InstrPath, direction: number) =>

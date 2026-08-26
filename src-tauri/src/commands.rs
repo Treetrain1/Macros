@@ -1,7 +1,7 @@
 use macros_core::config;
 use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
 use macros_core::macros::runner::VariableStore;
-use macros_core::macros::{loop_control, BlockPiece, FloatingValue, Instruction, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
+use macros_core::macros::{loop_control, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
 use macros_core::input::types::InputToken;
 use macros_core::input::value::{Evaluated, Value, OPERATOR_KINDS};
 use macros_core::recording;
@@ -32,6 +32,7 @@ fn push_undo(s: &mut crate::state::AppState) {
         s.undo_stack.push(MacroSnapshot {
             strands: mac.strands.clone(),
             floating_values: mac.floating_values.clone(),
+            comments: mac.comments.clone(),
             block_defs: mac.block_defs.clone(),
         });
         s.redo_stack.clear();
@@ -448,16 +449,16 @@ pub(crate) async fn export_macro(macro_id: String) -> Result<(), String> {
 /// `Forever`/`While` blocks) contains a `Command` instruction — the check
 /// behind `import_macro`'s "this macro can run arbitrary commands" warning.
 fn body_contains_command(body: &[Instruction]) -> bool {
-    body.iter().any(|ins| match ins {
+    body.iter().any(|ins| match &ins.kind {
         // `OpenApp`'s `command` is just as capable of running arbitrary
         // shell as a plain `Command` (see `runner::open_app`'s Linux/macOS
         // launchers) — a hand-edited macro file could carry any string
         // there, not just what the picker itself would ever produce.
-        Instruction::Command(_) | Instruction::OpenApp { .. } => true,
-        Instruction::If { body, .. } | Instruction::Repeat { body, .. } | Instruction::Forever { body } | Instruction::While { body, .. } => {
+        InstructionKind::Command(_) | InstructionKind::OpenApp { .. } => true,
+        InstructionKind::If { body, .. } | InstructionKind::Repeat { body, .. } | InstructionKind::Forever { body } | InstructionKind::While { body, .. } => {
             body_contains_command(body)
         }
-        Instruction::IfElse { then_body, else_body, .. } => body_contains_command(then_body) || body_contains_command(else_body),
+        InstructionKind::IfElse { then_body, else_body, .. } => body_contains_command(then_body) || body_contains_command(else_body),
         _ => false,
     })
 }
@@ -666,10 +667,10 @@ fn check_when_ran_attachment(list: &[Instruction], index: usize, ins: &Instructi
 /// block's body — enforced here so it can't be placed somewhere confusing
 /// (the interpreter otherwise tolerates a stray one harmlessly).
 fn check_return_placement(mac: &Macro, strand: &Strand, ins: &Instruction) -> Result<(), String> {
-    if !matches!(ins, Instruction::Return(_)) {
+    if !matches!(&ins.kind, InstructionKind::Return(_)) {
         return Ok(());
     }
-    let valid = matches!(strand.instructions.first(), Some(Instruction::BlockHeader(id))
+    let valid = matches!(strand.instructions.first().map(|i| &i.kind), Some(InstructionKind::BlockHeader(id))
         if mac.block_defs.iter().any(|b| &b.id == id && b.returns_value));
     if valid {
         Ok(())
@@ -683,14 +684,14 @@ fn check_return_placement(mac: &Macro, strand: &Strand, ins: &Instruction) -> Re
 /// looks at the strand's header) by walking every ancestor bracket named in
 /// `path` and checking whether any of them is a loop instruction.
 fn check_loop_control_placement(strand: &Strand, path: &[PathStep], ins: &Instruction) -> Result<(), String> {
-    if !matches!(ins, Instruction::EscapeLoop | Instruction::ContinueLoop) {
+    if !matches!(&ins.kind, InstructionKind::EscapeLoop | InstructionKind::ContinueLoop) {
         return Ok(());
     }
     let mut list: &[Instruction] = &strand.instructions;
     for step in path {
         let Some(slot) = step.slot else { break };
         let Some(ancestor) = list.get(step.index) else { break };
-        if matches!(ancestor, Instruction::Repeat { .. } | Instruction::Forever { .. } | Instruction::While { .. }) {
+        if matches!(&ancestor.kind, InstructionKind::Repeat { .. } | InstructionKind::Forever { .. } | InstructionKind::While { .. }) {
             return Ok(());
         }
         let Some(body) = ancestor.body(slot) else { break };
@@ -709,36 +710,36 @@ mod loop_control_placement_tests {
 
     #[test]
     fn non_loop_control_instructions_are_always_allowed() {
-        let strand = strand_with(vec![Instruction::WhenRan]);
-        assert!(check_loop_control_placement(&strand, &[PathStep { index: 1, slot: None }], &Instruction::Comment("x".into())).is_ok());
+        let strand = strand_with(vec![Instruction::new(InstructionKind::WhenRan)]);
+        assert!(check_loop_control_placement(&strand, &[PathStep { index: 1, slot: None }], &Instruction::new(InstructionKind::Comment("x".into()))).is_ok());
     }
 
     #[test]
     fn escape_loop_at_strand_top_level_is_rejected() {
-        let strand = strand_with(vec![Instruction::WhenRan]);
+        let strand = strand_with(vec![Instruction::new(InstructionKind::WhenRan)]);
         let path = vec![PathStep { index: 1, slot: None }];
-        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_err());
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::new(InstructionKind::EscapeLoop)).is_err());
     }
 
     #[test]
     fn escape_loop_directly_inside_repeat_body_is_allowed() {
         let strand = strand_with(vec![
-            Instruction::WhenRan,
-            Instruction::Repeat { count: Value::number(3.0), body: vec![] },
+            Instruction::new(InstructionKind::WhenRan),
+            Instruction::new(InstructionKind::Repeat { count: Value::number(3.0), body: vec![] }),
         ]);
         // Path: strand[1] (Repeat) -> slot 0 (its body) -> insertion index 0.
         let path = vec![PathStep { index: 1, slot: Some(0) }, PathStep { index: 0, slot: None }];
-        assert!(check_loop_control_placement(&strand, &path, &Instruction::ContinueLoop).is_ok());
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::new(InstructionKind::ContinueLoop)).is_ok());
     }
 
     #[test]
     fn escape_loop_inside_if_inside_while_is_allowed() {
         let strand = strand_with(vec![
-            Instruction::WhenRan,
-            Instruction::While {
+            Instruction::new(InstructionKind::WhenRan),
+            Instruction::new(InstructionKind::While {
                 condition: Value::Bool,
-                body: vec![Instruction::If { condition: Value::Bool, body: vec![] }],
-            },
+                body: vec![Instruction::new(InstructionKind::If { condition: Value::Bool, body: vec![] })],
+            }),
         ]);
         // strand[1] (While) -> slot 0 -> [0] (If) -> slot 0 -> insertion index 0.
         let path = vec![
@@ -746,17 +747,17 @@ mod loop_control_placement_tests {
             PathStep { index: 0, slot: Some(0) },
             PathStep { index: 0, slot: None },
         ];
-        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_ok());
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::new(InstructionKind::EscapeLoop)).is_ok());
     }
 
     #[test]
     fn escape_loop_inside_if_with_no_enclosing_loop_is_rejected() {
         let strand = strand_with(vec![
-            Instruction::WhenRan,
-            Instruction::If { condition: Value::Bool, body: vec![] },
+            Instruction::new(InstructionKind::WhenRan),
+            Instruction::new(InstructionKind::If { condition: Value::Bool, body: vec![] }),
         ]);
         let path = vec![PathStep { index: 1, slot: Some(0) }, PathStep { index: 0, slot: None }];
-        assert!(check_loop_control_placement(&strand, &path, &Instruction::EscapeLoop).is_err());
+        assert!(check_loop_control_placement(&strand, &path, &Instruction::new(InstructionKind::EscapeLoop)).is_err());
     }
 }
 
@@ -772,7 +773,7 @@ pub(crate) fn edit_instruction<R: Runtime>(
     let ins = dto_to_instruction(&instruction).ok_or("Unknown instruction type")?;
     // Freeform text fields coalesce keystrokes into one undo group, like
     // `edit_value_field`; every other kind gets its own undo step.
-    let session = matches!(ins, Instruction::Command(_) | Instruction::Comment(_))
+    let session = matches!(&ins.kind, InstructionKind::Command(_) | InstructionKind::Comment(_))
         .then(|| TextEditSession::Instruction { strand_id: strand_id.clone(), index: path.clone() });
     if s.text_edit_session != session || session.is_none() {
         push_undo(&mut s);
@@ -794,22 +795,22 @@ pub(crate) fn edit_instruction<R: Runtime>(
 
 /// Locates the `Value` tree a `FieldId` names on a given instruction.
 fn value_slot_mut(ins: &mut Instruction, field: FieldId) -> Option<&mut Value> {
-    match (ins, field) {
-        (Instruction::Wait(d), FieldId::WaitDuration) => Some(d),
-        (Instruction::Token(InputToken::MoveMouse(x, _, _)), FieldId::MoveMouseX) => Some(x),
-        (Instruction::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
-        (Instruction::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
-        (Instruction::Token(InputToken::Text(t)), FieldId::TextValue) => Some(t),
-        (Instruction::SetVariable(_, v), FieldId::SetVariableValue) => Some(v),
-        (Instruction::Return(v), FieldId::ReturnValue) => Some(v),
-        (Instruction::CallBlock { args, .. }, FieldId::CallArg(i)) => args.get_mut(i),
-        (Instruction::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
-        (Instruction::If { condition, .. }, FieldId::Condition) => Some(condition),
-        (Instruction::IfElse { condition, .. }, FieldId::Condition) => Some(condition),
-        (Instruction::While { condition, .. }, FieldId::Condition) => Some(condition),
-        (Instruction::Repeat { count, .. }, FieldId::RepeatCount) => Some(count),
-        (Instruction::WhenBatteryDischargedTo(v), FieldId::BatteryDischargeThreshold) => Some(v),
-        (Instruction::WhenBatteryChargedTo(v), FieldId::BatteryChargeThreshold) => Some(v),
+    match (&mut ins.kind, field) {
+        (InstructionKind::Wait(d), FieldId::WaitDuration) => Some(d),
+        (InstructionKind::Token(InputToken::MoveMouse(x, _, _)), FieldId::MoveMouseX) => Some(x),
+        (InstructionKind::Token(InputToken::MoveMouse(_, y, _)), FieldId::MoveMouseY) => Some(y),
+        (InstructionKind::Token(InputToken::Scroll(a, _)), FieldId::ScrollAmount) => Some(a),
+        (InstructionKind::Token(InputToken::Text(t)), FieldId::TextValue) => Some(t),
+        (InstructionKind::SetVariable(_, v), FieldId::SetVariableValue) => Some(v),
+        (InstructionKind::Return(v), FieldId::ReturnValue) => Some(v),
+        (InstructionKind::CallBlock { args, .. }, FieldId::CallArg(i)) => args.get_mut(i),
+        (InstructionKind::ChangeVariable(_, v), FieldId::ChangeVariableValue) => Some(v),
+        (InstructionKind::If { condition, .. }, FieldId::Condition) => Some(condition),
+        (InstructionKind::IfElse { condition, .. }, FieldId::Condition) => Some(condition),
+        (InstructionKind::While { condition, .. }, FieldId::Condition) => Some(condition),
+        (InstructionKind::Repeat { count, .. }, FieldId::RepeatCount) => Some(count),
+        (InstructionKind::WhenBatteryDischargedTo(v), FieldId::BatteryDischargeThreshold) => Some(v),
+        (InstructionKind::WhenBatteryChargedTo(v), FieldId::BatteryChargeThreshold) => Some(v),
         _ => None,
     }
 }
@@ -1099,6 +1100,116 @@ pub(crate) fn remove_floating_value<R: Runtime>(
     Ok(())
 }
 
+/// Creates a freestanding note parked on open canvas — the "Add Comment"
+/// canvas-context-menu item. Mirrors `create_floating_value`.
+#[tauri::command]
+pub(crate) fn create_comment<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    x: i32,
+    y: i32,
+    text: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    mac.comments.push(Comment { id: id.clone(), x, y, text, collapsed: false, attached_to: None });
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(id)
+}
+
+/// Creates a note pinned to `instruction_id` — the "Add Comment" block/header
+/// context-menu item. `dx`/`dy` are an offset from that instruction's
+/// on-screen position, not an absolute canvas coordinate (see `Comment`'s
+/// doc comment); the frontend picks a default that clears the block.
+#[tauri::command]
+pub(crate) fn create_attached_comment<R: Runtime>(
+    state: State<SharedState>,
+    app: tauri::AppHandle<R>,
+    instruction_id: String,
+    dx: i32,
+    dy: i32,
+    text: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    let mac = s.current_macro.as_mut().ok_or("No macro selected")?;
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    mac.comments.push(Comment { id: id.clone(), x: dx, y: dy, text, collapsed: false, attached_to: Some(instruction_id) });
+    auto_save(&s);
+    emit_state_updated(&app, &s);
+    Ok(id)
+}
+
+/// Repositions a note — `x`/`y` are the same value the frontend already
+/// tracks for it (an absolute canvas position if freestanding, an offset
+/// from its attached instruction if not), plus the pointer's drag delta; see
+/// `Comment`'s doc comment. No `push_undo` — pure repositioning, same as
+/// `move_floating_value`.
+#[tauri::command]
+pub(crate) fn move_comment<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, comment_id: String, x: i32, y: i32) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(c) = mac.comment_mut(&comment_id) {
+            c.x = x;
+            c.y = y;
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Deletes a note outright (its own "×" button) — mirrors `remove_floating_value`.
+#[tauri::command]
+pub(crate) fn remove_comment<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, comment_id: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    push_undo(&mut s);
+    if let Some(mac) = &mut s.current_macro {
+        mac.comments.retain(|c| c.id != comment_id);
+        auto_save(&s);
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Edits a note's text — coalesces keystrokes into one undo group, same as
+/// `edit_instruction`'s freeform-text instructions.
+#[tauri::command]
+pub(crate) fn edit_comment_text<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, comment_id: String, text: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let session = Some(TextEditSession::Comment { comment_id: comment_id.clone() });
+    if s.text_edit_session != session {
+        push_undo(&mut s);
+    }
+    s.text_edit_session = session;
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(c) = mac.comment_mut(&comment_id) {
+            c.text = text;
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Toggles a note's collapsed state — view state, not content, so no
+/// `push_undo` (same reasoning as `move_comment`).
+#[tauri::command]
+pub(crate) fn set_comment_collapsed<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, comment_id: String, collapsed: bool) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        if let Some(c) = mac.comment_mut(&comment_id) {
+            c.collapsed = collapsed;
+            auto_save(&s);
+        }
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, strand_id: String, path: Vec<PathStep>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -1114,6 +1225,7 @@ pub(crate) fn remove_instruction<R: Runtime>(state: State<SharedState>, app: tau
                     list.remove(idx);
                 }
             }
+            mac.prune_orphaned_comments();
             s.invalid_field_buffers.clear();
             auto_save(&s);
         }
@@ -1163,6 +1275,7 @@ pub(crate) fn delete_instruction<R: Runtime>(
     if now_empty {
         mac.strands.retain(|s| s.id != strand_id);
     }
+    mac.prune_orphaned_comments();
     s.invalid_field_buffers.clear();
     auto_save(&s);
     emit_state_updated(&app, &s);
@@ -1243,6 +1356,7 @@ pub(crate) fn clear_instructions<R: Runtime>(state: State<SharedState>, app: tau
             // Clearing wipes every strand, including "When Ran" blocks —
             // "start this macro over from scratch".
             mac.strands.clear();
+            mac.prune_orphaned_comments();
             s.invalid_field_buffers.clear();
             auto_save(&s);
             s.confirm_clear_instructions = false;
@@ -1259,6 +1373,7 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
         let current = s.current_macro.as_ref().map(|m| MacroSnapshot {
             strands: m.strands.clone(),
             floating_values: m.floating_values.clone(),
+            comments: m.comments.clone(),
             block_defs: m.block_defs.clone(),
         });
         if let Some(cur) = current {
@@ -1267,6 +1382,7 @@ fn perform_undo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
         if let Some(mac) = &mut s.current_macro {
             mac.strands = prev.strands;
             mac.floating_values = prev.floating_values;
+            mac.comments = prev.comments;
             mac.block_defs = prev.block_defs;
             mac.ensure_id();
         }
@@ -1286,6 +1402,7 @@ fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
         let current = s.current_macro.as_ref().map(|m| MacroSnapshot {
             strands: m.strands.clone(),
             floating_values: m.floating_values.clone(),
+            comments: m.comments.clone(),
             block_defs: m.block_defs.clone(),
         });
         if let Some(cur) = current {
@@ -1294,6 +1411,7 @@ fn perform_redo<R: Runtime>(state: &SharedState, app: &tauri::AppHandle<R>) -> R
         if let Some(mac) = &mut s.current_macro {
             mac.strands = next.strands;
             mac.floating_values = next.floating_values;
+            mac.comments = next.comments;
             mac.block_defs = next.block_defs;
             mac.ensure_id();
         }
@@ -1354,6 +1472,7 @@ pub(crate) fn remove_strand<R: Runtime>(state: State<SharedState>, app: tauri::A
     push_undo(&mut s);
     if let Some(mac) = &mut s.current_macro {
         mac.strands.retain(|strand| strand.id != strand_id);
+        mac.prune_orphaned_comments();
         s.invalid_field_buffers.retain(|loc, _| loc.strand_id() != Some(strand_id.as_str()));
         auto_save(&s);
     }
@@ -1538,8 +1657,8 @@ pub(crate) fn key_capture_event<R: Runtime>(
                 if let Some(mac) = &mut s.current_macro {
                     if let Some(strand) = mac.strand_mut(&strand_id) {
                         if let Some((list, idx)) = resolve_body_mut(&mut strand.instructions, &path) {
-                            if let Some(Instruction::Token(InputToken::Key(_, dir))) = list.get(idx).cloned() {
-                                list[idx] = Instruction::Token(InputToken::Key(mk, dir));
+                            if let Some(InstructionKind::Token(InputToken::Key(_, dir))) = list.get(idx).map(|i| i.kind.clone()) {
+                                list[idx].kind = InstructionKind::Token(InputToken::Key(mk, dir));
                                 auto_save(&s);
                             }
                         }
@@ -2255,13 +2374,14 @@ mod value_location_tests {
                 x: 0,
                 y: 0,
                 instructions: vec![
-                    Instruction::WhenRan,
-                    Instruction::Wait(Value::number(1000.0)),
+                    Instruction::new(InstructionKind::WhenRan),
+                    Instruction::new(InstructionKind::Wait(Value::number(1000.0))),
                 ],
             }],
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![FloatingValue { id: "f1".into(), x: 10, y: 20, value: Value::number(5.0) }],
+            comments: vec![],
             variables: vec![],
             block_defs: vec![],
             settings: macros_core::macros::MacroSettings::default(),
@@ -2516,15 +2636,16 @@ mod value_location_tests {
                 id: "s1".into(),
                 x: 0,
                 y: 0,
-                instructions: vec![Instruction::Token(macros_core::input::types::InputToken::MoveMouse(
+                instructions: vec![Instruction::new(InstructionKind::Token(macros_core::input::types::InputToken::MoveMouse(
                     Value::number(1.0),
                     Value::number(2.0),
                     Coordinate::Rel,
-                ))],
+                )))],
             }],
             recording_target: None,
             speed_multiplier: 1.0,
             floating_values: vec![],
+            comments: vec![],
             variables: vec![],
             block_defs: vec![],
             settings: macros_core::macros::MacroSettings::default(),
@@ -2594,12 +2715,12 @@ mod value_location_tests {
 
     #[test]
     fn rename_variable_in_renames_and_updates_references() {
-        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::SetVariable("score".to_string(), Value::number(1.0))]);
+        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::new(InstructionKind::SetVariable("score".to_string(), Value::number(1.0)))]);
         create_variable_in(&mut mac, "score").unwrap();
         let name = rename_variable_in(&mut mac, "score", "points").unwrap();
         assert_eq!(name, "points");
         assert_eq!(mac.variables[0].name, "points");
-        assert_eq!(mac.strands[0].instructions[1], Instruction::SetVariable("points".to_string(), Value::number(1.0)));
+        assert_eq!(mac.strands[0].instructions[1], Instruction::new(InstructionKind::SetVariable("points".to_string(), Value::number(1.0))));
     }
 
     #[test]
@@ -2635,11 +2756,11 @@ mod value_location_tests {
 
     #[test]
     fn delete_variable_in_removes_declaration_but_leaves_references() {
-        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::Token(InputToken::Text(Value::Var { name: "score".to_string() }))]);
+        let mut mac = Macro::new("Test".into(), "".into(), vec![Instruction::new(InstructionKind::Token(InputToken::Text(Value::Var { name: "score".to_string() })))]);
         create_variable_in(&mut mac, "score").unwrap();
         delete_variable_in(&mut mac, "score");
         assert!(mac.variables.is_empty());
-        assert_eq!(mac.strands[0].instructions[1], Instruction::Token(InputToken::Text(Value::Var { name: "score".to_string() })));
+        assert_eq!(mac.strands[0].instructions[1], Instruction::new(InstructionKind::Token(InputToken::Text(Value::Var { name: "score".to_string() }))));
     }
 
     // ─── Custom blocks ("My Blocks") ────────────────────────────────────────
@@ -2678,7 +2799,7 @@ mod value_location_tests {
         assert_eq!(mac.block_defs.len(), 1);
         assert_eq!(mac.block_defs[0].id, id);
         assert!(mac.block_defs[0].returns_value);
-        let header_strand = mac.strands.iter().find(|s| s.instructions == vec![Instruction::BlockHeader(id.clone())]);
+        let header_strand = mac.strands.iter().find(|s| s.instructions == vec![Instruction::new(InstructionKind::BlockHeader(id.clone()))]);
         assert!(header_strand.is_some());
     }
 
@@ -2691,13 +2812,13 @@ mod value_location_tests {
             id: "caller".into(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] }],
+            instructions: vec![Instruction::new(InstructionKind::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] })],
         });
         let old_pieces = mac.block_defs[0].pieces.clone();
         let new_pieces = vec![input("i1", "b")]; // same id, renamed
         mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
         let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
-        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        let InstructionKind::CallBlock { args, .. } = &caller.instructions[0].kind else { panic!("expected CallBlock") };
         assert_eq!(args, &vec![Value::number(5.0)]);
     }
 
@@ -2709,13 +2830,13 @@ mod value_location_tests {
             id: "caller".into(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(1.0), Value::number(2.0)] }],
+            instructions: vec![Instruction::new(InstructionKind::CallBlock { block_id: id.clone(), args: vec![Value::number(1.0), Value::number(2.0)] })],
         });
         let old_pieces = mac.block_defs[0].pieces.clone();
         let new_pieces = vec![input("i2", "b")]; // "a" (i1) removed
         mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
         let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
-        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        let InstructionKind::CallBlock { args, .. } = &caller.instructions[0].kind else { panic!("expected CallBlock") };
         assert_eq!(args, &vec![Value::number(2.0)]);
     }
 
@@ -2727,13 +2848,13 @@ mod value_location_tests {
             id: "caller".into(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] }],
+            instructions: vec![Instruction::new(InstructionKind::CallBlock { block_id: id.clone(), args: vec![Value::number(5.0)] })],
         });
         let old_pieces = mac.block_defs[0].pieces.clone();
         let new_pieces = vec![input("i1", "a"), input("i2", "b")]; // "b" newly added
         mac.reconcile_block_call_args(&id, &old_pieces, &new_pieces);
         let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
-        let Instruction::CallBlock { args, .. } = &caller.instructions[0] else { panic!("expected CallBlock") };
+        let InstructionKind::CallBlock { args, .. } = &caller.instructions[0].kind else { panic!("expected CallBlock") };
         assert_eq!(args, &vec![Value::number(5.0), Value::number(0.0)]);
     }
 
@@ -2745,16 +2866,16 @@ mod value_location_tests {
             id: "caller".into(),
             x: 0,
             y: 0,
-            instructions: vec![Instruction::SetVariable(
+            instructions: vec![Instruction::new(InstructionKind::SetVariable(
                 "x".to_string(),
                 Value::Call { block_id: id.clone(), args: vec![], saved: Box::new(Value::number(0.0)) },
-            )],
+            ))],
         });
         mac.remove_block(&id);
         assert!(mac.block_defs.is_empty());
-        assert!(!mac.strands.iter().any(|s| matches!(s.instructions.first(), Some(Instruction::BlockHeader(_)))));
+        assert!(!mac.strands.iter().any(|s| matches!(s.instructions.first().map(|i| &i.kind), Some(InstructionKind::BlockHeader(_)))));
         let caller = mac.strands.iter().find(|s| s.id == "caller").unwrap();
-        assert_eq!(caller.instructions[0], Instruction::SetVariable("x".to_string(), Value::number(0.0)));
+        assert_eq!(caller.instructions[0], Instruction::new(InstructionKind::SetVariable("x".to_string(), Value::number(0.0))));
     }
 
     /// An unresolved `Call` node must degrade to an ordinary `Err`, never panic.

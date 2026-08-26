@@ -9,13 +9,16 @@
 // since this *is* the block: the drag ghost is just a clone of it).
 import { computed, type Component } from 'vue';
 import type { InstructionDto, InstructionType } from '../types';
-import { isCapType, isHeaderType, isWrapType } from '../types';
+import { isCapType, isEntryTriggerType, isHeaderType, isWrapType } from '../types';
 import { paletteInstructions } from '../paletteState';
 import { beginPaletteDrag } from '../canvasDrag';
 import { ICONS, INSTRUCTION_TYPE_ICONS } from '../icons';
 import PaletteWhenRanFields from './fields/palette/PaletteWhenRanFields.vue';
 import PaletteWhenBatteryDischargedToFields from './fields/palette/PaletteWhenBatteryDischargedToFields.vue';
 import PaletteWhenBatteryChargedToFields from './fields/palette/PaletteWhenBatteryChargedToFields.vue';
+import PaletteWhenTimeFields from './fields/palette/PaletteWhenTimeFields.vue';
+import PaletteWhenPowerPluggedInFields from './fields/palette/PaletteWhenPowerPluggedInFields.vue';
+import PaletteWhenPowerUnpluggedFields from './fields/palette/PaletteWhenPowerUnpluggedFields.vue';
 import PaletteWaitFields from './fields/palette/PaletteWaitFields.vue';
 import PaletteTextFields from './fields/palette/PaletteTextFields.vue';
 import PaletteKeyFields from './fields/palette/PaletteKeyFields.vue';
@@ -23,6 +26,8 @@ import PaletteButtonFields from './fields/palette/PaletteButtonFields.vue';
 import PaletteMoveMouseFields from './fields/palette/PaletteMoveMouseFields.vue';
 import PaletteScrollFields from './fields/palette/PaletteScrollFields.vue';
 import PaletteCommandFields from './fields/palette/PaletteCommandFields.vue';
+import PaletteOpenAppFields from './fields/palette/PaletteOpenAppFields.vue';
+import PaletteCloseAppFields from './fields/palette/PaletteCloseAppFields.vue';
 import PaletteCommentFields from './fields/palette/PaletteCommentFields.vue';
 import PaletteSetVariableFields from './fields/palette/PaletteSetVariableFields.vue';
 import PaletteChangeVariableFields from './fields/palette/PaletteChangeVariableFields.vue';
@@ -50,6 +55,9 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Co
   WhenRan: PaletteWhenRanFields,
   WhenBatteryDischargedTo: PaletteWhenBatteryDischargedToFields,
   WhenBatteryChargedTo: PaletteWhenBatteryChargedToFields,
+  WhenTime: PaletteWhenTimeFields,
+  WhenPowerPluggedIn: PaletteWhenPowerPluggedInFields,
+  WhenPowerUnplugged: PaletteWhenPowerUnpluggedFields,
   Wait: PaletteWaitFields,
   Text: PaletteTextFields,
   Key: PaletteKeyFields,
@@ -57,6 +65,8 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], ExcludedType>, Co
   MoveMouse: PaletteMoveMouseFields,
   Scroll: PaletteScrollFields,
   Command: PaletteCommandFields,
+  OpenApp: PaletteOpenAppFields,
+  CloseApp: PaletteCloseAppFields,
   Comment: PaletteCommentFields,
   SetVariable: PaletteSetVariableFields,
   ChangeVariable: PaletteChangeVariableFields,
@@ -101,7 +111,7 @@ function onPointerDown(e: PointerEvent) {
   <div
     v-else
     class="instruction-row palette-prefab"
-    :class="{ 'instruction-row-when-ran': type === 'WhenRan' || type === 'WhenBatteryDischargedTo' || type === 'WhenBatteryChargedTo', 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
+    :class="{ 'instruction-row-when-ran': isEntryTriggerType(type), 'instruction-row-header': isHeaderType(type), 'instruction-row-cap': isCapType(type) }"
     @pointerdown="onPointerDown"
   >
     <div class="instruction-shape">

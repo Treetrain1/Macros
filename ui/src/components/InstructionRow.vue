@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, type Component } from 'vue';
 import type { InstrPath, InstructionDto } from '../types';
-import { isCapType, isHeaderType, isWrapType } from '../types';
+import { isCapType, isEntryTriggerType, isHeaderType, isWrapType } from '../types';
 import { beginPickup } from '../canvasDrag';
 import { state } from '../store';
 import { openBlockMenu } from '../contextMenu';
@@ -13,10 +13,15 @@ import ButtonFields from './fields/ButtonFields.vue';
 import MoveMouseFields from './fields/MoveMouseFields.vue';
 import ScrollFields from './fields/ScrollFields.vue';
 import CommandFields from './fields/CommandFields.vue';
+import OpenAppFields from './fields/OpenAppFields.vue';
+import CloseAppFields from './fields/CloseAppFields.vue';
 import CommentFields from './fields/CommentFields.vue';
 import WhenRanFields from './fields/WhenRanFields.vue';
 import WhenBatteryDischargedToFields from './fields/WhenBatteryDischargedToFields.vue';
 import WhenBatteryChargedToFields from './fields/WhenBatteryChargedToFields.vue';
+import WhenTimeFields from './fields/WhenTimeFields.vue';
+import WhenPowerPluggedInFields from './fields/WhenPowerPluggedInFields.vue';
+import WhenPowerUnpluggedFields from './fields/WhenPowerUnpluggedFields.vue';
 import SetVariableFields from './fields/SetVariableFields.vue';
 import ChangeVariableFields from './fields/ChangeVariableFields.vue';
 import BlockHeaderFields from './fields/BlockHeaderFields.vue';
@@ -42,6 +47,9 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], WrapType>, Compon
   WhenRan: WhenRanFields,
   WhenBatteryDischargedTo: WhenBatteryDischargedToFields,
   WhenBatteryChargedTo: WhenBatteryChargedToFields,
+  WhenTime: WhenTimeFields,
+  WhenPowerPluggedIn: WhenPowerPluggedInFields,
+  WhenPowerUnplugged: WhenPowerUnpluggedFields,
   Wait: WaitFields,
   Text: TextFields,
   Key: KeyFields,
@@ -49,6 +57,8 @@ const FIELD_COMPONENTS: Record<Exclude<InstructionDto['type'], WrapType>, Compon
   MoveMouse: MoveMouseFields,
   Scroll: ScrollFields,
   Command: CommandFields,
+  OpenApp: OpenAppFields,
+  CloseApp: CloseAppFields,
   Comment: CommentFields,
   SetVariable: SetVariableFields,
   ChangeVariable: ChangeVariableFields,
@@ -196,7 +206,7 @@ function onRowPointerLeave() {
   <div
     v-else
     class="instruction-row"
-    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': instruction.type === 'WhenRan' || instruction.type === 'WhenBatteryDischargedTo' || instruction.type === 'WhenBatteryChargedTo', 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
+    :class="{ 'row-first': isFirst, 'row-last': isLast, 'instruction-row-when-ran': isEntryTriggerType(instruction.type), 'instruction-row-header': isHeaderType(instruction.type), 'instruction-row-cap': isCapType(instruction.type) }"
     :data-index="index"
     @pointerdown="onRowPointerDown"
     @contextmenu.prevent.stop="onRowContextMenu"

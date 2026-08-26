@@ -1,3 +1,4 @@
+use crate::input::schedule::TimeSchedule;
 use crate::input::types::InputToken;
 use crate::input::value::{Evaluated, Op, Value};
 use serde::{Deserialize, Serialize};
@@ -131,6 +132,9 @@ impl Instruction {
                 | Instruction::BlockHeader(_)
                 | Instruction::WhenBatteryDischargedTo(_)
                 | Instruction::WhenBatteryChargedTo(_)
+                | Instruction::WhenTime(_)
+                | Instruction::WhenPowerPluggedIn
+                | Instruction::WhenPowerUnplugged
         )
     }
 
@@ -183,7 +187,8 @@ impl Instruction {
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
-            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
+            | Instruction::EscapeLoop | Instruction::ContinueLoop | Instruction::WhenTime(_)
+            | Instruction::WhenPowerPluggedIn | Instruction::WhenPowerUnplugged | Instruction::OpenApp { .. } | Instruction::CloseApp { .. } => {}
         }
     }
 
@@ -235,7 +240,8 @@ impl Instruction {
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
-            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
+            | Instruction::EscapeLoop | Instruction::ContinueLoop | Instruction::WhenTime(_)
+            | Instruction::WhenPowerPluggedIn | Instruction::WhenPowerUnplugged | Instruction::OpenApp { .. } | Instruction::CloseApp { .. } => {}
         }
     }
 
@@ -283,7 +289,8 @@ impl Instruction {
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
-            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
+            | Instruction::EscapeLoop | Instruction::ContinueLoop | Instruction::WhenTime(_)
+            | Instruction::WhenPowerPluggedIn | Instruction::WhenPowerUnplugged | Instruction::OpenApp { .. } | Instruction::CloseApp { .. } => {}
         }
     }
 
@@ -337,7 +344,8 @@ impl Instruction {
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
-            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
+            | Instruction::EscapeLoop | Instruction::ContinueLoop | Instruction::WhenTime(_)
+            | Instruction::WhenPowerPluggedIn | Instruction::WhenPowerUnplugged | Instruction::OpenApp { .. } | Instruction::CloseApp { .. } => {}
         }
     }
 
@@ -386,7 +394,8 @@ impl Instruction {
                 }
             }
             Instruction::Command(_) | Instruction::Comment(_) | Instruction::WhenRan | Instruction::BlockHeader(_)
-            | Instruction::EscapeLoop | Instruction::ContinueLoop => {}
+            | Instruction::EscapeLoop | Instruction::ContinueLoop | Instruction::WhenTime(_)
+            | Instruction::WhenPowerPluggedIn | Instruction::WhenPowerUnplugged | Instruction::OpenApp { .. } | Instruction::CloseApp { .. } => {}
         }
     }
 
@@ -454,11 +463,30 @@ pub struct Macro {
     /// def's body lives in its own header strand within `strands`.
     #[serde(default)]
     pub block_defs: Vec<BlockDef>,
+    /// Settings edited from the "Macro Settings" popup — see `MacroSettings`.
+    #[serde(default)]
+    pub settings: MacroSettings,
 }
 
 /// Valid range for both the per-macro and global speed multipliers, enforced
 /// wherever either is set from user input.
 pub const SPEED_MULTIPLIER_RANGE: std::ops::RangeInclusive<f64> = 0.1..=10.0;
+
+/// Per-macro settings edited from the "Macro Settings" popup next to the
+/// macro dropdown — not part of the macro's own behavior, but affecting how
+/// the app treats it. Persisted and exported/imported with the macro like
+/// everything else in `Macro`, so a new field here needs no separate wiring
+/// to survive a save/export round-trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct MacroSettings {
+    /// When `true`, this macro's `WhenBattery*`/`WhenTime`/`WhenPower*`
+    /// strands are watched by the background watchers (`battery_watch`/
+    /// `time_watch` in the desktop app) even while a different macro is
+    /// selected. By default only the currently selected macro's event
+    /// strands are live.
+    #[serde(default)]
+    pub always_listen: bool,
+}
 
 /// Deserialization shape supporting both the current multi-strand format and
 /// the legacy flat `code: Vec<Instruction>` format from older saves; legacy
@@ -482,6 +510,8 @@ enum MacroDe {
         variables: Vec<VariableDef>,
         #[serde(default)]
         block_defs: Vec<BlockDef>,
+        #[serde(default)]
+        settings: MacroSettings,
     },
     Legacy {
         #[serde(default = "default_macro_id")]
@@ -495,7 +525,7 @@ enum MacroDe {
 impl From<MacroDe> for Macro {
     fn from(de: MacroDe) -> Self {
         let mut mac = match de {
-            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables, block_defs } => {
+            MacroDe::Current { id, name, description, mut strands, recording_target, speed_multiplier, floating_values, variables, block_defs, settings } => {
                 // Pre-"When Ran" saves have a strand id=="root" that was the
                 // implicit entry point; give it a real WhenRan on upgrade.
                 if let Some(legacy) = strands.iter_mut().find(|s| s.id == LEGACY_ROOT_STRAND_ID) {
@@ -503,12 +533,12 @@ impl From<MacroDe> for Macro {
                         legacy.instructions.insert(0, Instruction::WhenRan);
                     }
                 }
-                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values, variables, block_defs }
+                Self { id, name, description, strands, recording_target, speed_multiplier, floating_values, variables, block_defs, settings }
             }
             MacroDe::Legacy { id, name, description, mut code } => {
                 code.insert(0, Instruction::WhenRan);
                 let strand = Strand { id: default_strand_id(), x: 0, y: 0, instructions: code };
-                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new(), block_defs: Vec::new() }
+                Self { id, name, description, strands: vec![strand], recording_target: None, speed_multiplier: default_speed_multiplier(), floating_values: Vec::new(), variables: Vec::new(), block_defs: Vec::new(), settings: MacroSettings::default() }
             }
         };
         // Repairs boolean slots poisoned by the historical `Value::Bool`-less
@@ -540,6 +570,7 @@ impl Macro {
             floating_values: Vec::new(),
             variables: Vec::new(),
             block_defs: Vec::new(),
+            settings: MacroSettings::default(),
         }
     }
 
@@ -712,6 +743,37 @@ pub enum Instruction {
     /// Same as `WhenBatteryDischargedTo`, but fires when the battery charge
     /// rises to (or above) the given percentage instead.
     WhenBatteryChargedTo(Value),
+    /// Header-only marker, same shape/semantics as `WhenBatteryDischargedTo`
+    /// (excluded from Run/Loop, driven by a background watcher — `time_watch`
+    /// in the desktop app) but for a recurring point in local time instead
+    /// of a battery level. See `TimeSchedule` for the recurrence shapes.
+    WhenTime(TimeSchedule),
+    /// Header-only marker, no payload (like `WhenRan`) — excluded from
+    /// Run/Loop and driven by the same background watcher as
+    /// `WhenBattery*To` (`battery_watch` in the desktop app), which fires
+    /// this strand's body the moment the system starts receiving external
+    /// power. See `crate::battery::is_plugged_in`.
+    WhenPowerPluggedIn,
+    /// Same as `WhenPowerPluggedIn`, but fires when external power is lost
+    /// instead — never fires at all on a system with no battery/UPS, since
+    /// `is_plugged_in` is always `true` there.
+    WhenPowerUnplugged,
+    /// Launches an installed application, chosen via the desktop app's "Open
+    /// App" picker (`src-tauri`'s `installed_apps` module lists candidates).
+    /// `command` is the already-resolved, platform-specific launch string
+    /// (a cleaned freedesktop `Exec=` line on Linux, a `.lnk` path on
+    /// Windows, an `.app` bundle path on macOS) captured at pick time —
+    /// running it later never re-queries the installed-app list. `name` and
+    /// `icon` (a `data:` URI, when one was found) are cached at the same
+    /// time purely for display, so the block keeps showing the right label
+    /// and picture even if the app is later renamed or uninstalled.
+    OpenApp { command: String, name: String, icon: Option<String> },
+    /// Same picker/payload shape as `OpenApp`, but terminates the app
+    /// instead of launching it — `runner::close_app` derives a process
+    /// matcher from `command` (and, on macOS, `name`) rather than executing
+    /// it directly. `command`/`name`/`icon` are cached at pick time for the
+    /// exact same reason `OpenApp`'s are.
+    CloseApp { command: String, name: String, icon: Option<String> },
     /// `set <name> to <value>` — overwrites the named variable.
     SetVariable(String, Value),
     /// `change <name> by <value>` — adds `value` to the named variable.
@@ -762,6 +824,7 @@ impl std::hash::Hash for Macro {
         self.floating_values.hash(state);
         self.variables.hash(state);
         self.block_defs.hash(state);
+        self.settings.hash(state);
     }
 }
 
@@ -792,6 +855,11 @@ impl std::hash::Hash for Instruction {
             Self::ContinueLoop => { 16u8.hash(state); }
             Self::WhenBatteryDischargedTo(v) => { 17u8.hash(state); v.hash(state); }
             Self::WhenBatteryChargedTo(v) => { 18u8.hash(state); v.hash(state); }
+            Self::WhenTime(s) => { 19u8.hash(state); s.hash(state); }
+            Self::WhenPowerPluggedIn => { 20u8.hash(state); }
+            Self::WhenPowerUnplugged => { 21u8.hash(state); }
+            Self::OpenApp { command, name, icon } => { 22u8.hash(state); command.hash(state); name.hash(state); icon.hash(state); }
+            Self::CloseApp { command, name, icon } => { 23u8.hash(state); command.hash(state); name.hash(state); icon.hash(state); }
         }
     }
 }
@@ -805,6 +873,11 @@ enum InstructionDe {
     WhenRan,
     WhenBatteryDischargedTo(Value),
     WhenBatteryChargedTo(Value),
+    WhenTime(TimeSchedule),
+    WhenPowerPluggedIn,
+    WhenPowerUnplugged,
+    OpenApp { command: String, name: String, icon: Option<String> },
+    CloseApp { command: String, name: String, icon: Option<String> },
     SetVariable(String, Value),
     ChangeVariable(String, Value),
     BlockHeader(String),
@@ -862,6 +935,11 @@ impl From<InstructionDe> for Instruction {
             InstructionDe::WhenRan => Instruction::WhenRan,
             InstructionDe::WhenBatteryDischargedTo(v) => Instruction::WhenBatteryDischargedTo(v),
             InstructionDe::WhenBatteryChargedTo(v) => Instruction::WhenBatteryChargedTo(v),
+            InstructionDe::WhenTime(s) => Instruction::WhenTime(s),
+            InstructionDe::WhenPowerPluggedIn => Instruction::WhenPowerPluggedIn,
+            InstructionDe::WhenPowerUnplugged => Instruction::WhenPowerUnplugged,
+            InstructionDe::OpenApp { command, name, icon } => Instruction::OpenApp { command, name, icon },
+            InstructionDe::CloseApp { command, name, icon } => Instruction::CloseApp { command, name, icon },
             InstructionDe::SetVariable(n, v) => Instruction::SetVariable(n, v),
             InstructionDe::ChangeVariable(n, v) => Instruction::ChangeVariable(n, v),
             InstructionDe::BlockHeader(id) => Instruction::BlockHeader(id),

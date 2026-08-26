@@ -3,8 +3,10 @@ import { computed, ref } from 'vue';
 import { Inbox } from 'lucide-vue-next';
 import { state } from '../store';
 import { exportMacro, importMacro } from '../tauri';
+import type { ImportPromptDto } from '../types';
 import AppDropdown from './AppDropdown.vue';
 import AppButton from './AppButton.vue';
+import ImportReviewDialog from './ImportReviewDialog.vue';
 
 const exportMacroId = ref('');
 const macroOptions = computed(() =>
@@ -18,6 +20,7 @@ function onExportMacroChange(value: string) {
 const exportBusy = ref(false);
 const importBusy = ref(false);
 const errorMessage = ref<string | null>(null);
+const importPrompt = ref<ImportPromptDto | null>(null);
 
 async function onExport() {
   if (!exportMacroId.value || exportBusy.value) return;
@@ -37,7 +40,7 @@ async function onImport() {
   errorMessage.value = null;
   importBusy.value = true;
   try {
-    await importMacro();
+    importPrompt.value = await importMacro();
   } catch (e) {
     errorMessage.value = `Failed to import macro: ${e}`;
   } finally {
@@ -72,5 +75,6 @@ async function onImport() {
       </div>
       <div v-if="errorMessage" class="settings-row">{{ errorMessage }}</div>
     </div>
+    <ImportReviewDialog v-if="importPrompt" :prompt="importPrompt" @close="importPrompt = null" />
   </div>
 </template>

@@ -2,9 +2,12 @@ pub(crate) mod battery_watch;
 pub(crate) mod commands;
 #[cfg(feature = "dev-bridge")]
 pub(crate) mod dev_bridge;
+pub(crate) mod installed_apps;
 pub(crate) mod macros_thread;
+pub(crate) mod scheduled_run;
 pub(crate) mod single_instance;
 pub(crate) mod state;
+pub(crate) mod time_watch;
 pub(crate) mod tray;
 
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
@@ -69,9 +72,6 @@ pub fn run() {
                 ipc_auto_start: settings.ipc_auto_start.unwrap_or(false),
                 close_to_tray: settings.close_to_tray.unwrap_or(false),
                 tray_icon: None,
-                confirm_remove_macro: false,
-                remove_confirm_remaining_secs: 0,
-                remove_confirm_generation: 0,
                 confirm_clear_instructions: false,
                 clear_confirm_remaining_secs: 0,
                 clear_confirm_generation: 0,
@@ -91,6 +91,7 @@ pub fn run() {
                 ipc_port_text: settings.ipc_port.unwrap_or(47821).to_string(),
                 ipc_port_invalid: false,
                 update_check_state: UpdateCheckState::Idle,
+                pending_import: None,
             };
 
             let shared: SharedState = Arc::new(Mutex::new(initial_state));
@@ -192,6 +193,9 @@ pub fn run() {
             // ── Background battery-event watcher (see src/battery_watch.rs) ──
             battery_watch::start(Arc::clone(&shared), app.handle().clone());
 
+            // ── Background time-event watcher (see src/time_watch.rs) ──────
+            time_watch::start(Arc::clone(&shared), app.handle().clone());
+
             // ── QueueSignal consumer (replaces iced hotkey subscription) ──
             let app_handle = app.handle().clone();
             let state_for_task = Arc::clone(&shared);
@@ -229,9 +233,12 @@ pub fn run() {
             commands::remove_macro,
             commands::set_title,
             commands::set_macro_speed_multiplier,
+            commands::set_macro_always_listen,
             commands::save_macro,
             commands::export_macro,
             commands::import_macro,
+            commands::confirm_import_macro,
+            commands::cancel_import_macro,
             commands::add_instruction,
             commands::edit_instruction,
             commands::create_variable,
@@ -289,6 +296,7 @@ pub fn run() {
             commands::set_close_to_tray,
             commands::check_for_updates,
             commands::apply_update,
+            commands::list_installed_apps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

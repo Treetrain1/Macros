@@ -214,12 +214,17 @@ impl Macro {
                     }
                 }
                 Some(Instruction::WhenRan) => entry_strands.push(strand.instructions),
-                // Battery-triggered strands aren't run here at all — they're
-                // driven by the app's own background battery watcher (e.g.
-                // src-tauri's `battery_watch` module), which fires just their
-                // body directly once the battery condition holds, independent
-                // of Run/Loop. A manual Run intentionally leaves them alone.
-                Some(Instruction::WhenBatteryDischargedTo(_)) | Some(Instruction::WhenBatteryChargedTo(_)) => {}
+                // Battery/time-triggered strands aren't run here at all —
+                // they're driven by the app's own background watchers (e.g.
+                // src-tauri's `battery_watch`/`time_watch` modules), which
+                // fire just their body directly once their own condition
+                // holds, independent of Run/Loop. A manual Run intentionally
+                // leaves them alone.
+                Some(Instruction::WhenBatteryDischargedTo(_))
+                | Some(Instruction::WhenBatteryChargedTo(_))
+                | Some(Instruction::WhenTime(_))
+                | Some(Instruction::WhenPowerPluggedIn)
+                | Some(Instruction::WhenPowerUnplugged) => {}
                 _ => {}
             }
         }
@@ -366,12 +371,27 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
             Instruction::BlockHeader(_) => {}
             // Header-only markers, same as `WhenRan`/`BlockHeader` — never
             // actually reached in practice (`run_with_offset` excludes these
-            // strands from `entry_strands` entirely, and the battery watcher
-            // that does fire them starts from `strand.instructions[1..]`,
-            // skipping the header). Handled here defensively so the match
-            // stays total.
+            // strands from `entry_strands` entirely, and the background
+            // watcher that does fire them starts from
+            // `strand.instructions[1..]`, skipping the header). Handled here
+            // defensively so the match stays total.
             Instruction::WhenBatteryDischargedTo(_) => {}
             Instruction::WhenBatteryChargedTo(_) => {}
+            Instruction::WhenTime(_) => {}
+            Instruction::WhenPowerPluggedIn => {}
+            Instruction::WhenPowerUnplugged => {}
+            Instruction::OpenApp { command, .. } => {
+                println!("Opening app: {command}");
+                if let Err(e) = open_app(command) {
+                    warn!("Failed to open app: {}", e);
+                }
+            }
+            Instruction::CloseApp { command, name, .. } => {
+                println!("Closing app: {name}");
+                if let Err(e) = close_app(command, name) {
+                    warn!("Failed to close app: {}", e);
+                }
+            }
             Instruction::Return(value) => {
                 let resolved = ctx.resolve(value, depth)?;
                 return Ok(Flow::Return(resolved.eval()?));
@@ -693,6 +713,75 @@ fn run_block(instructions: &[Instruction], ctx: &mut ExecCtx, depth: u32, start:
     Ok(Flow::Normal)
 }
 
+/// Launches `command` — the already-resolved, platform-specific launch
+/// string an `Instruction::OpenApp` carries (see its doc comment). Each
+/// platform needs a different launcher: Windows' `start` shell built-in
+/// handles a `.lnk` path directly; macOS' `open` handles an `.app` bundle
+/// path; a plain `sh -c` covers Linux's cleaned `Exec=` line (which may
+/// still carry shell-meaningful syntax the desktop entry relied on).
+#[cfg(target_os = "windows")]
+fn open_app(command: &str) -> std::io::Result<()> {
+    Command::new("cmd").args(["/C", "start", "", command]).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_app(command: &str) -> std::io::Result<()> {
+    Command::new("open").arg(command).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "linux")]
+fn open_app(command: &str) -> std::io::Result<()> {
+    Command::new("sh").arg("-c").arg(command).spawn().map(|_| ())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn open_app(_command: &str) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "opening apps is not supported on this platform"))
+}
+
+/// Terminates the app an `Instruction::CloseApp` names — there's no
+/// cross-platform "close this specific launch string" API the way there is
+/// for opening one, so each platform instead derives a best-effort process
+/// matcher from whatever `OpenApp`'s picker happened to capture: the
+/// executable basename out of a Linux `Exec=` line or a Windows `.lnk`
+/// path, or (macOS) the app's own display name, since `open`/Launch
+/// Services address running apps by name rather than by bundle path.
+#[cfg(target_os = "linux")]
+fn close_app(command: &str, _name: &str) -> std::io::Result<()> {
+    let proc_name = command.split_whitespace().next().and_then(|c| c.rsplit('/').next()).unwrap_or("");
+    if proc_name.is_empty() {
+        return Ok(());
+    }
+    Command::new("killall").arg(proc_name).status().map(|_| ())
+}
+
+#[cfg(target_os = "windows")]
+fn close_app(command: &str, _name: &str) -> std::io::Result<()> {
+    let Some(stem) = std::path::Path::new(command).file_stem().and_then(|s| s.to_str()) else { return Ok(()) };
+    if stem.is_empty() {
+        return Ok(());
+    }
+    Command::new("taskkill").args(["/IM", &format!("{stem}.exe"), "/F"]).status().map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn close_app(_command: &str, name: &str) -> std::io::Result<()> {
+    if name.is_empty() {
+        return Ok(());
+    }
+    // AppleScript string literal — strip quotes/backslashes rather than
+    // escaping them, since `name` only ever comes from the picker's own app
+    // list (never freeform user text) and doesn't need real escaping support.
+    let sanitized: String = name.chars().filter(|c| *c != '"' && *c != '\\').collect();
+    let script = format!("tell application \"{sanitized}\" to quit");
+    Command::new("osascript").args(["-e", &script]).spawn().map(|_| ())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn close_app(_command: &str, _name: &str) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "closing apps is not supported on this platform"))
+}
+
 pub fn make_backend() -> Option<Arc<Mutex<dyn InputBackend>>> {
     match create_backend() {
         Some(b) => Some(b),
@@ -758,6 +847,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![],
+            settings: crate::macros::MacroSettings::default(),
         };
         let start = Instant::now();
         mac.run(noop_emulator(), None, 1.0, empty_vars());
@@ -781,6 +871,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![],
+            settings: crate::macros::MacroSettings::default(),
         };
         let start = Instant::now();
         mac.run_with_offset(noop_emulator(), None, 1.0, empty_vars(), Duration::from_millis(80));
@@ -804,6 +895,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![],
+            settings: crate::macros::MacroSettings::default(),
         };
         let stop_flag = Arc::new(Mutex::new(true));
         let flag_clone = Arc::clone(&stop_flag);
@@ -927,6 +1019,7 @@ mod tests {
                 pieces: vec![BlockPiece::Label { id: "p1".into(), text: "double".into() }, BlockPiece::Input { id: "p2".into(), name: "n".into() }],
                 returns_value: true,
             }],
+            settings: crate::macros::MacroSettings::default(),
         }
     }
 
@@ -972,6 +1065,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
+            settings: crate::macros::MacroSettings::default(),
         };
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), None);
@@ -1008,6 +1102,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: false }],
+            settings: crate::macros::MacroSettings::default(),
         };
         let start = Instant::now();
         mac.run(noop_emulator(), None, 1.0, empty_vars());
@@ -1052,6 +1147,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
+            settings: crate::macros::MacroSettings::default(),
         };
         // Should return promptly (erroring out at MAX_CALL_DEPTH) rather than
         // hanging or crashing the test process via a stack overflow.
@@ -1139,6 +1235,7 @@ mod tests {
                     returns_value: true,
                 },
             ],
+            settings: crate::macros::MacroSettings::default(),
         };
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(6.0)));
@@ -1267,6 +1364,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
+            settings: crate::macros::MacroSettings::default(),
         };
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(42.0)));
@@ -1443,6 +1541,7 @@ mod tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![BlockDef { id: block_id, pieces: vec![], returns_value: true }],
+            settings: crate::macros::MacroSettings::default(),
         };
         mac.run(noop_emulator(), None, 1.0, Arc::clone(&vars));
         assert_eq!(vars.lock().unwrap().get("x"), Some(&Evaluated::Number(7.0)));

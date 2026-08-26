@@ -7,6 +7,29 @@ export type MouseButton = 'Left' | 'Right' | 'Middle' | 'Side' | 'Extra';
 export type Coordinate = 'Absolute' | 'Relative';
 export type ScrollAxis = 'Vertical' | 'Horizontal';
 
+export type WeekdayDto = 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
+
+// One entry in the "Open App" picker's list — mirrors src-tauri/src/state.rs's
+// AppEntryDto. `command` is opaque (platform-specific launch string) and gets
+// stored as-is on the `OpenApp` instruction if picked; `icon`, when present,
+// is a `data:` URI ready to drop straight into an <img src>.
+export interface AppEntryDto {
+  name: string;
+  command: string;
+  icon: string | null;
+}
+
+// A recurring point in local time — mirrors macros-core's `TimeSchedule`
+// (input/schedule.rs), reused as-is on the wire (same shape as `Op` being
+// reused directly in `ValueDto`, not mirrored through a *Dto type). `hour`/
+// `minute` are always 24-hour; see timeSchedule.ts for the 12h/24h display
+// split and per-kind option lists.
+export type TimeScheduleDto =
+  | { kind: 'Daily'; hour: number; minute: number }
+  | { kind: 'Weekly'; weekday: WeekdayDto; hour: number; minute: number }
+  | { kind: 'Monthly'; day: number; hour: number; minute: number }
+  | { kind: 'Yearly'; month: number; day: number; hour: number; minute: number };
+
 // A small recursive expression tree backing a value field — a number, text,
 // or an operator applied to nested `args` (e.g. `(5) + (3)`). Mirrors
 // src-tauri/src/state.rs's ValueDto.
@@ -17,7 +40,13 @@ export type ValueOp =
   // (separate blocks, not a toggle — see valueOps.ts's OPERATOR_KINDS).
   | 'Eq' | 'Neq' | 'Gt' | 'Lt' | 'Gte' | 'Lte' | 'And' | 'Or' | 'Not' | 'True' | 'False'
   // Zero-arity — the system's current battery charge, 0-100.
-  | 'BatteryPercentage';
+  | 'BatteryPercentage'
+  // Zero-arity boolean — whether the system is currently on external power
+  // (always true with no battery/UPS present).
+  | 'PluggedIn'
+  // One fixed-dropdown arg (year/month/date/day of week/hour/minute/second)
+  // — always numeric, see timeSchedule.ts's CURRENT_TIME_OPTIONS.
+  | 'CurrentTime';
 // Join/Join3 both emit op 'Join' (only args.length differs, no 'Join3' on the
 // wire). `Var:<name>`/`Param:<name>` are per-variable/per-input identifiers,
 // not fixed operators. `Call:<blockId>` (a "My Blocks" reporter) has dynamic
@@ -170,6 +199,11 @@ export type InstructionDto =
   | { type: 'WhenRan' }
   | { type: 'WhenBatteryDischargedTo'; threshold: ValueDto }
   | { type: 'WhenBatteryChargedTo'; threshold: ValueDto }
+  | { type: 'WhenTime'; schedule: TimeScheduleDto }
+  | { type: 'WhenPowerPluggedIn' }
+  | { type: 'WhenPowerUnplugged' }
+  | { type: 'OpenApp'; command: string; name: string; icon: string | null }
+  | { type: 'CloseApp'; command: string; name: string; icon: string | null }
   | { type: 'SetVariable'; name: string; value: ValueDto }
   | { type: 'ChangeVariable'; name: string; value: ValueDto }
   | { type: 'BlockHeader'; block_id: string }
@@ -192,6 +226,11 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
     case 'WhenRan': return { type: 'WhenRan' };
     case 'WhenBatteryDischargedTo': return { type: 'WhenBatteryDischargedTo', threshold: numberValue(20) };
     case 'WhenBatteryChargedTo': return { type: 'WhenBatteryChargedTo', threshold: numberValue(100) };
+    case 'WhenTime': return { type: 'WhenTime', schedule: { kind: 'Daily', hour: 9, minute: 0 } };
+    case 'WhenPowerPluggedIn': return { type: 'WhenPowerPluggedIn' };
+    case 'WhenPowerUnplugged': return { type: 'WhenPowerUnplugged' };
+    case 'OpenApp': return { type: 'OpenApp', command: '', name: '', icon: null };
+    case 'CloseApp': return { type: 'CloseApp', command: '', name: '', icon: null };
     case 'Wait': return { type: 'Wait', duration: numberValue(1000) };
     case 'Text': return { type: 'Text', text: textValue('text') };
     case 'Key': return { type: 'Key', key: 'a', direction: 'Click' };
@@ -216,10 +255,22 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
   }
 }
 
-export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo']);
+export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged']);
 
 export function isHeaderType(type: InstructionDto['type']): boolean {
   return HEADER_TYPES.has(type);
+}
+
+// The subset of HEADER_TYPES that are "entry point" triggers (WhenRan and
+// every When-condition block) rather than a custom block's own definition
+// header (BlockHeader renders its own params instead of a fixed label, so it
+// gets its own look — see BlockHeaderFields.vue — not this quiet accent
+// tint). Drives `.instruction-row-when-ran`'s styling in InstructionRow.vue/
+// PaletteInstructionBlock.vue.
+export const ENTRY_TRIGGER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged']);
+
+export function isEntryTriggerType(type: InstructionDto['type']): boolean {
+  return ENTRY_TRIGGER_TYPES.has(type);
 }
 
 // "Cap" blocks (the mirror of header blocks) never have anything stacked
@@ -265,6 +316,38 @@ export interface MacroDto {
   variables: string[];
   /** User-defined custom blocks ("My Blocks") — see `BlockDefDto`. */
   block_defs: BlockDefDto[];
+  /** Settings edited from the "Macro Settings" popup — see `MacroSettingsDto`. */
+  settings: MacroSettingsDto;
+}
+
+// Mirrors src-tauri/src/state.rs's MacroSettingsDto — per-macro settings
+// edited from the "Macro Settings" popup next to the macro dropdown, and
+// included in macro export/import like everything else in MacroDto.
+export interface MacroSettingsDto {
+  /** When true, this macro's When-Battery/-Time/-Power strands are watched
+   * by the background watchers even while a different macro is selected. */
+  always_listen: boolean;
+}
+
+export function defaultMacroSettings(): MacroSettingsDto {
+  return { always_listen: false };
+}
+
+/** One non-default `MacroSettingsDto` field an import wants confirmed —
+ * mirrors src-tauri/src/state.rs's CustomMacroSettingDto. */
+export interface CustomMacroSettingDto {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+/** What `importMacro` needs the user to resolve before the staged import can
+ * be committed — mirrors src-tauri/src/state.rs's ImportPromptDto. `null`
+ * (Rust's `None`) means the import needed no confirmation and already
+ * committed. */
+export interface ImportPromptDto {
+  needs_command_warning: boolean;
+  custom_settings: CustomMacroSettingDto[];
 }
 
 /** Alphabetical variable names for a macro — shared by the sidebar reporter
@@ -377,8 +460,6 @@ export interface StateDto {
   ipc_active_port: number | null;
   ipc_auto_start: boolean;
   close_to_tray: boolean;
-  confirm_remove_macro: boolean;
-  confirm_remove_macro_remaining_secs: number;
   confirm_clear_instructions: boolean;
   confirm_clear_instructions_remaining_secs: number;
   key_capture: KeyCaptureDto | null;
@@ -412,8 +493,6 @@ export function emptyState(): StateDto {
     ipc_active_port: null,
     ipc_auto_start: false,
     close_to_tray: false,
-    confirm_remove_macro: false,
-    confirm_remove_macro_remaining_secs: 0,
     confirm_clear_instructions: false,
     confirm_clear_instructions_remaining_secs: 0,
     key_capture: null,

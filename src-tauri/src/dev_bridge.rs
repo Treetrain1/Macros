@@ -149,6 +149,18 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
             call!(commands::export_macro(macro_id).await)
         }
         "import_macro" => call!(commands::import_macro(state, app).await),
+        "add_instruction" => {
+            let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let instruction: InstructionDto = match field(&body, "instruction") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            call!(commands::add_instruction(state, app, strand_id, index, instruction))
+        }
+        "edit_instruction" => {
+            let strand_id: String = match field(&body, "strandId") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let index: Vec<PathStep> = match field(&body, "path") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            let instruction: InstructionDto = match field(&body, "instruction") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            call!(commands::edit_instruction(state, app, strand_id, index, instruction))
+        }
         "create_variable" => {
             let name: String = match field(&body, "name") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::create_variable(state, app, name))
@@ -341,6 +353,7 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
         }
         "check_for_updates" => call!(commands::check_for_updates(state, app)),
         "apply_update" => call!(commands::apply_update(state, app)),
+        "list_installed_apps" => call!(Ok(commands::list_installed_apps().await)),
         other => ok_response::<()>(Err(format!("unknown command: {other}"))),
     }
 }

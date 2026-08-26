@@ -1,5 +1,5 @@
 import { invoke, listen, getVersion } from './bridge';
-import type { BlockPieceDto, HotkeyActionDto, InstrPath, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
+import type { AppEntryDto, BlockPieceDto, HotkeyActionDto, ImportPromptDto, InstrPath, InstructionDto, StateDto, ValueDto, ValueKind, ValueLocationDto } from './types';
 
 export function getState(): Promise<StateDto> {
   return invoke('get_state');
@@ -20,9 +20,21 @@ export const removeMacro = () => invoke<void>('remove_macro');
 export const setTitle = (title: string) => invoke<void>('set_title', { title });
 export const setMacroSpeedMultiplier = (multiplier: number) =>
   invoke<void>('set_macro_speed_multiplier', { multiplier });
+export const setMacroAlwaysListen = (enabled: boolean) =>
+  invoke<void>('set_macro_always_listen', { enabled });
 export const saveMacro = () => invoke<void>('save_macro');
 export const exportMacro = (macroId: string) => invoke<void>('export_macro', { macroId });
-export const importMacro = () => invoke<void>('import_macro');
+/** Resolves the prompt to show the user before the staged import can be
+ * committed (a Command warning and/or non-default settings to confirm —
+ * see `ImportPromptDto`), or `null` if the dialog was cancelled or the
+ * macro imported immediately with nothing to confirm. */
+export const importMacro = () => invoke<ImportPromptDto | null>('import_macro');
+/** `keepSettings` maps each `ImportPromptDto.custom_settings` entry's `key`
+ * to whether to keep its imported (non-default) value (`true`) or reset it
+ * to the default (`false`). */
+export const confirmImportMacro = (keepSettings: Record<string, boolean>) =>
+  invoke<void>('confirm_import_macro', { keepSettings });
+export const cancelImportMacro = () => invoke<void>('cancel_import_macro');
 export const createVariable = (name: string) => invoke<void>('create_variable', { name });
 export const renameVariable = (oldName: string, newName: string) =>
   invoke<void>('rename_variable', { oldName, newName });
@@ -129,3 +141,6 @@ export const setCloseToTray = (enabled: boolean) => invoke<void>('set_close_to_t
 // ─── Updates ────────────────────────────────────────────────────────────────
 export const checkForUpdates = () => invoke<void>('check_for_updates');
 export const applyUpdate = () => invoke<void>('apply_update');
+
+// ─── Open App picker ────────────────────────────────────────────────────────
+export const listInstalledApps = () => invoke<AppEntryDto[]>('list_installed_apps');

@@ -33,6 +33,19 @@ const CASE_OPTIONS = [
   { value: 'Lower', label: 'lowercase' },
 ];
 
+// Mirrors macros-core's `Value::eval`'s `Op::CurrentTime` match arm — always
+// numeric (`DayOfWeek` is 1=Sunday..7=Saturday, `Hour` is always 24-hour),
+// matching Scratch's own "current ()" sensing block.
+const CURRENT_TIME_OPTIONS = [
+  { value: 'Year', label: 'year' },
+  { value: 'Month', label: 'month' },
+  { value: 'Date', label: 'date (day of month)' },
+  { value: 'DayOfWeek', label: 'day of week' },
+  { value: 'Hour', label: 'hour' },
+  { value: 'Minute', label: 'minute' },
+  { value: 'Second', label: 'second' },
+];
+
 export const OPERATOR_KINDS: OperatorKindSpec[] = [
   { kind: 'Add', op: 'Add', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '+' },
   { kind: 'Sub', op: 'Sub', arity: 2, argTypes: ['number', 'number'], resultType: 'number', infix: '−' },
@@ -66,6 +79,10 @@ export const OPERATOR_KINDS: OperatorKindSpec[] = [
   { kind: 'False', op: 'False', arity: 0, argTypes: [], resultType: 'bool', prefix: 'false' },
   // Zero-arity, like NewLine/Tab — evaluates to the live system battery percentage.
   { kind: 'BatteryPercentage', op: 'BatteryPercentage', arity: 0, argTypes: [], resultType: 'number', prefix: 'battery percentage' },
+  { kind: 'PluggedIn', op: 'PluggedIn', arity: 0, argTypes: [], resultType: 'bool', prefix: 'plugged in' },
+  // One arg, entirely a fixed dropdown (no draggable operand) — same enumArg
+  // shape as Case, just with nothing else alongside it.
+  { kind: 'CurrentTime', op: 'CurrentTime', arity: 1, argTypes: ['text'], resultType: 'number', prefix: 'current', enumArg: { index: 0, options: CURRENT_TIME_OPTIONS } },
 ];
 
 export function specForKind(kind: ValueKind): OperatorKindSpec | undefined {

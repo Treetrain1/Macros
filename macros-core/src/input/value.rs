@@ -65,6 +65,16 @@ pub enum Op {
     /// Zero-arity — the system's current battery charge, 0-100. See
     /// `crate::battery::percentage`.
     BatteryPercentage,
+    /// Zero-arity boolean — whether the system is currently receiving
+    /// external power. See `crate::battery::is_plugged_in`.
+    PluggedIn,
+    /// `args[0]` (a fixed dropdown, like `Case`'s upper/lowercase toggle) is
+    /// one of `"Year"`/`"Month"`/`"Date"`/`"DayOfWeek"`/`"Hour"`/`"Minute"`/
+    /// `"Second"`, naming which local-clock component to read right now.
+    /// Always numeric — `DayOfWeek` is 1 (Sunday) through 7 (Saturday),
+    /// `Hour` is always 24-hour (0-23) regardless of the UI's display
+    /// format, matching Scratch's own "current ()" sensing block.
+    CurrentTime,
 }
 
 /// Recursive expression tree backing a numeric/text instruction field — a
@@ -241,6 +251,14 @@ pub const OPERATOR_KINDS: &[OperatorKindSpec] = &[
     OperatorKindSpec { kind: "False", op: Op::False, arity: 0, default_args: Vec::new },
     // Zero-arity, like NewLine/Tab — evaluates to the live system battery percentage.
     OperatorKindSpec { kind: "BatteryPercentage", op: Op::BatteryPercentage, arity: 0, default_args: Vec::new },
+    // Zero-arity, like True/False — evaluates to whether the system is
+    // currently on external power.
+    OperatorKindSpec { kind: "PluggedIn", op: Op::PluggedIn, arity: 0, default_args: Vec::new },
+    // `args[0]` defaults to the dropdown's first ("Year") option — same
+    // shape as `Case`, and matching valueOps.ts's CURRENT_TIME_OPTIONS order
+    // (the frontend's own default for a freshly-dragged block always picks
+    // the enumArg's first option).
+    OperatorKindSpec { kind: "CurrentTime", op: Op::CurrentTime, arity: 1, default_args: || vec![Value::Text { value: "Year".to_string() }] },
 ];
 
 /// 1-based char index of the first occurrence of `needle` in `haystack`, or
@@ -333,6 +351,24 @@ impl Value {
             Value::Op { op: Op::True, .. } => Ok(Evaluated::Bool(true)),
             Value::Op { op: Op::False, .. } => Ok(Evaluated::Bool(false)),
             Value::Op { op: Op::BatteryPercentage, .. } => Ok(Evaluated::Number(crate::battery::percentage()?)),
+            Value::Op { op: Op::PluggedIn, .. } => Ok(Evaluated::Bool(crate::battery::is_plugged_in())),
+            Value::Op { op: Op::CurrentTime, args, .. } => {
+                use chrono::{Datelike, Timelike};
+                let now = chrono::Local::now();
+                let n = match args[0].eval_text()?.as_str() {
+                    "Year" => now.year() as f64,
+                    "Month" => now.month() as f64,
+                    "Date" => now.day() as f64,
+                    // 1 (Sunday) through 7 (Saturday), matching Scratch's own
+                    // "current (day of week)" numbering.
+                    "DayOfWeek" => now.weekday().num_days_from_sunday() as f64 + 1.0,
+                    "Hour" => now.hour() as f64,
+                    "Minute" => now.minute() as f64,
+                    "Second" => now.second() as f64,
+                    other => return Err(format!("unknown current-time component '{other}'")),
+                };
+                Ok(Evaluated::Number(n))
+            }
             Value::Op { op: Op::Not, args, .. } => Ok(Evaluated::Bool(!args[0].eval()?.as_bool())),
             Value::Op { op: Op::And, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() && args[1].eval()?.as_bool())),
             Value::Op { op: Op::Or, args, .. } => Ok(Evaluated::Bool(args[0].eval()?.as_bool() || args[1].eval()?.as_bool())),
@@ -371,7 +407,7 @@ impl Value {
                     }
                     Op::Join | Op::NewLine | Op::Tab | Op::Length | Op::IndexOf | Op::LastIndexOf | Op::LetterOf | Op::Case
                     | Op::Round | Op::True | Op::False | Op::Not | Op::And | Op::Or | Op::Eq | Op::Neq | Op::Gt | Op::Lt
-                    | Op::Gte | Op::Lte | Op::BatteryPercentage => unreachable!("matched above"),
+                    | Op::Gte | Op::Lte | Op::BatteryPercentage | Op::PluggedIn | Op::CurrentTime => unreachable!("matched above"),
                 };
                 Ok(Evaluated::Number(result))
             }
@@ -943,6 +979,27 @@ mod tests {
     fn eval_text_letter_of_rejects_zero_index() {
         let v = Value::Op { op: Op::LetterOf, args: vec![Value::number(0.0), text("hello")], saved: Box::new(Value::number(0.0)) };
         assert!(v.eval_text().is_err());
+    }
+
+    #[test]
+    fn current_time_components_stay_in_range() {
+        let current = |which: &str| {
+            let v = Value::Op { op: Op::CurrentTime, args: vec![text(which)], saved: Box::new(Value::number(0.0)) };
+            v.eval_number().unwrap()
+        };
+        assert!(current("Year") >= 2020.0);
+        assert!((1.0..=12.0).contains(&current("Month")));
+        assert!((1.0..=31.0).contains(&current("Date")));
+        assert!((1.0..=7.0).contains(&current("DayOfWeek")));
+        assert!((0.0..=23.0).contains(&current("Hour")));
+        assert!((0.0..=59.0).contains(&current("Minute")));
+        assert!((0.0..=59.0).contains(&current("Second")));
+    }
+
+    #[test]
+    fn current_time_rejects_unknown_component() {
+        let v = Value::Op { op: Op::CurrentTime, args: vec![text("Fortnight")], saved: Box::new(Value::number(0.0)) };
+        assert!(v.eval_number().is_err());
     }
 
     #[test]

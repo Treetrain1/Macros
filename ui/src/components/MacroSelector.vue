@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { state } from '../store';
-import { newMacro, openSettings, removeMacro, selectMacro } from '../tauri';
+import { newMacro, openSettings, selectMacro } from '../tauri';
 import AppDropdown from './AppDropdown.vue';
 import AppButton from './AppButton.vue';
+import RemoveMacroDialog from './RemoveMacroDialog.vue';
+import MacroSettingsDialog from './MacroSettingsDialog.vue';
 
 const macroOptions = computed(() =>
   state.macro_names.map((name, idx) => ({ value: String(idx), label: name })),
@@ -25,39 +27,47 @@ function onSelect(value: string) {
   selectMacro(idx);
 }
 
-const removeIcon = computed(() => (state.confirm_remove_macro ? 'alert-triangle' : 'trash'));
-const removeLabel = computed(() =>
-  state.confirm_remove_macro ? `Delete (${state.confirm_remove_macro_remaining_secs}s)?` : 'Delete',
-);
+const showRemoveDialog = ref(false);
+const showMacroSettings = ref(false);
 </script>
 
 <template>
   <div class="toolbar-row" id="selector-row">
     <div class="selector-left">
       <label id="macro-dropdown-label">Select macro</label>
-      <AppDropdown
-        :options="macroOptions"
-        :model-value="selectedValue"
-        placeholder="— no macro selected —"
-        class-name="macro-select-trigger"
-        aria-label="Select macro"
-        aria-labelledby="macro-dropdown-label"
-        @update:model-value="onSelect"
-      />
+      <div class="macro-dropdown-row">
+        <AppDropdown
+          :options="macroOptions"
+          :model-value="selectedValue"
+          placeholder="— no macro selected —"
+          class-name="macro-select-trigger"
+          aria-label="Select macro"
+          aria-labelledby="macro-dropdown-label"
+          @update:model-value="onSelect"
+        />
+        <AppButton
+          icon="sliders-horizontal"
+          :disabled="state.macro_selected == null"
+          title="Macro Settings"
+          aria-label="Macro Settings"
+          @click="showMacroSettings = true"
+        />
+      </div>
     </div>
     <div class="selector-right">
       <AppButton icon="plus" label="New macro" title="Add a new macro" @click="newMacro()" />
       <AppButton
         id="remove-macro-btn"
         class="btn-danger"
-        :class="{ 'confirm-armed': state.confirm_remove_macro }"
         :disabled="state.macro_selected == null"
         title="Delete selected macro"
-        :icon="removeIcon"
-        :label="removeLabel"
-        @click="removeMacro()"
+        icon="trash"
+        label="Delete"
+        @click="showRemoveDialog = true"
       />
       <AppButton icon="settings" label="Settings" title="Open Settings" @click="openSettings()" />
     </div>
+    <RemoveMacroDialog v-if="showRemoveDialog" @close="showRemoveDialog = false" />
+    <MacroSettingsDialog v-if="showMacroSettings" @close="showMacroSettings = false" />
   </div>
 </template>

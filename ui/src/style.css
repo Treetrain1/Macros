@@ -215,7 +215,7 @@ button:disabled { opacity: 0.38; cursor: default; }
 }
 
 /* ── Inputs & Selects ────────────────────────────────────────────────────── */
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], input[type="time"], select, textarea {
   background: var(--bg2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -225,11 +225,24 @@ input[type="text"], input[type="number"], select, textarea {
   transition: box-shadow var(--dur-fast) var(--ease-standard),
               border-color var(--dur-fast) var(--ease-standard);
 }
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="time"]:focus, select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--glow-accent);
 }
+/* `<input type="time">`'s internal hour/minute/AM-PM fields, selection
+   highlight, spin arrows, and calendar-picker icon are all painted by the
+   browser itself rather than styled by the `background`/`color` above —
+   Chromium picks a fixed *light* palette for that internal rendering unless
+   told otherwise, which is what made this input look like a stray white
+   pill against the rest of this dark-themed app. `color-scheme` is the
+   correct/standard way to fix that: it tells the browser which built-in
+   palette to paint its own native chrome with, dark or light, independent
+   of anything else. Scoped to each theme the same way every other
+   dark-vs-light split in this file is. */
+:root:not([data-theme="light"]) input[type="time"] { color-scheme: dark; }
+:root[data-theme="light"] input[type="time"] { color-scheme: light; }
+input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 input.invalid, select.invalid { border-color: var(--red); }
 input.invalid:focus, select.invalid:focus { box-shadow: var(--glow-red); }
 .invalid-hint { color: var(--red); font-size: 11px; }
@@ -282,6 +295,11 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   flex: 1;
 }
 .selector-left label { font-size: 12px; color: var(--text-dim); }
+.macro-dropdown-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .selector-right {
   display: flex;
@@ -1884,6 +1902,10 @@ body.sidebar-resizing {
 .strand-snap-preview .instruction-content {
   opacity: 0;
 }
+.strand-snap-preview .instruction-type-icon,
+.strand-snap-preview .instruction-type-icon-inline {
+  display: none;
+}
 
 /* Bare positioning wrapper, same idea as .strand-drag-ghost — the dragged
    content is a real .value-card-shape clone, already styled correctly. */
@@ -2100,6 +2122,138 @@ body.sidebar-resizing {
   justify-content: flex-end;
   gap: var(--spacing-sm);
   margin-top: var(--spacing-sm);
+}
+
+/* ── "Open App" picker (AppSelectorDialog.vue) ──────────────────────────── */
+.app-selector-panel { width: 480px; max-width: calc(100vw - 32px); }
+.app-selector-search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.app-selector-search svg { color: var(--text-dim); flex-shrink: 0; }
+.app-selector-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+.app-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 4px;
+  max-height: 360px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.app-selector-grid::-webkit-scrollbar { width: 10px; }
+.app-selector-grid::-webkit-scrollbar-track { background: transparent; }
+.app-selector-grid::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.app-selector-grid::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+.app-selector-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  /* Grid items default to `min-width: auto`, which floors their width at
+     the name text's min-content size — for a long, unbroken app name that's
+     wider than the 84px column, which grows the whole grid (and forces the
+     unwanted horizontal scrollbar) instead of letting the text wrap. */
+  min-width: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: center;
+  color: var(--text);
+}
+.app-selector-item:hover { background: var(--hover-overlay); }
+.app-selector-item-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+.app-selector-item-icon-fallback {
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  box-sizing: border-box;
+  color: var(--text-dim);
+  background: var(--bg3);
+  border-radius: var(--radius);
+}
+.app-selector-item-name {
+  width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.app-selector-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Chosen-app summary shown inline in the OpenApp instruction block itself
+   (OpenAppFields.vue / PaletteOpenAppFields.vue). */
+.open-app-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.open-app-icon-fallback { color: var(--text-dim); flex-shrink: 0; }
+.open-app-choose-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.open-app-name {
+  font-weight: 500;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Warning/confirm dialogs (Command-in-import, delete macro, …) ────────── */
+.warning-panel { width: 380px; max-width: calc(100vw - 32px); }
+.warning-panel .modal-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+.warning-icon {
+  color: var(--yellow);
+  flex-shrink: 0;
+}
+.danger-icon {
+  color: var(--red);
+  flex-shrink: 0;
+}
+.warning-panel p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
 }
 
 /* ── "Make a Block"/"Edit Block" dialog ─────────────────────────────────── */
@@ -2321,6 +2475,17 @@ body.sidebar-resizing {
 .dd-trigger.dd-compact svg { width: 12px; height: 12px; }
 
 .macro-select-trigger { width: 200px; }
+
+/* "When [time]" block's plain (non-Value) day-of-month/time-of-day inputs —
+   sized to their own content instead of the browser's wide number/time
+   input default. */
+.when-time-day-input { width: 3.2em; padding: 5px 4px; text-align: center; }
+/* Wide enough for the longest rendering (12-hour locales show "hh:mm AM",
+   not just "hh:mm") plus the native spin-arrow/clock-icon chrome and this
+   input's own padding — all of which count against `width` under
+   `border-box`, so a tight value here clips the text itself, not just the
+   icon. */
+.when-time-time-input { width: 9em; padding: 5px 6px; }
 
 #dd-portal {
   position: fixed;

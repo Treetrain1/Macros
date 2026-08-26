@@ -19,6 +19,8 @@ serde_json.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }
 rfd.workspace = true
+chrono.workspace = true
+dirs.workspace = true
 axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 
@@ -29,6 +31,10 @@ tower-http = { workspace = true, optional = true }
 # doesn't touch GTK at all, so we have to initialize it ourselves before
 # building any tray menu.
 gtk = "0.18"
+# Encodes application icons found via .desktop entries as data: URIs for the
+# "Open App" picker (see src/installed_apps.rs) — Linux-only, since the
+# Windows/Mac listings there don't resolve icons at all yet.
+base64.workspace = true
 
 [features]
 default = ["cef"]

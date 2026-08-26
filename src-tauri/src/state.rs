@@ -1,10 +1,11 @@
 use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use macros_core::input::schedule::TimeSchedule;
 use macros_core::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
 use macros_core::input::value::{Evaluated, Op, Value};
 use macros_core::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
 use macros_core::macros::backend::InputBackend;
 use macros_core::macros::thread_pool::ThreadPool;
-use macros_core::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, Strand};
+use macros_core::macros::{BlockDef, BlockPiece, FloatingValue, Instruction, Macro, MacroSettings, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -164,9 +165,6 @@ pub(crate) struct AppState {
     pub(crate) ipc_auto_start: bool,
     pub(crate) close_to_tray: bool,
     pub(crate) tray_icon: Option<tauri::tray::TrayIcon<tauri::Cef>>,
-    pub(crate) confirm_remove_macro: bool,
-    pub(crate) remove_confirm_remaining_secs: u8,
-    pub(crate) remove_confirm_generation: u64,
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,
@@ -186,6 +184,12 @@ pub(crate) struct AppState {
     pub(crate) ipc_port_text: String,
     pub(crate) ipc_port_invalid: bool,
     pub(crate) update_check_state: UpdateCheckState,
+    /// A macro file the user just picked via `import_macro` but whose import
+    /// is paused on the "contains a Command instruction" warning popup —
+    /// `confirm_import_macro`/`cancel_import_macro` resolve it. `None` the
+    /// rest of the time (including immediately after a no-warning-needed
+    /// import, which commits inline instead of staging here).
+    pub(crate) pending_import: Option<Macro>,
 }
 
 // ─── Serializable DTO ──────────────────────────────────────────────────────
@@ -202,8 +206,6 @@ pub(crate) struct StateDto {
     pub(crate) ipc_active_port: Option<u16>,
     pub(crate) ipc_auto_start: bool,
     pub(crate) close_to_tray: bool,
-    pub(crate) confirm_remove_macro: bool,
-    pub(crate) confirm_remove_macro_remaining_secs: u8,
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) confirm_clear_instructions_remaining_secs: u8,
     pub(crate) key_capture: Option<KeyCaptureDto>,
@@ -239,6 +241,35 @@ pub(crate) struct MacroDto {
     pub(crate) variables: Vec<String>,
     /// User-defined custom blocks ("My Blocks").
     pub(crate) block_defs: Vec<BlockDefDto>,
+    /// Settings edited from the "Macro Settings" popup — see `MacroSettingsDto`.
+    pub(crate) settings: MacroSettingsDto,
+}
+
+/// Wire shape for `MacroSettings` — see there for field meanings.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub(crate) struct MacroSettingsDto {
+    pub(crate) always_listen: bool,
+}
+
+fn macro_settings_to_dto(settings: &MacroSettings) -> MacroSettingsDto {
+    MacroSettingsDto { always_listen: settings.always_listen }
+}
+
+/// One non-default `MacroSettings` field an import wants confirmed — see
+/// `commands::non_default_macro_settings`.
+#[derive(Serialize, Clone)]
+pub(crate) struct CustomMacroSettingDto {
+    pub(crate) key: String,
+    pub(crate) label: String,
+    pub(crate) enabled: bool,
+}
+
+/// What `import_macro` needs the user to resolve before the staged
+/// `pending_import` macro can be committed.
+#[derive(Serialize, Clone)]
+pub(crate) struct ImportPromptDto {
+    pub(crate) needs_command_warning: bool,
+    pub(crate) custom_settings: Vec<CustomMacroSettingDto>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -411,6 +442,11 @@ pub(crate) enum InstructionDto {
     WhenRan,
     WhenBatteryDischargedTo { threshold: ValueDto },
     WhenBatteryChargedTo { threshold: ValueDto },
+    WhenTime { schedule: TimeSchedule },
+    WhenPowerPluggedIn,
+    WhenPowerUnplugged,
+    OpenApp { command: String, name: String, icon: Option<String> },
+    CloseApp { command: String, name: String, icon: Option<String> },
     SetVariable { name: String, value: ValueDto },
     ChangeVariable { name: String, value: ValueDto },
     BlockHeader { block_id: String },
@@ -423,6 +459,16 @@ pub(crate) enum InstructionDto {
     While { condition: ValueDto, body: Vec<InstructionDto> },
     EscapeLoop,
     ContinueLoop,
+}
+
+/// One entry in the "Open App" picker's list — see `installed_apps`.
+/// `command` is the ready-to-launch string an `Instruction::OpenApp` stores
+/// as-is; `icon`, when present, is a `data:` URI.
+#[derive(Serialize, Clone)]
+pub(crate) struct AppEntryDto {
+    pub(crate) name: String,
+    pub(crate) command: String,
+    pub(crate) icon: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -571,6 +617,11 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
         Instruction::WhenRan => InstructionDto::WhenRan,
         Instruction::WhenBatteryDischargedTo(threshold) => InstructionDto::WhenBatteryDischargedTo { threshold: value_to_dto(threshold) },
         Instruction::WhenBatteryChargedTo(threshold) => InstructionDto::WhenBatteryChargedTo { threshold: value_to_dto(threshold) },
+        Instruction::WhenTime(schedule) => InstructionDto::WhenTime { schedule: *schedule },
+        Instruction::WhenPowerPluggedIn => InstructionDto::WhenPowerPluggedIn,
+        Instruction::WhenPowerUnplugged => InstructionDto::WhenPowerUnplugged,
+        Instruction::OpenApp { command, name, icon } => InstructionDto::OpenApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
+        Instruction::CloseApp { command, name, icon } => InstructionDto::CloseApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
         Instruction::SetVariable(name, value) => InstructionDto::SetVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::ChangeVariable(name, value) => InstructionDto::ChangeVariable { name: name.clone(), value: value_to_dto(value) },
         Instruction::BlockHeader(block_id) => InstructionDto::BlockHeader { block_id: block_id.clone() },
@@ -644,6 +695,11 @@ pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
         InstructionDto::WhenRan => Instruction::WhenRan,
         InstructionDto::WhenBatteryDischargedTo { threshold } => Instruction::WhenBatteryDischargedTo(dto_to_value(threshold)),
         InstructionDto::WhenBatteryChargedTo { threshold } => Instruction::WhenBatteryChargedTo(dto_to_value(threshold)),
+        InstructionDto::WhenTime { schedule } => Instruction::WhenTime(*schedule),
+        InstructionDto::WhenPowerPluggedIn => Instruction::WhenPowerPluggedIn,
+        InstructionDto::WhenPowerUnplugged => Instruction::WhenPowerUnplugged,
+        InstructionDto::OpenApp { command, name, icon } => Instruction::OpenApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
+        InstructionDto::CloseApp { command, name, icon } => Instruction::CloseApp { command: command.clone(), name: name.clone(), icon: icon.clone() },
         InstructionDto::SetVariable { name, value } => Instruction::SetVariable(name.clone(), dto_to_value(value)),
         InstructionDto::ChangeVariable { name, value } => Instruction::ChangeVariable(name.clone(), dto_to_value(value)),
         InstructionDto::BlockHeader { block_id } => Instruction::BlockHeader(block_id.clone()),
@@ -700,6 +756,7 @@ fn macro_to_dto(mac: &Macro) -> MacroDto {
         floating_values: mac.floating_values.iter().map(floating_value_to_dto).collect(),
         variables: mac.variables.iter().map(|v| v.name.clone()).collect(),
         block_defs: mac.block_defs.iter().map(block_def_to_dto).collect(),
+        settings: macro_settings_to_dto(&mac.settings),
     }
 }
 
@@ -833,8 +890,6 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         ipc_active_port: s.ipc_active_port,
         ipc_auto_start: s.ipc_auto_start,
         close_to_tray: s.close_to_tray,
-        confirm_remove_macro: s.confirm_remove_macro,
-        confirm_remove_macro_remaining_secs: s.remove_confirm_remaining_secs,
         confirm_clear_instructions: s.confirm_clear_instructions,
         confirm_clear_instructions_remaining_secs: s.clear_confirm_remaining_secs,
         key_capture,

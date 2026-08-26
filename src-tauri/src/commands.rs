@@ -19,7 +19,6 @@ use tauri::{Runtime, State};
 use tracing::warn;
 
 const CLEAR_CONFIRM_TIMEOUT_SECS: u64 = 3;
-const REMOVE_CONFIRM_TIMEOUT_SECS: u64 = 3;
 const UNDO_STACK_LIMIT: usize = 50;
 
 fn push_undo(s: &mut crate::state::AppState) {
@@ -137,48 +136,22 @@ pub(crate) fn new_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHa
     Ok(())
 }
 
+/// Deletes the current macro. The frontend confirms with the user via a
+/// popup (`RemoveMacroDialog.vue`) before ever calling this, so it deletes
+/// unconditionally.
 #[tauri::command]
 pub(crate) fn remove_macro<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    if !s.confirm_remove_macro {
-        s.confirm_remove_macro = true;
-        s.remove_confirm_remaining_secs = REMOVE_CONFIRM_TIMEOUT_SECS as u8;
-        s.remove_confirm_generation = s.remove_confirm_generation.wrapping_add(1);
-        let timeout_gen = s.remove_confirm_generation;
-        emit_state_updated(&app, &s);
-        drop(s);
-
-        let state_clone = Arc::clone(&*state);
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            for remaining in (1..=REMOVE_CONFIRM_TIMEOUT_SECS).rev() {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                if let Ok(mut s) = state_clone.lock() {
-                    if s.remove_confirm_generation != timeout_gen {
-                        break;
-                    }
-                    s.remove_confirm_remaining_secs = remaining as u8 - 1;
-                    if remaining == 1 {
-                        s.confirm_remove_macro = false;
-                    }
-                    emit_state_updated(&app_clone, &s);
-                }
-            }
-        });
-    } else {
-        if let Some(mac) = s.current_macro.take() {
-            if let Err(e) = mac.remove() {
-                warn!("Failed to remove macro: {e}");
-            }
+    if let Some(mac) = s.current_macro.take() {
+        if let Err(e) = mac.remove() {
+            warn!("Failed to remove macro: {e}");
         }
-        s.confirm_remove_macro = false;
-        s.remove_confirm_remaining_secs = 0;
-        s.macro_selected = None;
-        s.invalid_field_buffers.clear();
-        refresh_macro_list(&mut s);
-        config::set_selected_macro_id(None);
-        emit_state_updated(&app, &s);
     }
+    s.macro_selected = None;
+    s.invalid_field_buffers.clear();
+    refresh_macro_list(&mut s);
+    config::set_selected_macro_id(None);
+    emit_state_updated(&app, &s);
     Ok(())
 }
 
@@ -203,6 +176,21 @@ pub(crate) fn set_macro_speed_multiplier<R: Runtime>(state: State<SharedState>, 
     if let Some(mac) = &mut s.current_macro {
         mac.speed_multiplier = multiplier.clamp(*SPEED_MULTIPLIER_RANGE.start(), *SPEED_MULTIPLIER_RANGE.end());
         auto_save(&s);
+    }
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+/// Sets the current macro's "always listen for events even when a different
+/// macro is selected" setting — see `MacroSettings::always_listen`. Edited
+/// from the "Macro Settings" popup next to the macro dropdown.
+#[tauri::command]
+pub(crate) fn set_macro_always_listen<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, enabled: bool) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(mac) = &mut s.current_macro {
+        mac.settings.always_listen = enabled;
+        auto_save(&s);
+        refresh_macro_list(&mut s);
     }
     emit_state_updated(&app, &s);
     Ok(())
@@ -456,19 +444,75 @@ pub(crate) async fn export_macro(macro_id: String) -> Result<(), String> {
     config::write_macro_file(file.path(), &mac)
 }
 
-/// Imports a `.macro` file as a brand-new macro (fresh id, so importing never
-/// collides with or overwrites an existing macro — even a re-imported copy of
-/// one already in the library lands as a separate entry).
-#[tauri::command]
-pub(crate) async fn import_macro<R: Runtime>(state: State<'_, SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("Import Macro")
-        .add_filter("Macro", &["macro"])
-        .pick_file()
-        .await;
+/// Whether `body` (or anything nested inside its `If`/`IfElse`/`Repeat`/
+/// `Forever`/`While` blocks) contains a `Command` instruction — the check
+/// behind `import_macro`'s "this macro can run arbitrary commands" warning.
+fn body_contains_command(body: &[Instruction]) -> bool {
+    body.iter().any(|ins| match ins {
+        // `OpenApp`'s `command` is just as capable of running arbitrary
+        // shell as a plain `Command` (see `runner::open_app`'s Linux/macOS
+        // launchers) — a hand-edited macro file could carry any string
+        // there, not just what the picker itself would ever produce.
+        Instruction::Command(_) | Instruction::OpenApp { .. } => true,
+        Instruction::If { body, .. } | Instruction::Repeat { body, .. } | Instruction::Forever { body } | Instruction::While { body, .. } => {
+            body_contains_command(body)
+        }
+        Instruction::IfElse { then_body, else_body, .. } => body_contains_command(then_body) || body_contains_command(else_body),
+        _ => false,
+    })
+}
 
-    let Some(file) = file else { return Ok(()); };
-    let mut mac = config::read_macro_file(file.path())?;
+fn macro_contains_command(mac: &Macro) -> bool {
+    mac.strands.iter().any(|strand| body_contains_command(&strand.instructions))
+}
+
+/// One (key, label, getter, setter) entry per `MacroSettings` field — the
+/// single place a new setting needs registering for it to participate in the
+/// "review custom settings on import" flow below. `key` is the wire
+/// identifier the frontend's toggle list and `confirm_import_macro`'s
+/// `keep_settings` map address it by; `label` is the human-readable text
+/// shown in that list.
+type SettingAccessor = (&'static str, &'static str, fn(&macros_core::macros::MacroSettings) -> bool, fn(&mut macros_core::macros::MacroSettings, bool));
+
+const SETTING_ACCESSORS: &[SettingAccessor] = &[(
+    "always_listen",
+    "Always listen for events, even when a different macro is selected",
+    |s| s.always_listen,
+    |s, v| s.always_listen = v,
+)];
+
+/// Every `MacroSettings` field on `settings` that differs from its default —
+/// what `import_macro` shows the user for confirmation, since an imported
+/// macro asking for non-default behavior deserves a second look before it's
+/// silently applied.
+fn non_default_macro_settings(settings: &macros_core::macros::MacroSettings) -> Vec<crate::state::CustomMacroSettingDto> {
+    let default = macros_core::macros::MacroSettings::default();
+    SETTING_ACCESSORS
+        .iter()
+        .filter_map(|(key, label, get, _)| {
+            let value = get(settings);
+            (value != get(&default)).then(|| crate::state::CustomMacroSettingDto { key: key.to_string(), label: label.to_string(), enabled: value })
+        })
+        .collect()
+}
+
+/// Resets every setting the user unchecked in the import review popup (i.e.
+/// present in `keep` as `false`) back to its default; anything not mentioned
+/// in `keep` is left as imported.
+fn apply_setting_overrides(settings: &mut macros_core::macros::MacroSettings, keep: &HashMap<String, bool>) {
+    let default = macros_core::macros::MacroSettings::default();
+    for (key, _, get, set) in SETTING_ACCESSORS {
+        if !keep.get(*key).copied().unwrap_or(true) {
+            set(settings, get(&default));
+        }
+    }
+}
+
+/// Assigns a fresh id to `mac` (so importing never collides with or
+/// overwrites an existing macro — even a re-imported copy of one already in
+/// the library lands as a separate entry), saves it, and makes it the
+/// selected/current macro.
+fn commit_imported_macro<R: Runtime>(mut mac: Macro, state: &SharedState, app: &tauri::AppHandle<R>) -> Result<(), String> {
     mac.id = uuid::Uuid::new_v4().simple().to_string();
     let new_id = mac.id.clone();
     mac.add()?;
@@ -482,7 +526,62 @@ pub(crate) async fn import_macro<R: Runtime>(state: State<'_, SharedState>, app:
     }
     s.invalid_field_buffers.clear();
     sync_variable_values(&mut s);
-    emit_state_updated(&app, &s);
+    emit_state_updated(app, &s);
+    Ok(())
+}
+
+/// Picks a `.macro` file and reads it. If it needs a confirmation prompt
+/// before it can be committed — it contains a `Command` instruction (which
+/// can run arbitrary system commands) and/or requests non-default macro
+/// settings (see `non_default_macro_settings`) — the parsed macro is staged
+/// in `pending_import` and the prompt to show is returned; the frontend
+/// resolves it via `confirm_import_macro`/`cancel_import_macro`. Otherwise
+/// the macro is imported immediately and `None` is returned.
+#[tauri::command]
+pub(crate) async fn import_macro<R: Runtime>(state: State<'_, SharedState>, app: tauri::AppHandle<R>) -> Result<Option<crate::state::ImportPromptDto>, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Import Macro")
+        .add_filter("Macro", &["macro"])
+        .pick_file()
+        .await;
+
+    let Some(file) = file else { return Ok(None); };
+    let mac = config::read_macro_file(file.path())?;
+
+    let needs_command_warning = macro_contains_command(&mac);
+    let custom_settings = non_default_macro_settings(&mac.settings);
+
+    if needs_command_warning || !custom_settings.is_empty() {
+        let prompt = crate::state::ImportPromptDto { needs_command_warning, custom_settings };
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.pending_import = Some(mac);
+        return Ok(Some(prompt));
+    }
+
+    commit_imported_macro(mac, &state, &app)?;
+    Ok(None)
+}
+
+/// Finishes an import staged by `import_macro` after the user resolves its
+/// prompt. `keep_settings` maps each `ImportPromptDto::custom_settings`
+/// entry's `key` to whether the user chose to keep its imported (non-default)
+/// value (`true`) or reset it to the default (`false`); a key the popup never
+/// showed (because there was nothing to confirm) is simply absent, which
+/// `apply_setting_overrides` treats as "keep".
+#[tauri::command]
+pub(crate) async fn confirm_import_macro<R: Runtime>(state: State<'_, SharedState>, app: tauri::AppHandle<R>, keep_settings: HashMap<String, bool>) -> Result<(), String> {
+    let mac = { state.lock().map_err(|e| e.to_string())?.pending_import.take() };
+    let Some(mut mac) = mac else { return Ok(()); };
+    apply_setting_overrides(&mut mac.settings, &keep_settings);
+    commit_imported_macro(mac, &state, &app)
+}
+
+/// Discards an import staged by `import_macro` after the user declines the
+/// Command warning popup.
+#[tauri::command]
+pub(crate) fn cancel_import_macro(state: State<SharedState>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.pending_import = None;
     Ok(())
 }
 
@@ -2119,6 +2218,21 @@ fn run_macro_task<R: Runtime>(
     }
 }
 
+// ─── Open App picker ────────────────────────────────────────────────────────
+
+/// Lists installed applications for the "Open App" instruction's picker
+/// popup — see `installed_apps`. `async` so scanning `.desktop`/icon-theme
+/// files (Linux) or walking the Start Menu (Windows) doesn't block the main
+/// thread; stateless, so unlike almost every other command here it doesn't
+/// take `State<SharedState>` at all.
+#[tauri::command]
+pub(crate) async fn list_installed_apps() -> Vec<crate::state::AppEntryDto> {
+    crate::installed_apps::list_apps()
+        .into_iter()
+        .map(|a| crate::state::AppEntryDto { name: a.name, command: a.command, icon: a.icon })
+        .collect()
+}
+
 #[cfg(test)]
 mod value_location_tests {
     use super::*;
@@ -2150,6 +2264,7 @@ mod value_location_tests {
             floating_values: vec![FloatingValue { id: "f1".into(), x: 10, y: 20, value: Value::number(5.0) }],
             variables: vec![],
             block_defs: vec![],
+            settings: macros_core::macros::MacroSettings::default(),
         }
     }
 
@@ -2412,6 +2527,7 @@ mod value_location_tests {
             floating_values: vec![],
             variables: vec![],
             block_defs: vec![],
+            settings: macros_core::macros::MacroSettings::default(),
         };
         let loc = ValueLocation::Field { strand_id: "s1".into(), index: top(0), field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));

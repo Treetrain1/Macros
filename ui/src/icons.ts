@@ -50,6 +50,11 @@ import {
   SkipForward,
   BatteryWarning,
   BatteryCharging,
+  PlugZap,
+  Unplug,
+  SlidersHorizontal,
+  AppWindow,
+  SquareX,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -102,6 +107,11 @@ export const ICONS = {
   'skip-forward': SkipForward,
   'battery-warning': BatteryWarning,
   'battery-charging': BatteryCharging,
+  'plug-zap': PlugZap,
+  unplug: Unplug,
+  'sliders-horizontal': SlidersHorizontal,
+  'app-window': AppWindow,
+  'square-x': SquareX,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;
@@ -111,6 +121,9 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   WhenRan: 'play',
   WhenBatteryDischargedTo: 'battery-warning',
   WhenBatteryChargedTo: 'battery-charging',
+  WhenTime: 'clock',
+  WhenPowerPluggedIn: 'plug-zap',
+  WhenPowerUnplugged: 'unplug',
   Wait: 'clock',
   Text: 'text-cursor',
   Key: 'key',
@@ -118,6 +131,8 @@ export const INSTRUCTION_TYPE_ICONS: Record<InstructionType, IconName> = {
   MoveMouse: 'move',
   Scroll: 'mouse',
   Command: 'terminal',
+  OpenApp: 'app-window',
+  CloseApp: 'square-x',
   Comment: 'message-square',
   SetVariable: 'equal',
   ChangeVariable: 'trending-up',
@@ -139,6 +154,9 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   WhenRan: 'When Ran',
   WhenBatteryDischargedTo: 'When Battery Discharged To',
   WhenBatteryChargedTo: 'When Battery Charged To',
+  WhenTime: 'When Time',
+  WhenPowerPluggedIn: 'When Power Plugged In',
+  WhenPowerUnplugged: 'When Power Unplugged',
   Wait: 'Wait',
   Text: 'Text',
   Key: 'Key',
@@ -146,6 +164,8 @@ export const INSTRUCTION_TYPE_LABELS: Record<InstructionType, string> = {
   MoveMouse: 'Move Mouse',
   Scroll: 'Scroll',
   Command: 'Command',
+  OpenApp: 'Open App',
+  CloseApp: 'Close App',
   Comment: 'Comment',
   SetVariable: 'Set Variable',
   ChangeVariable: 'Change Variable',

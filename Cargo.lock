@@ -2568,6 +2568,9 @@ name = "macros"
 version = "0.4.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
+ "chrono",
+ "dirs",
  "gtk",
  "macros-core",
  "rfd",
@@ -2589,6 +2592,7 @@ name = "macros-core"
 version = "0.4.0"
 dependencies = [
  "bincode",
+ "chrono",
  "core-foundation",
  "core-graphics",
  "dirs",

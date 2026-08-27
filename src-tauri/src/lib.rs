@@ -11,10 +11,10 @@ pub(crate) mod time_watch;
 pub(crate) mod tray;
 
 use crate::state::{AppState, ComboCapture, Page, RecordingPhase, SharedState, UpdateCheckState};
-use macros_core::macros::runner::make_backend;
-use macros_core::macros::thread_pool::ThreadPool;
-use macros_core::recording::QueueSignal;
-use macros_core::{config, recording};
+use blockwork_core::macros::runner::make_backend;
+use blockwork_core::macros::thread_pool::ThreadPool;
+use blockwork_core::recording::QueueSignal;
+use blockwork_core::{config, recording};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Cef, Manager};
@@ -29,6 +29,10 @@ pub fn run() {
     // `cef::execute_process` and exits. The single-instance activation-port
     // check below only makes sense for the real browser process.
     let is_cef_subprocess = std::env::args().any(|a| a.starts_with("--type="));
+
+    if !is_cef_subprocess {
+        config::migrate_legacy_app_id();
+    }
 
     let activation_listener = if is_cef_subprocess {
         None
@@ -104,7 +108,7 @@ pub fn run() {
                 // Load macros; create a default one if empty
                 let macros = config::get_macros_from_config();
                 if macros.is_empty() {
-                    let _ = macros_core::macros::Macro::new("New Macro".into(), "".into(), vec![]).add();
+                    let _ = blockwork_core::macros::Macro::new("New Macro".into(), "".into(), vec![]).add();
                 }
                 let macros = config::get_macros_from_config();
                 s.macro_strs = macros.iter().map(|m| m.name.clone()).collect();
@@ -121,7 +125,7 @@ pub fn run() {
                 // macOS accessibility
                 #[cfg(target_os = "macos")]
                 {
-                    let trusted = macros_core::macros::backend::macos::request_accessibility();
+                    let trusted = blockwork_core::macros::backend::macos::request_accessibility();
                     if !trusted {
                         recording::set_grab_failed(true);
                     }
@@ -135,7 +139,7 @@ pub fn run() {
                 // client callback still sees every keystroke in that case, so
                 // it's wired to feed the same hotkey pipeline as a fallback.
                 tauri_runtime_cef::set_focused_key_hook(|vk, pressed| {
-                    macros_core::macros::backend::dispatch_from_focused_window(vk as u16, pressed)
+                    blockwork_core::macros::backend::dispatch_from_focused_window(vk as u16, pressed)
                 });
 
                 let bindings = config::load_hotkey_bindings();
@@ -146,7 +150,7 @@ pub fn run() {
                 if s.ipc_auto_start {
                     if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
                         let (tx, rx) = tokio::sync::watch::channel(false);
-                        s.ipc_server = Some(tauri::async_runtime::spawn(macros_core::ipc::run_server(port, rx)));
+                        s.ipc_server = Some(tauri::async_runtime::spawn(blockwork_core::ipc::run_server(port, rx)));
                         s.ipc_shutdown_tx = Some(tx);
                         s.ipc_active_port = Some(port);
                     }

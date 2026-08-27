@@ -1,10 +1,10 @@
 [package]
-name = "macros-core"
+name = "blockwork-core"
 version.workspace = true
 edition.workspace = true
 
 [lib]
-name = "macros_core"
+name = "blockwork_core"
 
 [features]
 default = ["ipc", "updater"]

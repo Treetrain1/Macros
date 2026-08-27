@@ -37,13 +37,13 @@ fn build_frontend() {
         let mut command = std::process::Command::new(pnpm);
         command.args(args).current_dir(&ui_dir);
         // Sandboxed/offline builds (see packaging/flatpak, which sets
-        // MACROS_PNPM_OFFLINE=1 -- deliberately not FLATPAK, which cef-dll-sys's
+        // BLOCKWORK_PNPM_OFFLINE=1 -- deliberately not FLATPAK, which cef-dll-sys's
         // own build script already keys off to look for CEF at /usr/lib instead
         // of $CEF_PATH) need pnpm to trust the committed lockfile without
         // touching the network -- pnpm 11's env-var config (npm_config_offline,
         // npm_config_trust_lockfile) isn't honored for these, only the CLI flags
         // are, so pass them directly.
-        if args[0] == "install" && std::env::var_os("MACROS_PNPM_OFFLINE").is_some() {
+        if args[0] == "install" && std::env::var_os("BLOCKWORK_PNPM_OFFLINE").is_some() {
             command.args(["--offline", "--frozen-lockfile", "--trust-lockfile"]);
         }
         let status = command

@@ -11,7 +11,7 @@ fn main() {
 
     match cbindgen::Builder::new().with_crate(&crate_dir).with_config(config).generate() {
         Ok(bindings) => {
-            bindings.write_to_file(PathBuf::from(&crate_dir).join("include/macros_ffi.h"));
+            bindings.write_to_file(PathBuf::from(&crate_dir).join("include/blockwork_ffi.h"));
         }
         // A generation failure shouldn't fail the whole build (the header is
         // only needed by the C++ side, not by anything downstream in Cargo);

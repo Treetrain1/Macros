@@ -1,10 +1,10 @@
-use macros_core::config;
-use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use macros_core::macros::runner::VariableStore;
-use macros_core::macros::{loop_control, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
-use macros_core::input::types::InputToken;
-use macros_core::input::value::{Evaluated, Value, OPERATOR_KINDS};
-use macros_core::recording;
+use blockwork_core::config;
+use blockwork_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use blockwork_core::macros::runner::VariableStore;
+use blockwork_core::macros::{loop_control, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, Strand, VariableDef, SPEED_MULTIPLIER_RANGE};
+use blockwork_core::input::types::InputToken;
+use blockwork_core::input::value::{Evaluated, Value, OPERATOR_KINDS};
+use blockwork_core::recording;
 use crate::macros_thread;
 use crate::state::{
     build_state_dto, dto_to_block_piece, dto_to_hotkey_action, dto_to_instruction, dto_to_value, emit_state_updated,
@@ -473,7 +473,7 @@ fn macro_contains_command(mac: &Macro) -> bool {
 /// identifier the frontend's toggle list and `confirm_import_macro`'s
 /// `keep_settings` map address it by; `label` is the human-readable text
 /// shown in that list.
-type SettingAccessor = (&'static str, &'static str, fn(&macros_core::macros::MacroSettings) -> bool, fn(&mut macros_core::macros::MacroSettings, bool));
+type SettingAccessor = (&'static str, &'static str, fn(&blockwork_core::macros::MacroSettings) -> bool, fn(&mut blockwork_core::macros::MacroSettings, bool));
 
 const SETTING_ACCESSORS: &[SettingAccessor] = &[(
     "always_listen",
@@ -486,8 +486,8 @@ const SETTING_ACCESSORS: &[SettingAccessor] = &[(
 /// what `import_macro` shows the user for confirmation, since an imported
 /// macro asking for non-default behavior deserves a second look before it's
 /// silently applied.
-fn non_default_macro_settings(settings: &macros_core::macros::MacroSettings) -> Vec<crate::state::CustomMacroSettingDto> {
-    let default = macros_core::macros::MacroSettings::default();
+fn non_default_macro_settings(settings: &blockwork_core::macros::MacroSettings) -> Vec<crate::state::CustomMacroSettingDto> {
+    let default = blockwork_core::macros::MacroSettings::default();
     SETTING_ACCESSORS
         .iter()
         .filter_map(|(key, label, get, _)| {
@@ -500,8 +500,8 @@ fn non_default_macro_settings(settings: &macros_core::macros::MacroSettings) -> 
 /// Resets every setting the user unchecked in the import review popup (i.e.
 /// present in `keep` as `false`) back to its default; anything not mentioned
 /// in `keep` is left as imported.
-fn apply_setting_overrides(settings: &mut macros_core::macros::MacroSettings, keep: &HashMap<String, bool>) {
-    let default = macros_core::macros::MacroSettings::default();
+fn apply_setting_overrides(settings: &mut blockwork_core::macros::MacroSettings, keep: &HashMap<String, bool>) {
+    let default = blockwork_core::macros::MacroSettings::default();
     for (key, _, get, set) in SETTING_ACCESSORS {
         if !keep.get(*key).copied().unwrap_or(true) {
             set(settings, get(&default));
@@ -1648,8 +1648,8 @@ pub(crate) fn key_capture_event<R: Runtime>(
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let Some(target) = s.key_capture.take() else { return Ok(()); };
 
-    let captured_key = macros_core::key_mapping::web_code_to_macro_key(&code)
-        .or_else(|| macros_core::key_mapping::web_key_to_macro_key(&key));
+    let captured_key = blockwork_core::key_mapping::web_code_to_macro_key(&code)
+        .or_else(|| blockwork_core::key_mapping::web_key_to_macro_key(&key));
 
     if let Some(mk) = captured_key {
         match target {
@@ -1666,7 +1666,7 @@ pub(crate) fn key_capture_event<R: Runtime>(
                 }
             }
             KeyCaptureTarget::Standalone => {
-                s.pending_standalone_key = Some(macros_core::input::key_to_string(&mk).unwrap_or("Unknown").to_string());
+                s.pending_standalone_key = Some(blockwork_core::input::key_to_string(&mk).unwrap_or("Unknown").to_string());
             }
         }
     }
@@ -1920,7 +1920,7 @@ pub(crate) fn combo_capture_event<R: Runtime>(
     modifiers: u8,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let key_name = match macros_core::key_mapping::web_code_to_rdev_name(&code) {
+    let key_name = match blockwork_core::key_mapping::web_code_to_rdev_name(&code) {
         Some(n) => n,
         None => return Ok(()),
     };
@@ -2055,7 +2055,7 @@ pub(crate) async fn start_ipc_server<R: Runtime>(state: State<'_, SharedState>, 
     if s.ipc_server.is_none() {
         if let Ok(port) = s.ipc_port_text.trim().parse::<u16>() {
             let (tx, rx) = tokio::sync::watch::channel(false);
-            s.ipc_server = Some(tauri::async_runtime::spawn(macros_core::ipc::run_server(port, rx)));
+            s.ipc_server = Some(tauri::async_runtime::spawn(blockwork_core::ipc::run_server(port, rx)));
             s.ipc_shutdown_tx = Some(tx);
             s.ipc_active_port = Some(port);
         }
@@ -2129,7 +2129,7 @@ pub(crate) async fn check_for_updates_internal<R: Runtime>(state: &SharedState, 
     #[cfg(windows)]
     {
         let version = env!("CARGO_PKG_VERSION").to_string();
-        let result = tokio::task::spawn_blocking(move || macros_core::updater::check_for_update(&version))
+        let result = tokio::task::spawn_blocking(move || blockwork_core::updater::check_for_update(&version))
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
         if let Ok(mut s) = state.lock() {
@@ -2161,7 +2161,7 @@ pub(crate) fn apply_update<R: Runtime>(state: State<SharedState>, app: tauri::Ap
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let version = env!("CARGO_PKG_VERSION").to_string();
-            let result = tokio::task::spawn_blocking(move || macros_core::updater::apply_update(&version))
+            let result = tokio::task::spawn_blocking(move || blockwork_core::updater::apply_update(&version))
                 .await
                 .unwrap_or_else(|e| Err(e.to_string()));
             match result {
@@ -2215,7 +2215,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
         HotkeyAction::StopLoop => {
             // Clears every in-flight run's stop flag, not just loop mode's —
             // a single run has its own stop flag that `is_looping` doesn't reach.
-            let cleared = macros_core::macros::run_registry::stop_all();
+            let cleared = blockwork_core::macros::run_registry::stop_all();
             tracing::info!(cleared, "StopLoop hotkey handled");
             if let Ok(s) = state.lock() {
                 if let Ok(mut lk) = s.is_looping.lock() {
@@ -2294,7 +2294,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
 
 fn run_macro_task<R: Runtime>(
     mac: Macro,
-    emulator: Arc<std::sync::Mutex<dyn macros_core::macros::backend::InputBackend>>,
+    emulator: Arc<std::sync::Mutex<dyn blockwork_core::macros::backend::InputBackend>>,
     is_looping: Arc<std::sync::Mutex<bool>>,
     loop_mode: bool,
     speed_multiplier: f64,
@@ -2316,11 +2316,11 @@ fn run_macro_task<R: Runtime>(
         tokio::task::spawn_blocking(move || {
             // Registered before the run starts so "Stop Loop" can reach it
             // even during the focus switch below.
-            let playback_guard = macros_core::macros::run_registry::begin_run();
+            let playback_guard = blockwork_core::macros::run_registry::begin_run();
             #[cfg(windows)]
-            macros_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
+            blockwork_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
             task();
-            macros_core::macros::run_registry::end_run(&playback_guard);
+            blockwork_core::macros::run_registry::end_run(&playback_guard);
         });
     } else {
         if let Ok(mut st) = is_looping.lock() { *st = true; }
@@ -2328,11 +2328,11 @@ fn run_macro_task<R: Runtime>(
         let task = macros_thread::into_single_run_task(mac, emulator, stop_flag, speed_multiplier, variables, state, app);
         tokio::task::spawn_blocking(move || {
             // Same pre-registration as the loop branch above.
-            let playback_guard = macros_core::macros::run_registry::begin_run();
+            let playback_guard = blockwork_core::macros::run_registry::begin_run();
             #[cfg(windows)]
-            macros_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
+            blockwork_core::macros::backend::windows::prepare_for_macro_execution(&prep_backend);
             task();
-            macros_core::macros::run_registry::end_run(&playback_guard);
+            blockwork_core::macros::run_registry::end_run(&playback_guard);
         });
     }
 }
@@ -2355,8 +2355,8 @@ pub(crate) async fn list_installed_apps() -> Vec<crate::state::AppEntryDto> {
 #[cfg(test)]
 mod value_location_tests {
     use super::*;
-    use macros_core::input::types::Coordinate;
-    use macros_core::input::value::Op;
+    use blockwork_core::input::types::Coordinate;
+    use blockwork_core::input::value::Op;
 
     /// A flat, non-nested `InstrPath` — the shape every location was
     /// addressed by before nested `If`/`IfElse` bodies existed.
@@ -2384,7 +2384,7 @@ mod value_location_tests {
             comments: vec![],
             variables: vec![],
             block_defs: vec![],
-            settings: macros_core::macros::MacroSettings::default(),
+            settings: blockwork_core::macros::MacroSettings::default(),
         }
     }
 
@@ -2636,7 +2636,7 @@ mod value_location_tests {
                 id: "s1".into(),
                 x: 0,
                 y: 0,
-                instructions: vec![Instruction::new(InstructionKind::Token(macros_core::input::types::InputToken::MoveMouse(
+                instructions: vec![Instruction::new(InstructionKind::Token(blockwork_core::input::types::InputToken::MoveMouse(
                     Value::number(1.0),
                     Value::number(2.0),
                     Coordinate::Rel,
@@ -2648,7 +2648,7 @@ mod value_location_tests {
             comments: vec![],
             variables: vec![],
             block_defs: vec![],
-            settings: macros_core::macros::MacroSettings::default(),
+            settings: blockwork_core::macros::MacroSettings::default(),
         };
         let loc = ValueLocation::Field { strand_id: "s1".into(), index: top(0), field_id: FieldId::MoveMouseY, path: vec![] };
         assert_eq!(resolve_location_mut(&mut mac, &loc), Some(&mut Value::number(2.0)));

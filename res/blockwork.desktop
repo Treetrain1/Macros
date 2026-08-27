@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=Macros
+Name=Blockwork
 Comment=Create and manage macros
-Exec=macros
+Exec=blockwork
 Terminal=false
 Type=Application
-Icon=macros
+Icon=blockwork
 Categories=Utility;
 Keywords=Macro;Manager;

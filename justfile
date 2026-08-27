@@ -1,10 +1,10 @@
-name := "macros"
-appid := "dev.ethanstokes.Macros"
+name := "blockwork"
+appid := "dev.ethanstokes.Blockwork"
 
 # Variables
-TARGET := "target/release/macros"
+TARGET := "target/release/blockwork"
 CEF_DIR := "target/release"
-LIBDIR := "/usr/lib/macros"
+LIBDIR := "/usr/lib/blockwork"
 
 # Default target
 default: build
@@ -26,7 +26,7 @@ install:
     # Binary's RUNPATH is `$ORIGIN`, so the CEF runtime payload (libcef.so,
     # GL/Vulkan shims, *.pak, icudtl.dat, locales/, ...) has to live alongside
     # it in a private libdir, not /usr/bin.
-    sudo install -Dm0755 {{TARGET}} {{LIBDIR}}/macros
+    sudo install -Dm0755 {{TARGET}} {{LIBDIR}}/blockwork
     sudo install -Dm0755 {{CEF_DIR}}/libcef.so {{LIBDIR}}/libcef.so
     sudo install -Dm0755 {{CEF_DIR}}/libEGL.so {{LIBDIR}}/libEGL.so
     sudo install -Dm0755 {{CEF_DIR}}/libGLESv2.so {{LIBDIR}}/libGLESv2.so
@@ -41,14 +41,14 @@ install:
     sudo install -Dm0644 {{CEF_DIR}}/resources.pak {{LIBDIR}}/resources.pak
     sudo rm -rf {{LIBDIR}}/locales
     sudo cp -r {{CEF_DIR}}/locales {{LIBDIR}}/locales
-    sudo ln -sf {{LIBDIR}}/macros /usr/bin/macros
-    sudo install -Dm0644 res/macros.desktop /usr/share/applications/macros.desktop
-    sudo install -Dm0644 res/icons/macros.png /usr/share/icons/hicolor/256x256/apps/macros.png
+    sudo ln -sf {{LIBDIR}}/blockwork /usr/bin/blockwork
+    sudo install -Dm0644 res/blockwork.desktop /usr/share/applications/blockwork.desktop
+    sudo install -Dm0644 res/icons/blockwork.png /usr/share/icons/hicolor/256x256/apps/blockwork.png
 
 # Uninstall the project
 uninstall:
     sudo rm -rf {{LIBDIR}}
-    sudo rm -f /usr/bin/macros /usr/share/applications/macros.desktop /usr/share/icons/hicolor/256x256/apps/macros.png
+    sudo rm -f /usr/bin/blockwork /usr/share/applications/blockwork.desktop /usr/share/icons/hicolor/256x256/apps/blockwork.png
 
 replace: build uninstall install
 
@@ -73,8 +73,8 @@ flatpak-build *args:
 # Install the just-built Flatpak from the local repo, adding it as a remote
 # first if needed. Re-run after every flatpak-build to pick up changes.
 flatpak-install:
-    flatpak remote-add --user --if-not-exists --no-gpg-verify macros-local flatpak-repo
-    flatpak install --user -y --reinstall macros-local {{appid}}
+    flatpak remote-add --user --if-not-exists --no-gpg-verify blockwork-local flatpak-repo
+    flatpak install --user -y --reinstall blockwork-local {{appid}}
 
 # Build, install, and launch in one go -- the normal "does it still work" loop.
 flatpak-test *args: (flatpak-build args) flatpak-install

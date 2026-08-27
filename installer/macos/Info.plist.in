@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Macros</string>
+    <string>Blockwork</string>
     <key>CFBundleDisplayName</key>
-    <string>Macros</string>
+    <string>Blockwork</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.ethanstokes.Macros</string>
+    <string>dev.ethanstokes.Blockwork</string>
     <key>CFBundleVersion</key>
     <string>__VERSION__</string>
     <key>CFBundleShortVersionString</key>
     <string>__VERSION__</string>
     <key>CFBundleExecutable</key>
-    <string>Macros</string>
+    <string>Blockwork</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>

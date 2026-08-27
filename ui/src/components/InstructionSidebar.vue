@@ -36,8 +36,8 @@ const VALUE_KINDS: ValueKind[] = ['Number', 'Text', ...OPERATOR_KINDS.map(s => s
 const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.current_macro).map(n => `Var:${n}` as ValueKind));
 
 // blockstitch's PaletteValueBlock emits its own generic ValueNode shape (its
-// `op` is a plain string, since blockstitch doesn't know Macros' ValueOp
-// union) — safe to treat as Macros' own ValueDto here, since Macros'
+// `op` is a plain string, since blockstitch doesn't know Blockwork's ValueOp
+// union) — safe to treat as Blockwork's own ValueDto here, since Blockwork's
 // operator registry is the only thing that ever populates it.
 function onValueUpdate(kind: ValueKind, next: ValueNode) {
   applyPaletteValueEdit(kind, next as ValueDto);

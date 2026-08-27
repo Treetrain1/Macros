@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Thin wrapper around blockstitch's generic <ContextMenuPanel> — this is where
-// Macros' own menu content (what each of the four menu variants offers, and
+// Blockwork's own menu content (what each of the four menu variants offers, and
 // what each item does) lives; the panel itself only handles positioning,
 // outside-click/Escape/scroll close, and rendering the item list.
 import { computed } from 'vue';

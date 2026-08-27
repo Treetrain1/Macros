@@ -2,7 +2,7 @@
 //! picker popup — desktop-app-only concern (unlike the cross-platform
 //! `InstructionKind::OpenApp` itself, which just launches whatever `command`
 //! string this produced and never re-scans anything), so this lives here
-//! rather than in `macros-core`.
+//! rather than in `blockwork-core`.
 //!
 //! Icon support is currently Linux-only: freedesktop `.desktop` entries name
 //! an icon theme lookup key, which resolves fairly reliably to a `.png`/

@@ -1,5 +1,5 @@
 //! Wine detection, shared-memory setup, and launching the native Linux
-//! helper (`macros-linux-bridge`) — needed because `WH_KEYBOARD_LL`/
+//! helper (`blockwork-linux-bridge`) — needed because `WH_KEYBOARD_LL`/
 //! `WH_MOUSE_LL` don't see real host input under Wine, and `SendInput`
 //! emission is unreliable there too (both confirmed empirically against a
 //! real Proton/GD session; see the project plan for the diagnostic
@@ -12,7 +12,7 @@
 //! instead of Wine's much weaker `SetThreadPriority` emulation.
 #![cfg(windows)]
 
-use macros_core::wire::{self, SharedRegion, WireCapture, WireControlCommand};
+use blockwork_core::wire::{self, SharedRegion, WireCapture, WireControlCommand};
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::Ordering;
@@ -84,7 +84,7 @@ fn wine_unix_path(windows_path: &str) -> Option<String> {
 }
 
 /// Owns the shared-memory mapping and the handles behind it. Kept alive in
-/// `macros-ffi`'s static state for the process lifetime — there is no
+/// `blockwork-ffi`'s static state for the process lifetime — there is no
 /// clean-shutdown path today (matches how `EMULATOR`/the capture thread are
 /// already never torn down).
 #[allow(dead_code)] // fields exist to keep the handles/mapping alive, never read again
@@ -221,7 +221,7 @@ pub fn spawn_capture_forwarder(region: &'static SharedRegion) {
         // nowhere observable from inside a console-less DLL. Catching per
         // event means one bad event can't permanently stop draining the
         // ring the way a thread-ending panic would.
-        let mut callback = macros_core::recording::build_capture_callback();
+        let mut callback = blockwork_core::recording::build_capture_callback();
         let mut buf = [0u8; wire::SLOT_SIZE - 4];
         let mut processed: u64 = 0;
         let mut last_log = std::time::Instant::now();
@@ -230,7 +230,7 @@ pub fn spawn_capture_forwarder(region: &'static SharedRegion) {
                 Some(len) => {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if let Some(WireCapture { event, ts }) = wire::decode_capture(&buf[..len]) {
-                            let timestamp = macros_core::macros::backend::CaptureTimestamp::Hardware(ts.to_system_time());
+                            let timestamp = blockwork_core::macros::backend::CaptureTimestamp::Hardware(ts.to_system_time());
                             // Discarded: `CaptureDecision::Suppress` is
                             // never actually returned here — the embedded
                             // engine's hotkey table is always empty (see
@@ -257,7 +257,7 @@ pub fn spawn_capture_forwarder(region: &'static SharedRegion) {
 }
 
 /// Pushes a control command into the bridge's control ring for
-/// `macros-linux-bridge` to act on. Same bounded-retry contract the old
+/// `blockwork-linux-bridge` to act on. Same bounded-retry contract the old
 /// per-event `RemoteEvdevBackend::push` used: a full ring means the Linux
 /// side has fallen behind, and this is called at a bounded rate (once per
 /// `macros_run_macro`/`macros_stop_loop` call), not in a tight loop, so a
@@ -273,7 +273,7 @@ fn push_control(region: &SharedRegion, cmd: &WireControlCommand) -> Result<(), S
     Err("control ring full".to_string())
 }
 
-/// Tells `macros-linux-bridge` to run the macro with this id — the entire
+/// Tells `blockwork-linux-bridge` to run the macro with this id — the entire
 /// timed run (loading the macro, pacing Waits, emitting input) happens
 /// natively over there now; see `wire::WireControlCommand`'s docs for why.
 /// `elapsed_overshoot_ms` is forwarded as-is — see `WireControlCommand::
@@ -282,7 +282,7 @@ pub fn send_run_macro(region: &SharedRegion, macro_id: &str, elapsed_overshoot_m
     push_control(region, &WireControlCommand::RunMacro(macro_id.to_string(), elapsed_overshoot_ms))
 }
 
-/// Tells `macros-linux-bridge` to stop every run it has in flight.
+/// Tells `blockwork-linux-bridge` to stop every run it has in flight.
 pub fn send_stop_loop(region: &SharedRegion) -> Result<(), String> {
     push_control(region, &WireControlCommand::StopLoop)
 }

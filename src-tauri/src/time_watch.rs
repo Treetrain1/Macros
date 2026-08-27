@@ -19,7 +19,7 @@
 use crate::scheduled_run;
 use crate::state::SharedState;
 use chrono::{Local, NaiveDate};
-use macros_core::macros::InstructionKind;
+use blockwork_core::macros::InstructionKind;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the Macros release binary and packages it into a Windows installer.
+    Builds the Blockwork release binary and packages it into a Windows installer.
 
 .DESCRIPTION
     Prerequisite (one-time, local machine only): install Inno Setup 6
@@ -30,7 +30,7 @@ if (-not $Version) {
 
 Push-Location $RepoRoot
 try {
-    Write-Host "Building macros.exe (release, version $Version)..."
+    Write-Host "Building blockwork.exe (release, version $Version)..."
     cargo build --release --target x86_64-pc-windows-msvc
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
@@ -42,10 +42,10 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot "dist") | Out-Null
 
     Write-Host "Compiling installer (version $Version)..."
-    & $iscc "/DMyAppVersion=$Version" (Join-Path $RepoRoot "installer\macros.iss")
+    & $iscc "/DMyAppVersion=$Version" (Join-Path $RepoRoot "installer\blockwork.iss")
     if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed" }
 
-    Write-Host "Installer written to dist\macros-windows-x86_64-setup.exe"
+    Write-Host "Installer written to dist\blockwork-windows-x86_64-setup.exe"
 } finally {
     Pop-Location
 }

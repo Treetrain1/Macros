@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "macros-core", "macros-ffi", "macros-linux-bridge"]
+members = ["src-tauri", "blockwork-core", "blockwork-ffi", "blockwork-linux-bridge"]
 resolver = "2"
 
 [workspace.package]

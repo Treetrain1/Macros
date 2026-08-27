@@ -184,7 +184,7 @@ impl Macro {
     /// know real time has already passed between the event this run is
     /// supposed to be synced to and the moment this function actually gets
     /// called (dispatch latency, or — the caller this was added for —
-    /// `macros-gd`'s attempt-start trigger, which only fires once per game
+    /// `blockwork-gd`'s attempt-start trigger, which only fires once per game
     /// frame and so always overshoots its own target instant by however
     /// much that frame's `dt` was; passing that overshoot back here keeps
     /// the macro's timeline anchored to the *intended* start instant instead

@@ -1,11 +1,11 @@
-use macros_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
-use macros_core::input::schedule::TimeSchedule;
-use macros_core::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
-use macros_core::input::value::{Evaluated, Op, Value};
-use macros_core::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
-use macros_core::macros::backend::InputBackend;
-use macros_core::macros::thread_pool::ThreadPool;
-use macros_core::macros::{BlockDef, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, MacroSettings, Strand};
+use blockwork_core::hotkey_types::{HotkeyAction, HotkeyBinding, KeyCombo};
+use blockwork_core::input::schedule::TimeSchedule;
+use blockwork_core::input::types::{Axis, Coordinate, Direction, InputToken, MacroButton, MacroKey};
+use blockwork_core::input::value::{Evaluated, Op, Value};
+use blockwork_core::input::{get_mouse_button_names, key_to_string, mouse_button_to_index};
+use blockwork_core::macros::backend::InputBackend;
+use blockwork_core::macros::thread_pool::ThreadPool;
+use blockwork_core::macros::{BlockDef, BlockPiece, Comment, FloatingValue, Instruction, InstructionKind, Macro, MacroSettings, Strand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -465,7 +465,7 @@ pub(crate) enum InstructionDto {
     ContinueLoop { id: String },
 }
 
-/// A floating/attached note — see `macros_core::macros::Comment`.
+/// A floating/attached note — see `blockwork_core::macros::Comment`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct CommentDto {
     pub(crate) id: String,
@@ -692,7 +692,7 @@ pub(crate) fn instruction_to_dto(ins: &Instruction) -> InstructionDto {
 }
 
 pub(crate) fn dto_to_instruction(dto: &InstructionDto) -> Option<Instruction> {
-    use macros_core::input::{index_to_mouse_button, key_names::string_to_key};
+    use blockwork_core::input::{index_to_mouse_button, key_names::string_to_key};
     let (id, kind) = match dto {
         InstructionDto::Wait { id, duration } => (id, InstructionKind::Wait(dto_to_value(duration))),
         InstructionDto::Text { id, text } => (id, InstructionKind::Token(InputToken::Text(dto_to_value(text)))),
@@ -869,7 +869,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
     let named_hotkey_defaults: Vec<NamedHotkeyDefaultDto> = NAMED_HOTKEY_ACTIONS.iter().map(|action| {
         NamedHotkeyDefaultDto {
             action: hotkey_action_to_dto(action),
-            combo_display: macros_core::config::default_combo_for_action(action).map(|c| c.format()),
+            combo_display: blockwork_core::config::default_combo_for_action(action).map(|c| c.format()),
         }
     }).collect();
 
@@ -934,7 +934,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         ipc_port_text: s.ipc_port_text.clone(),
         ipc_port_invalid: s.ipc_port_invalid,
         emulator_available: s.emulator.is_some(),
-        grab_available: !macros_core::recording::grab_failed(),
+        grab_available: !blockwork_core::recording::grab_failed(),
         update_check_state,
     }
 }

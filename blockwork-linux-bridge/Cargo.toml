@@ -1,14 +1,14 @@
 [package]
-name = "macros-linux-bridge"
+name = "blockwork-linux-bridge"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "macros-linux-bridge"
+name = "blockwork-linux-bridge"
 path = "src/main.rs"
 
 [dependencies]
-macros-core = { path = "../macros-core", default-features = false }
+blockwork-core = { path = "../blockwork-core", default-features = false }
 evdev.workspace = true
 memmap2.workspace = true
 tracing.workspace = true

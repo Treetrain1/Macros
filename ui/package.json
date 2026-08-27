@@ -1,5 +1,5 @@
 {
-  "name": "macros-ui",
+  "name": "blockwork-ui",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.3.0",

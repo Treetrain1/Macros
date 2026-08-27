@@ -13,7 +13,7 @@ target/
 dist/
 
 # Flatpak build output (staged CEF runtime payload + build state)
-packaging/flatpak/macros
+packaging/flatpak/blockwork
 packaging/flatpak/libcef.so
 packaging/flatpak/libEGL.so
 packaging/flatpak/libGLESv2.so

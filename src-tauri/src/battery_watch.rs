@@ -27,7 +27,7 @@
 
 use crate::scheduled_run;
 use crate::state::SharedState;
-use macros_core::macros::InstructionKind;
+use blockwork_core::macros::InstructionKind;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -79,8 +79,8 @@ fn run<R: Runtime>(shared_state: SharedState, app: AppHandle<R>) {
         // `level` is `None` on a desktop with no battery at all — that only
         // rules out the two threshold blocks below, not plug/unplug (see
         // `battery::is_plugged_in`, which is always `true` there).
-        let level = macros_core::battery::percentage().ok();
-        let plugged_in = macros_core::battery::is_plugged_in();
+        let level = blockwork_core::battery::percentage().ok();
+        let plugged_in = blockwork_core::battery::is_plugged_in();
 
         let (macros, emulator, speed_multiplier, selected_id) = {
             let Ok(s) = shared_state.lock() else { continue };

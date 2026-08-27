@@ -1,5 +1,5 @@
-// The single startup wiring point between Macros and blockstitch — registers
-// Macros' instruction vocabulary (shapes, field forms, icons, operators) and
+// The single startup wiring point between Blockwork and blockstitch — registers
+// Blockwork's instruction vocabulary (shapes, field forms, icons, operators) and
 // builds the CanvasBackend/CanvasHost blockstitch's canvas drives. Call
 // `setupBlockstitch()` once, before mounting the app (see main.ts).
 import {

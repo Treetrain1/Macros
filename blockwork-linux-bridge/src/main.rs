@@ -1,9 +1,9 @@
-//! Native Linux helper for the embedded macros-gd mod running under Proton.
+//! Native Linux helper for the embedded blockwork-gd mod running under Proton.
 //!
 //! `WH_KEYBOARD_LL`/`WH_MOUSE_LL` don't see real host input under Wine, and
 //! `SendInput`-based emission is unreliable there too (both confirmed
 //! empirically against a real Proton/GD session). This process is launched
-//! by `macros-ffi` (see its Wine-detection code) and bridges real input
+//! by `blockwork-ffi` (see its Wine-detection code) and bridges real input
 //! across a shared-memory region at the path given as `argv[1]`:
 //!
 //! - capture: reads `/dev/input/event*` directly (non-exclusive — see the
@@ -36,14 +36,14 @@
 //! so this never orphans itself.
 
 use evdev::{AbsoluteAxisCode, EventType, KeyCode, PropType, RelativeAxisCode};
-use macros_core::config;
-use macros_core::macros::backend::evdev::EvdevBackend;
-use macros_core::macros::backend::evdev_mapping::{evdev_button_from_code, evdev_key_to_macro_key};
-use macros_core::macros::backend::InputBackend;
-use macros_core::macros::priority::raise_current_thread_priority;
-use macros_core::macros::runner::VariableStore;
-use macros_core::macros::run_registry;
-use macros_core::wire::{
+use blockwork_core::config;
+use blockwork_core::macros::backend::evdev::EvdevBackend;
+use blockwork_core::macros::backend::evdev_mapping::{evdev_button_from_code, evdev_key_to_macro_key};
+use blockwork_core::macros::backend::InputBackend;
+use blockwork_core::macros::priority::raise_current_thread_priority;
+use blockwork_core::macros::runner::VariableStore;
+use blockwork_core::macros::run_registry;
+use blockwork_core::wire::{
     self, SharedRegion, WireCapture, WireCaptureEvent, WireControlCommand, WireTimestamp,
 };
 use std::fs::OpenOptions;
@@ -81,7 +81,7 @@ fn main() {
     let shm_path = match std::env::args().nth(1) {
         Some(p) => p,
         None => {
-            eprintln!("usage: macros-linux-bridge <shm-path>");
+            eprintln!("usage: blockwork-linux-bridge <shm-path>");
             std::process::exit(1);
         }
     };
@@ -131,7 +131,7 @@ fn main() {
     let mmap: &'static mut memmap2::MmapMut = Box::leak(Box::new(mmap));
     let region: &'static SharedRegion = unsafe { &*(mmap.as_ptr() as *const SharedRegion) };
 
-    tracing::info!("macros-linux-bridge started, shm: {shm_path}");
+    tracing::info!("blockwork-linux-bridge started, shm: {shm_path}");
 
     let backend = match EvdevBackend::new() {
         Ok(b) => Arc::new(Mutex::new(b)) as Arc<Mutex<dyn InputBackend>>,
@@ -368,13 +368,13 @@ fn spawn_macro_worker(backend: Arc<Mutex<dyn InputBackend>>) -> std::sync::mpsc:
         // Nothing left to do but log — without this thread, every future
         // RunMacro will hit the `send` failure branch in `control_loop` and
         // get logged there too, so this isn't a silent failure.
-        tracing::error!("macros-linux-bridge: failed to spawn persistent macro worker thread: {e}");
+        tracing::error!("blockwork-linux-bridge: failed to spawn persistent macro worker thread: {e}");
     }
     tx
 }
 
 /// Loads and runs one macro to completion (including loop-mode repeats),
-/// exactly mirroring `macros-ffi`'s (pre-Wine-bridge) `macros_run_macro` —
+/// exactly mirroring `blockwork-ffi`'s (pre-Wine-bridge) `macros_run_macro` —
 /// same variable snapshot, same speed-multiplier/loop-mode resolution from
 /// the live settings file, same post-run variable persistence. The only
 /// difference is where it runs: natively here, not embedded in the
@@ -422,7 +422,7 @@ fn run_macro_blocking(id: String, elapsed_overshoot_ms: f64, backend: Arc<Mutex<
         let mut mac = mac.clone();
         mac.sync_variables_from(&values);
         if let Err(e) = mac.save() {
-            tracing::warn!("macros-linux-bridge: failed to persist variable values: {e}");
+            tracing::warn!("blockwork-linux-bridge: failed to persist variable values: {e}");
         }
     }
 }

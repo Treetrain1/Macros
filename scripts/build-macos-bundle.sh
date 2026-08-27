@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/Macros.app: a proper macOS app bundle with the CEF framework and
-# helper processes alongside the main binary.
+# Builds dist/Blockwork.app: a proper macOS app bundle with the CEF framework
+# and helper processes alongside the main binary.
 #
 # cef-dll-sys deliberately doesn't place CEF's runtime files for you on macOS
 # (unlike Linux/Windows, where it copies them next to target/<triple>/release/) --
@@ -30,7 +30,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-APP_NAME="Macros"
+APP_NAME="Blockwork"
 
 echo "Building $APP_NAME (release, $TARGET)..."
 cargo build --release --target "$TARGET"
@@ -58,19 +58,19 @@ CONTENTS="$DIST/Contents"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$CONTENTS/Frameworks"
 
 echo "Assembling bundle at $DIST..."
-cp "$RELEASE_DIR/macros" "$CONTENTS/MacOS/$APP_NAME"
+cp "$RELEASE_DIR/blockwork" "$CONTENTS/MacOS/$APP_NAME"
 sed -e "s/__VERSION__/$VERSION/g" installer/macos/Info.plist.in > "$CONTENTS/Info.plist"
 
-# Rebuild icon.icns from res/icons/macros.png -- the committed
+# Rebuild icon.icns from res/icons/blockwork.png -- the committed
 # src-tauri/icons/icon.icns is an empty stub (nothing in this repo invokes
 # the Tauri CLI's own bundler, which is what normally generates it).
 ICONSET_PARENT="$(mktemp -d)"
 ICONSET="$ICONSET_PARENT/icon.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 64 128 256 512; do
-  sips -z "$size" "$size" res/icons/macros.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z "$size" "$size" res/icons/blockwork.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
-  sips -z "$double" "$double" res/icons/macros.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  sips -z "$double" "$double" res/icons/blockwork.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/icon.icns"
 rm -rf "$ICONSET_PARENT"
@@ -91,7 +91,7 @@ for variant in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   suffix=$(echo "$variant" | tr -d ' ()')
   helper_dir="$CONTENTS/Frameworks/$helper_name.app/Contents"
   mkdir -p "$helper_dir/MacOS"
-  cp "$RELEASE_DIR/macros" "$helper_dir/MacOS/$helper_name"
+  cp "$RELEASE_DIR/blockwork" "$helper_dir/MacOS/$helper_name"
   sed -e "s/__VERSION__/$VERSION/g" \
       -e "s/__HELPER_NAME__/$helper_name/g" \
       -e "s/__SUFFIX__/${suffix:+.$suffix}/g" \
@@ -108,7 +108,7 @@ done
 # identity below is the free, local, ad-hoc signature -- no Apple Developer
 # Program membership needed. Gatekeeper will still show an "unidentified
 # developer" prompt on first launch (right-click > Open, or
-# `xattr -dr com.apple.quarantine dist/Macros.app` after downloading);
+# `xattr -dr com.apple.quarantine dist/Blockwork.app` after downloading);
 # that's expected without a paid Developer ID for notarization.
 find "$CONTENTS/Frameworks" -maxdepth 1 -name "*.app" -exec codesign --force --sign - {} \;
 codesign --force --sign - "$CONTENTS/Frameworks/Chromium Embedded Framework.framework"

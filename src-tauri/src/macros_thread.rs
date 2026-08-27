@@ -1,9 +1,9 @@
 use crate::state::{build_state_dto, SharedState};
-use macros_core::macros::backend::InputBackend;
-use macros_core::macros::run_registry;
-use macros_core::macros::runner::VariableStore;
-use macros_core::macros::thread_pool::ThreadPool;
-use macros_core::macros::Macro;
+use blockwork_core::macros::backend::InputBackend;
+use blockwork_core::macros::run_registry;
+use blockwork_core::macros::runner::VariableStore;
+use blockwork_core::macros::thread_pool::ThreadPool;
+use blockwork_core::macros::Macro;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Runtime};

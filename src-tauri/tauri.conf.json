@@ -1,6 +1,6 @@
 {
-  "productName": "Macros",
-  "identifier": "dev.ethanstokes.Macros",
+  "productName": "Blockwork",
+  "identifier": "dev.ethanstokes.Blockwork",
   "build": {
     "frontendDist": "../ui/dist"
   },
@@ -8,7 +8,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "Macros",
+        "title": "Blockwork",
         "width": 1024,
         "height": 768,
         "resizable": true

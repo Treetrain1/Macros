@@ -17,7 +17,7 @@ jobs:
           - name: windows-x86_64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: macros-windows-x86_64.exe
+            artifact_name: blockwork-windows-x86_64.exe
             cef_windows_dir: cef_windows_x86_64
             installer_arch: x64compatible
             experimental: false
@@ -25,7 +25,7 @@ jobs:
           - name: windows-arm64
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
-            artifact_name: macros-windows-arm64.exe
+            artifact_name: blockwork-windows-arm64.exe
             cef_windows_dir: cef_windows_aarch64
             installer_arch: arm64
             experimental: true
@@ -33,21 +33,21 @@ jobs:
           - name: linux-x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: macros-linux-x86_64
+            artifact_name: blockwork-linux-x86_64
             linux_arch: x86_64
             experimental: false
 
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact_name: macros-linux-arm64
+            artifact_name: blockwork-linux-arm64
             linux_arch: aarch64
             experimental: false
 
           - name: macos-arm64
             runner: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: macros-macos-arm64
+            artifact_name: blockwork-macos-arm64
             experimental: true
 
     steps:
@@ -126,12 +126,12 @@ jobs:
 
       - name: Rename binary (Linux)
         if: runner.os == 'Linux'
-        run: cp target/${{ matrix.target }}/release/macros ${{ matrix.artifact_name }}
+        run: cp target/${{ matrix.target }}/release/blockwork ${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item target/${{ matrix.target }}/release/macros.exe ${{ matrix.artifact_name }}
+        run: Copy-Item target/${{ matrix.target }}/release/blockwork.exe ${{ matrix.artifact_name }}
 
       - name: Upload artifact
         if: runner.os == 'Windows'
@@ -157,14 +157,14 @@ jobs:
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           $version = "${{ github.sha }}".Substring(0, 7)
-          & $iscc "/DMyAppVersion=$version-dev" "/DTargetTriple=${{ matrix.target }}" "/DInstallerArch=${{ matrix.installer_arch }}" "/DOutputBaseFilename=macros-${{ matrix.name }}-setup" installer\macros.iss
+          & $iscc "/DMyAppVersion=$version-dev" "/DTargetTriple=${{ matrix.target }}" "/DInstallerArch=${{ matrix.installer_arch }}" "/DOutputBaseFilename=blockwork-${{ matrix.name }}-setup" installer\blockwork.iss
 
       - name: Upload installer artifact
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: macros-${{ matrix.name }}-setup.exe
-          path: dist/macros-${{ matrix.name }}-setup.exe
+          name: blockwork-${{ matrix.name }}-setup.exe
+          path: dist/blockwork-${{ matrix.name }}-setup.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -174,7 +174,7 @@ jobs:
 
       - name: Zip macOS app bundle
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/Macros.app ${{ matrix.artifact_name }}.app.zip
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Blockwork.app ${{ matrix.artifact_name }}.app.zip
 
       - name: Upload macOS app bundle
         if: runner.os == 'macOS'
@@ -193,11 +193,11 @@ jobs:
           wget -q -O linuxdeploy-plugin-appimage.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-${{ matrix.linux_arch }}.AppImage"
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-appimage.AppImage
           # linuxdeploy expects the binary name to match the Exec entry in the desktop file
-          cp ${{ matrix.artifact_name }} macros
+          cp ${{ matrix.artifact_name }} blockwork
 
           # cef-dll-sys' build script drops the whole CEF runtime (libcef.so, GL/Vulkan
           # shims, *.pak, icudtl.dat, locales/, ...) next to the compiled binary in
-          # target/<triple>/release. libcef.so has to sit beside `macros` for linuxdeploy
+          # target/<triple>/release. libcef.so has to sit beside `blockwork` for linuxdeploy
           # to resolve the NEEDED entry via ldd; the rest of the payload isn't linked
           # (some is dlopen'd, the data files aren't ELF at all), so it has to be copied
           # in by hand wherever libcef.so ends up (usr/lib, once linuxdeploy deploys it).
@@ -206,9 +206,9 @@ jobs:
 
           ./linuxdeploy.AppImage \
             --appdir AppDir \
-            --executable ./macros \
-            --desktop-file res/macros.desktop \
-            --icon-file res/icons/macros.png
+            --executable ./blockwork \
+            --desktop-file res/blockwork.desktop \
+            --icon-file res/icons/blockwork.png
 
           cp "$CEF_DIR"/libEGL.so "$CEF_DIR"/libGLESv2.so "$CEF_DIR"/libvk_swiftshader.so \
              "$CEF_DIR"/libvulkan.so.1 "$CEF_DIR"/vk_swiftshader_icd.json "$CEF_DIR"/chrome-sandbox \
@@ -218,7 +218,7 @@ jobs:
           cp -r "$CEF_DIR/locales" AppDir/usr/lib/
 
           ./linuxdeploy.AppImage --appdir AppDir --output appimage
-          mv Macros*.AppImage ${{ matrix.artifact_name }}.AppImage
+          mv Blockwork*.AppImage ${{ matrix.artifact_name }}.AppImage
 
       - name: Upload AppImage artifact
         if: runner.os == 'Linux'
@@ -241,10 +241,10 @@ jobs:
       - name: Build Flatpak
         if: runner.os == 'Linux'
         run: |
-          cp ${{ matrix.artifact_name }} packaging/flatpak/macros
+          cp ${{ matrix.artifact_name }} packaging/flatpak/blockwork
 
           # Same CEF runtime payload as the AppImage step above, staged for the
-          # manifest's sources list (packaging/flatpak/dev.ethanstokes.Macros.yml).
+          # manifest's sources list (packaging/flatpak/dev.ethanstokes.Blockwork.yml).
           CEF_DIR="target/${{ matrix.target }}/release"
           cp "$CEF_DIR"/libcef.so "$CEF_DIR"/libEGL.so "$CEF_DIR"/libGLESv2.so \
              "$CEF_DIR"/libvk_swiftshader.so "$CEF_DIR"/libvulkan.so.1 "$CEF_DIR"/vk_swiftshader_icd.json \
@@ -253,8 +253,8 @@ jobs:
              packaging/flatpak/
           cp -r "$CEF_DIR/locales" packaging/flatpak/locales
 
-          flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/dev.ethanstokes.Macros.yml
-          flatpak build-bundle flatpak-repo ${{ matrix.artifact_name }}.flatpak dev.ethanstokes.Macros stable
+          flatpak-builder --force-clean --user --repo=flatpak-repo flatpak-build packaging/flatpak/dev.ethanstokes.Blockwork.yml
+          flatpak build-bundle flatpak-repo ${{ matrix.artifact_name }}.flatpak dev.ethanstokes.Blockwork stable
 
       - name: Upload Flatpak artifact
         if: runner.os == 'Linux'

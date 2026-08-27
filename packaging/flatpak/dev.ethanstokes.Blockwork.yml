@@ -1,4 +1,4 @@
-app-id: dev.ethanstokes.Macros
+app-id: dev.ethanstokes.Blockwork
 # org.gnome.Platform (not org.freedesktop.Platform) for GTK3, which tao/wry needs
 # for the window itself. webkit2gtk is unused: the "cef" feature keeps wry from
 # ever linking webkit2gtk-sys.
@@ -8,7 +8,7 @@ sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node20
-command: macros
+command: blockwork
 branch: stable
 
 add-extensions:
@@ -29,13 +29,13 @@ add-extensions:
 build-options:
   # build.rs shells out to bare `pnpm`, so pnpm-bin needs to be on PATH, not just
   # invoked by relative path in build-commands.
-  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin:/run/build/macros/pnpm-bin
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin:/run/build/blockwork/pnpm-bin
   env:
     # cargo-sources.json's vendor config lives at cargo/config, not .cargo/config.toml;
     # cargo only picks it up if CARGO_HOME points there.
-    CARGO_HOME: /run/build/macros/cargo
+    CARGO_HOME: /run/build/blockwork/cargo
     CARGO_NET_OFFLINE: 'true'
-    CEF_PATH: /run/build/macros/cef-prebuilt
+    CEF_PATH: /run/build/blockwork/cef-prebuilt
     # Full nproc alongside a from-scratch CEF wrapper cmake/ninja build OOM-kills
     # the sandbox; cap cargo (and, transitively via $NUM_JOBS, ninja) instead.
     CARGO_BUILD_JOBS: '6'
@@ -43,7 +43,7 @@ build-options:
     # pnpm ignores the env-var equivalents for these, only the CLI flags work.
     # Not named FLATPAK: cef-dll-sys's build script keys off that name to look
     # for CEF at /usr/lib instead of $CEF_PATH.
-    MACROS_PNPM_OFFLINE: '1'
+    BLOCKWORK_PNPM_OFFLINE: '1'
 
 finish-args:
   - --share=ipc
@@ -56,13 +56,13 @@ finish-args:
   - --device=dri
   # No --talk-name=org.freedesktop.DBus: CEF's "Failed to connect to the bus" (it
   # wants UPower) is harmless without it.
-  # --filesystem=home is for macros-core's Command instruction, which shells out
+  # --filesystem=home is for blockwork-core's Command instruction, which shells out
   # via `bash -c` with no path restriction -- not for rfd dialogs (portal-routed,
   # need nothing) or config persistence (XDG dir, auto-redirected).
   - --filesystem=home
 
 modules:
-  - name: macros
+  - name: blockwork
     buildsystem: simple
     build-commands:
       # 1. Stage CEF where cef-dll-sys's build.rs expects it via $CEF_PATH (see
@@ -104,36 +104,36 @@ modules:
       # 4. Install the binary plus the CEF runtime payload build.rs drops next to
       # it in target/release. RUNPATH is $ORIGIN, so everything lives together in
       # a private libdir, not /usr/bin.
-      - install -Dm755 target/release/macros /app/lib/macros/macros
+      - install -Dm755 target/release/blockwork /app/lib/blockwork/blockwork
       - mkdir -p /app/bin
       # Wrapper, not a symlink: tauri-runtime-cef's "sandbox" feature is on by
       # default and can't be disabled downstream, which builds a chrome-sandbox
       # expecting root+setuid -- Flatpak's export can't do that. --no-sandbox is
       # the standard workaround (redundant with Flatpak's own bwrap anyway).
       - |
-        cat > /app/bin/macros <<'EOF'
+        cat > /app/bin/blockwork <<'EOF'
         #!/bin/sh
-        exec /app/lib/macros/macros --no-sandbox "$@"
+        exec /app/lib/blockwork/blockwork --no-sandbox "$@"
         EOF
-        chmod +x /app/bin/macros
-      - install -Dm755 target/release/libcef.so /app/lib/macros/libcef.so
-      - install -Dm755 target/release/libEGL.so /app/lib/macros/libEGL.so
-      - install -Dm755 target/release/libGLESv2.so /app/lib/macros/libGLESv2.so
-      - install -Dm755 target/release/libvk_swiftshader.so /app/lib/macros/libvk_swiftshader.so
-      - install -Dm755 target/release/libvulkan.so.1 /app/lib/macros/libvulkan.so.1
-      - install -Dm644 target/release/vk_swiftshader_icd.json /app/lib/macros/vk_swiftshader_icd.json
-      - install -Dm755 target/release/chrome-sandbox /app/lib/macros/chrome-sandbox
-      - install -Dm644 target/release/icudtl.dat /app/lib/macros/icudtl.dat
-      - install -Dm644 target/release/v8_context_snapshot.bin /app/lib/macros/v8_context_snapshot.bin
-      - install -Dm644 target/release/chrome_100_percent.pak /app/lib/macros/chrome_100_percent.pak
-      - install -Dm644 target/release/chrome_200_percent.pak /app/lib/macros/chrome_200_percent.pak
-      - install -Dm644 target/release/resources.pak /app/lib/macros/resources.pak
-      - cp -r target/release/locales /app/lib/macros/locales
+        chmod +x /app/bin/blockwork
+      - install -Dm755 target/release/libcef.so /app/lib/blockwork/libcef.so
+      - install -Dm755 target/release/libEGL.so /app/lib/blockwork/libEGL.so
+      - install -Dm755 target/release/libGLESv2.so /app/lib/blockwork/libGLESv2.so
+      - install -Dm755 target/release/libvk_swiftshader.so /app/lib/blockwork/libvk_swiftshader.so
+      - install -Dm755 target/release/libvulkan.so.1 /app/lib/blockwork/libvulkan.so.1
+      - install -Dm644 target/release/vk_swiftshader_icd.json /app/lib/blockwork/vk_swiftshader_icd.json
+      - install -Dm755 target/release/chrome-sandbox /app/lib/blockwork/chrome-sandbox
+      - install -Dm644 target/release/icudtl.dat /app/lib/blockwork/icudtl.dat
+      - install -Dm644 target/release/v8_context_snapshot.bin /app/lib/blockwork/v8_context_snapshot.bin
+      - install -Dm644 target/release/chrome_100_percent.pak /app/lib/blockwork/chrome_100_percent.pak
+      - install -Dm644 target/release/chrome_200_percent.pak /app/lib/blockwork/chrome_200_percent.pak
+      - install -Dm644 target/release/resources.pak /app/lib/blockwork/resources.pak
+      - cp -r target/release/locales /app/lib/blockwork/locales
       # 5. Desktop file, icon, AppStream metainfo. Icon= must match the app id
-      # for flatpak export, hence the sed rename from res/macros.desktop's Icon=macros.
-      - sed 's/^Icon=macros$/Icon=dev.ethanstokes.Macros/' res/macros.desktop > dev.ethanstokes.Macros.desktop
-      - install -Dm644 dev.ethanstokes.Macros.desktop /app/share/applications/dev.ethanstokes.Macros.desktop
-      - install -Dm644 res/icons/macros.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Macros.png
+      # for flatpak export, hence the sed rename from res/blockwork.desktop's Icon=blockwork.
+      - sed 's/^Icon=blockwork$/Icon=dev.ethanstokes.Blockwork/' res/blockwork.desktop > dev.ethanstokes.Blockwork.desktop
+      - install -Dm644 dev.ethanstokes.Blockwork.desktop /app/share/applications/dev.ethanstokes.Blockwork.desktop
+      - install -Dm644 res/icons/blockwork.png /app/share/icons/hicolor/256x256/apps/dev.ethanstokes.Blockwork.png
     sources:
       # Local checkout including uncommitted changes, for `just flatpak-build`
       # iteration. Before a real Flathub submission, swap for a pinned `type: git`

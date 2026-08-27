@@ -1,11 +1,11 @@
 //! Wire format for the shared-memory bridge between the embedded engine
-//! (running inside GD, under Wine on Proton) and `macros-linux-bridge` (a
+//! (running inside GD, under Wine on Proton) and `blockwork-linux-bridge` (a
 //! native Linux process that does real input capture/emission, since
 //! Windows' `WH_KEYBOARD_LL`/`WH_MOUSE_LL` hooks don't see real host input
 //! under Wine, and `SendInput`-based emission is unreliable there too).
 //!
-//! Always compiled (no platform gate) — both `macros-ffi` (Windows target)
-//! and `macros-linux-bridge` (Linux target) depend on this module directly,
+//! Always compiled (no platform gate) — both `blockwork-ffi` (Windows target)
+//! and `blockwork-linux-bridge` (Linux target) depend on this module directly,
 //! so the two ends can never disagree about the encoding.
 
 use crate::input::types::{MacroButton, MacroKey};
@@ -68,7 +68,7 @@ impl From<WireCaptureEvent> for crate::macros::backend::CaptureEvent {
 }
 
 /// Control-plane commands, sent Windows (Wine-hosted mod) → Linux
-/// (`macros-linux-bridge`). Playback used to be paced entirely on the
+/// (`blockwork-linux-bridge`). Playback used to be paced entirely on the
 /// Windows side: one `WireEmitCommand` shipped across per input event, the
 /// instant `runner::run()`'s Wait-based deadline loop decided to fire it.
 /// But that loop ran inside the Wine-hosted GD process, where Wine's
@@ -82,10 +82,10 @@ impl From<WireCaptureEvent> for crate::macros::backend::CaptureEvent {
 ///
 /// Now the whole timed run happens natively on the Linux side instead —
 /// only these two control commands cross the wire, never per-event
-/// emission. `macros-linux-bridge` loads the macro itself (straight from
+/// emission. `blockwork-linux-bridge` loads the macro itself (straight from
 /// the OS-default config dir — the same file the Windows side's
 /// `macros-dir` override setting reaches via its `Z:` mapping, so no macro
-/// data needs to cross the wire either) and runs `macros_core::macros::
+/// data needs to cross the wire either) and runs `blockwork_core::macros::
 /// Macro::run` exactly as the old desktop app did, including its own
 /// `raise_current_thread_priority()` call — on Linux that's the `#[cfg(unix)]`
 /// branch, real `SCHED_FIFO`, not Wine's emulation of it.
@@ -96,9 +96,9 @@ pub enum WireControlCommand {
     /// immediately" contract. The `f64` is `elapsed_overshoot_ms` from that
     /// same call: how much real time had already passed, before this
     /// command was even sent, since the moment playback was actually
-    /// supposed to start (macros-gd's attempt-start trigger only fires once
+    /// supposed to start (blockwork-gd's attempt-start trigger only fires once
     /// per game frame, so it always overshoots its own 200ms grace-period
-    /// target by that frame's `dt`). `macros-linux-bridge` feeds it into
+    /// target by that frame's `dt`). `blockwork-linux-bridge` feeds it into
     /// `Macro::run_with_offset` so the run's first `Wait` deadline anchors
     /// to the *intended* start instant instead of whenever this command
     /// happens to get noticed and dispatched.
@@ -131,7 +131,7 @@ pub struct RingBuffer {
     pub head: AtomicU32,
     pub tail: AtomicU32,
     /// Cross-process spinlock guarding `try_push` — needed because
-    /// `macros-linux-bridge` spawns one reader thread *per input device*
+    /// `blockwork-linux-bridge` spawns one reader thread *per input device*
     /// and every one of them pushes into the same capture ring directly.
     /// Without this, two threads can read the same `head`, write into the
     /// same slot, and only one push ends up counted — a real race
@@ -193,10 +193,10 @@ impl RingBuffer {
 
 #[repr(C)]
 pub struct SharedRegion {
-    /// Bumped by macros-ffi; macros-linux-bridge exits if this goes stale,
+    /// Bumped by blockwork-ffi; blockwork-linux-bridge exits if this goes stale,
     /// so it never orphans itself if GD is killed/crashes.
     pub windows_heartbeat: AtomicU32,
-    /// Bumped by macros-linux-bridge; lets macros-ffi notice the bridge
+    /// Bumped by blockwork-linux-bridge; lets blockwork-ffi notice the bridge
     /// process died (best-effort, not load-bearing in v1).
     pub linux_heartbeat: AtomicU32,
     /// Linux (producer) → Windows (consumer).
@@ -276,7 +276,7 @@ mod tests {
         assert!(ring.try_pop(&mut buf).is_none());
     }
 
-    /// Regression test for the multi-producer race: macros-linux-bridge
+    /// Regression test for the multi-producer race: blockwork-linux-bridge
     /// spawns one reader thread per input device, and every one of them
     /// pushes into the same capture ring concurrently. A single-producer
     /// test can't catch this — it needs actual concurrent pushers to

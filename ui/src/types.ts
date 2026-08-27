@@ -4,7 +4,7 @@
 // The generic block-graph addressing/navigation helpers (path types,
 // resolveInstructionList, isHeaderType, etc.) now live in blockstitch — this
 // file re-exports them under their original names so every existing call
-// site keeps working unchanged, and keeps only Macros' own concrete DTOs.
+// site keeps working unchanged, and keeps only Blockwork's own concrete DTOs.
 import { defaultArgFor, specForKind } from './valueOps';
 import {
   bodyBasePath as bsBodyBasePath,
@@ -43,7 +43,7 @@ export interface AppEntryDto {
   icon: string | null;
 }
 
-// A recurring point in local time — mirrors macros-core's `TimeSchedule`
+// A recurring point in local time — mirrors blockwork-core's `TimeSchedule`
 // (input/schedule.rs), reused as-is on the wire (same shape as `Op` being
 // reused directly in `ValueDto`, not mirrored through a *Dto type). `hour`/
 // `minute` are always 24-hour; see timeSchedule.ts for the 12h/24h display

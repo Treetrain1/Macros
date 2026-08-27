@@ -375,6 +375,80 @@ dependencies = [
 ]
 
 [[package]]
+name = "blockwork"
+version = "0.4.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "blockwork-core",
+ "chrono",
+ "dirs",
+ "gtk",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-runtime-cef",
+ "tokio",
+ "tower-http 0.7.0",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "blockwork-core"
+version = "0.4.0"
+dependencies = [
+ "bincode",
+ "chrono",
+ "core-foundation",
+ "core-graphics",
+ "dirs",
+ "enigo",
+ "evdev",
+ "foreign-types",
+ "http",
+ "libc",
+ "rand 0.10.2",
+ "self_update",
+ "serde",
+ "serde_json",
+ "spin_sleep",
+ "starship-battery",
+ "tokio",
+ "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "blockwork-ffi"
+version = "0.4.0"
+dependencies = [
+ "blockwork-core",
+ "cbindgen",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "blockwork-linux-bridge"
+version = "0.4.0"
+dependencies = [
+ "blockwork-core",
+ "evdev",
+ "memmap2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "borsh"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2562,80 +2636,6 @@ name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
-
-[[package]]
-name = "macros"
-version = "0.4.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "chrono",
- "dirs",
- "gtk",
- "macros-core",
- "rfd",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-runtime-cef",
- "tokio",
- "tower-http 0.7.0",
- "tracing",
- "tracing-log",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "macros-core"
-version = "0.4.0"
-dependencies = [
- "bincode",
- "chrono",
- "core-foundation",
- "core-graphics",
- "dirs",
- "enigo",
- "evdev",
- "foreign-types",
- "http",
- "libc",
- "rand 0.10.2",
- "self_update",
- "serde",
- "serde_json",
- "spin_sleep",
- "starship-battery",
- "tokio",
- "tracing",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "macros-ffi"
-version = "0.4.0"
-dependencies = [
- "cbindgen",
- "macros-core",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "macros-linux-bridge"
-version = "0.4.0"
-dependencies = [
- "evdev",
- "macros-core",
- "memmap2",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "markup5ever"

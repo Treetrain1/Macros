@@ -12,7 +12,7 @@ pub(crate) fn build(app: &AppHandle<Cef>) -> tauri::Result<TrayIcon<Cef>> {
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Macros")
+        .tooltip("Blockwork")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
             "quit" => app.exit(0),

@@ -7,10 +7,10 @@ use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 
 const REPO_OWNER: &str = "EthanRStokes";
-const REPO_NAME: &str = "macros";
+const REPO_NAME: &str = "blockwork";
 // Must match the artifact_name values produced by .github/workflows/release.yml.
-const ASSET_NAME: &str = "macros-windows-x86_64.exe";
-const INSTALLER_ASSET_NAME: &str = "macros-windows-x86_64-setup.exe";
+const ASSET_NAME: &str = "blockwork-windows-x86_64.exe";
+const INSTALLER_ASSET_NAME: &str = "blockwork-windows-x86_64-setup.exe";
 
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 
@@ -23,7 +23,7 @@ fn build_updater(current_version: &str) -> Result<Box<dyn self_update::update::R
     Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
-        .bin_name("macros")
+        .bin_name("blockwork")
         .bin_path_in_archive(ASSET_NAME)
         .current_version(current_version)
         .show_download_progress(false)
@@ -62,7 +62,7 @@ pub fn apply_update(current_version: &str) -> Result<PathBuf, String> {
         .find(|asset| asset.name == INSTALLER_ASSET_NAME)
         .ok_or_else(|| format!("no '{INSTALLER_ASSET_NAME}' asset in the latest release"))?;
 
-    let temp_dir = std::env::temp_dir().join("macros-update");
+    let temp_dir = std::env::temp_dir().join("blockwork-update");
     fs::create_dir_all(&temp_dir).map_err(|err| err.to_string())?;
     let installer_path = temp_dir.join(INSTALLER_ASSET_NAME);
     let mut installer_file = fs::File::create(&installer_path).map_err(|err| err.to_string())?;

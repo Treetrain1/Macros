@@ -1,6 +1,6 @@
 //! C ABI surface for embedding the recording/playback engine directly into
-//! a host process (e.g. the macros-gd Geode mod), replacing the loopback
-//! TCP control connection `macros_core::ipc` provides for the standalone
+//! a host process (e.g. the blockwork-gd Geode mod), replacing the loopback
+//! TCP control connection `blockwork_core::ipc` provides for the standalone
 //! desktop app. Every call here is synchronous and direct — no tokio
 //! runtime, no `AppState`/`QueueSignal` bridging, since there's no GUI
 //! event loop on the other side to hand off to.
@@ -11,12 +11,12 @@
 #[cfg(windows)]
 mod wine_bridge;
 
-use macros_core::config;
-use macros_core::macros::backend::InputBackend;
-use macros_core::macros::run_registry;
-use macros_core::macros::runner::{self, VariableStore};
-use macros_core::macros::{Instruction, Macro, SPEED_MULTIPLIER_RANGE};
-use macros_core::recording;
+use blockwork_core::config;
+use blockwork_core::macros::backend::InputBackend;
+use blockwork_core::macros::run_registry;
+use blockwork_core::macros::runner::{self, VariableStore};
+use blockwork_core::macros::{Instruction, Macro, SPEED_MULTIPLIER_RANGE};
+use blockwork_core::recording;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -28,7 +28,7 @@ static EMULATOR: OnceLock<Arc<Mutex<dyn InputBackend>>> = OnceLock::new();
 static WINE_BRIDGE: OnceLock<wine_bridge::WineBridge> = OnceLock::new();
 
 /// A registered C callback that every `tracing::info!`/`warn!`/etc. call
-/// site in this crate (and in `macros-core`, when linked in) gets routed
+/// site in this crate (and in `blockwork-core`, when linked in) gets routed
 /// through — without this, `tracing` events have no subscriber and are
 /// silently dropped, which is exactly what was happening before this was
 /// added (confirmed empirically: zero Wine-bridge diagnostic lines ever
@@ -131,7 +131,7 @@ pub extern "C" fn macros_init(config_dir_override_utf8: *const c_char, linux_bri
 
         #[cfg(target_os = "macos")]
         {
-            if !macros_core::macros::backend::macos::request_accessibility() {
+            if !blockwork_core::macros::backend::macos::request_accessibility() {
                 recording::set_grab_failed(true);
             }
         }
@@ -145,7 +145,7 @@ pub extern "C" fn macros_init(config_dir_override_utf8: *const c_char, linux_bri
         #[cfg(windows)]
         if wine_bridge::detect_wine_linux() {
             let Some(path) = linux_bridge_resource_path.filter(|p| !p.is_empty()) else {
-                tracing::warn!("macros-ffi: running under Wine but no linux-input resource path given; falling back to the native (non-functional under Wine) input path");
+                tracing::warn!("blockwork-ffi: running under Wine but no linux-input resource path given; falling back to the native (non-functional under Wine) input path");
                 return native_init();
             };
             return match wine_bridge::setup_and_launch(&path) {
@@ -161,7 +161,7 @@ pub extern "C" fn macros_init(config_dir_override_utf8: *const c_char, linux_bri
                     0
                 }
                 None => {
-                    tracing::warn!("macros-ffi: Wine bridge setup failed; falling back to the native (non-functional under Wine) input path");
+                    tracing::warn!("blockwork-ffi: Wine bridge setup failed; falling back to the native (non-functional under Wine) input path");
                     native_init()
                 }
             };
@@ -219,7 +219,7 @@ pub extern "C" fn macros_stop_recording() -> i32 {
         let Some(mut mac) = config::get_macro_by_id(&id) else { return -2 };
         mac.recording_target_mut().instructions.extend(instructions);
         if let Err(e) = mac.save() {
-            tracing::warn!("macros-ffi: failed to save recorded macro: {e}");
+            tracing::warn!("blockwork-ffi: failed to save recorded macro: {e}");
             return -3;
         }
         config::set_selected_macro_id(Some(&mac.id));
@@ -236,7 +236,7 @@ pub extern "C" fn macros_stop_recording() -> i32 {
 ///
 /// `elapsed_overshoot_ms` (>= 0, milliseconds): how much real time had
 /// already passed, before this call, since playback was actually supposed
-/// to start — pass 0 if the caller has no such notion. `macros-gd`'s
+/// to start — pass 0 if the caller has no such notion. `blockwork-gd`'s
 /// attempt-start trigger only fires once per game frame, so it always
 /// overshoots its own grace-period target by that frame's `dt`; passing
 /// that overshoot here backdates the run's first `Wait` deadline to the
@@ -261,7 +261,7 @@ pub extern "C" fn macros_run_macro(id_utf8: *const c_char, elapsed_overshoot_ms:
             return match wine_bridge::send_run_macro(bridge.region, &mac.id, elapsed_overshoot_ms) {
                 Ok(()) => 0,
                 Err(e) => {
-                    tracing::warn!("macros-ffi: failed to forward run_macro to Linux bridge: {e}");
+                    tracing::warn!("blockwork-ffi: failed to forward run_macro to Linux bridge: {e}");
                     -3
                 }
             };
@@ -295,7 +295,7 @@ pub extern "C" fn macros_run_macro(id_utf8: *const c_char, elapsed_overshoot_ms:
                 let mut mac = mac.clone();
                 mac.sync_variables_from(&values);
                 if let Err(e) = mac.save() {
-                    tracing::warn!("macros-ffi: failed to persist variable values: {e}");
+                    tracing::warn!("blockwork-ffi: failed to persist variable values: {e}");
                 }
             }
         });
@@ -317,7 +317,7 @@ pub extern "C" fn macros_stop_loop() -> i32 {
             return match wine_bridge::send_stop_loop(bridge.region) {
                 Ok(()) => 0,
                 Err(e) => {
-                    tracing::warn!("macros-ffi: failed to forward stop_loop to Linux bridge: {e}");
+                    tracing::warn!("blockwork-ffi: failed to forward stop_loop to Linux bridge: {e}");
                     -1
                 }
             };
@@ -437,7 +437,7 @@ pub extern "C" fn macros_rename_macro(name_utf8: *const c_char) -> i32 {
         mac.name = trimmed.to_string();
 
         if let Err(e) = mac.save() {
-            tracing::warn!("macros-ffi: failed to save renamed macro: {e}");
+            tracing::warn!("blockwork-ffi: failed to save renamed macro: {e}");
             return -4;
         }
         0
@@ -457,7 +457,7 @@ pub extern "C" fn macros_delete_macro() -> i32 {
         let Some(mac) = config::get_macro_by_id(&id) else { return -2 };
 
         if let Err(e) = mac.remove() {
-            tracing::warn!("macros-ffi: failed to delete macro: {e}");
+            tracing::warn!("blockwork-ffi: failed to delete macro: {e}");
             return -3;
         }
         config::set_selected_macro_id(None);
@@ -490,7 +490,7 @@ pub extern "C" fn macros_clear_recording_target_instructions() -> i32 {
         strand.instructions.truncate(keep);
 
         if let Err(e) = mac.save() {
-            tracing::warn!("macros-ffi: failed to save after clearing recording-target instructions: {e}");
+            tracing::warn!("blockwork-ffi: failed to save after clearing recording-target instructions: {e}");
             return -3;
         }
         removed

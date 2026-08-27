@@ -1,4 +1,4 @@
-# Macros
+# Blockwork
 
 A Tauri app to visually create and run macros on Windows, Linux, and macOS.
 
@@ -6,13 +6,13 @@ A Tauri app to visually create and run macros on Windows, Linux, and macOS.
 
 ### Build
 ```bash
-git clone https://github.com/EthanRStokes/macros.git macros && cd macros
+git clone https://github.com/EthanRStokes/blockwork.git blockwork && cd blockwork
 just
 ```
 
 ### Installation
 
-AUR: `macros-git`
+AUR: `blockwork-git`
 
 ```bash
 just install
@@ -28,4 +28,4 @@ GitHub release. To build one locally:
    ```powershell
    pwsh -File scripts/build-installer.ps1
    ```
-   This produces `dist\macros-windows-x86_64-setup.exe`.
+   This produces `dist\blockwork-windows-x86_64-setup.exe`.

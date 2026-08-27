@@ -3,9 +3,9 @@
 //! strand's body on its own trigger rather than the user pressing Run.
 
 use crate::state::{build_state_dto, SharedState};
-use macros_core::macros::backend::InputBackend;
-use macros_core::macros::runner::{run_instructions, VariableStore};
-use macros_core::macros::{run_registry, Instruction, VariableDef};
+use blockwork_core::macros::backend::InputBackend;
+use blockwork_core::macros::runner::{run_instructions, VariableStore};
+use blockwork_core::macros::{run_registry, Instruction, VariableDef};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::warn;

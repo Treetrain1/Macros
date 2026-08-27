@@ -1,14 +1,14 @@
 [package]
-name = "macros"
+name = "blockwork"
 version.workspace = true
 edition.workspace = true
 
 [lib]
-name = "macros"
+name = "blockwork"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-macros-core = { path = "../macros-core" }
+blockwork-core = { path = "../blockwork-core" }
 tauri = { workspace = true, features = ["tray-icon"] }
 tauri-runtime-cef.workspace = true
 tracing.workspace = true

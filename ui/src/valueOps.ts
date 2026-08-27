@@ -33,7 +33,7 @@ const CASE_OPTIONS = [
   { value: 'Lower', label: 'lowercase' },
 ];
 
-// Mirrors macros-core's `Value::eval`'s `Op::CurrentTime` match arm — always
+// Mirrors blockwork-core's `Value::eval`'s `Op::CurrentTime` match arm — always
 // numeric (`DayOfWeek` is 1=Sunday..7=Saturday, `Hour` is always 24-hour),
 // matching Scratch's own "current ()" sensing block.
 const CURRENT_TIME_OPTIONS = [

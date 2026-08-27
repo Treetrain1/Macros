@@ -16,6 +16,7 @@ use blockwork_core::macros::thread_pool::ThreadPool;
 use blockwork_core::recording::QueueSignal;
 use blockwork_core::{config, recording};
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{Cef, Manager};
 
@@ -87,7 +88,8 @@ pub fn run() {
                 text_edit_session: None,
                 recording_phase: RecordingPhase::Idle,
                 recording_countdown_generation: 0,
-                record_mouse_relative: true,
+                record_mouse_relative: settings.record_mouse_relative.unwrap_or(true),
+                record_mouse_movement: settings.record_mouse_movement.unwrap_or(false),
                 page: Page::Main,
                 combo_capture: None,
                 hotkey_bindings: vec![],
@@ -133,6 +135,8 @@ pub fn run() {
                 }
 
                 recording::start_grab_thread();
+                recording::RECORD_MOUSE_RELATIVE.store(s.record_mouse_relative, Ordering::Relaxed);
+                recording::RECORD_MOUSE_MOVEMENT.store(s.record_mouse_movement, Ordering::Relaxed);
 
                 // Chromium grabs raw keyboard input for its own focused
                 // window on Windows (chromiumembedded/cef#2609), starving the
@@ -289,6 +293,7 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::toggle_record_mouse_relative,
+            commands::toggle_record_mouse_movement,
             commands::open_settings,
             commands::close_settings,
             commands::start_combo_capture,

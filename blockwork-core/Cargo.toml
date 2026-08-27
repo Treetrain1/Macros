@@ -33,17 +33,9 @@ libc.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev.workspace = true
-# XTest-based emission backend (see backend/xtest.rs): injects directly into
-# the X server, skipping the kernel evdev/libinput/compositor hops the
-# uinput-based EvdevBackend's emission goes through - the extra hops there
-# turned out to add just enough latency to throw off frame/tick-precise
-# input under Wine (confirmed: GD runs a fixed 240 TPS independent of
-# render rate, so it wasn't a framerate mismatch; scheduling priority was
-# separately confirmed to already be real SCHED_FIFO, not the emulated one
-# Wine gives Windows-side threads - process of elimination points at this
-# pipeline). Already a workspace dependency for the Windows backend
-# (`backend/windows.rs`); its default `x11rb` feature covers XTest here too.
-enigo.workspace = true
+# Read-only cursor-position query via XWayland (see backend/x11_cursor.rs) -
+# not the removed XTest emission backend; core X11 protocol only.
+x11rb.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { state } from '../store';
 import { runMacro, startRecording, stopRecording, toggleLoopMode } from '../tauri';
 import { AppButton } from 'blockstitch';
 import { SwitchControl } from 'blockstitch';
+import RecordingSettingsDialog from './RecordingSettingsDialog.vue';
 
 const runIcon = computed(() => (state.loop_mode_enabled ? 'repeat' : 'play'));
 const runLabel = computed(() => (state.loop_mode_enabled ? 'Start loop' : 'Run macro'));
@@ -38,6 +39,7 @@ function onRecordClick() {
   else stopRecording();
 }
 
+const showRecordingSettings = ref(false);
 </script>
 
 <template>
@@ -66,6 +68,14 @@ function onRecordClick() {
         :label="recordLabel"
         @click="onRecordClick"
       />
+      <AppButton
+        id="recording-settings-btn"
+        icon="sliders-horizontal"
+        title="Recording Settings"
+        aria-label="Recording Settings"
+        @click="showRecordingSettings = true"
+      />
     </div>
+    <RecordingSettingsDialog v-if="showRecordingSettings" @close="showRecordingSettings = false" />
   </div>
 </template>

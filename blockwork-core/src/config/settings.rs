@@ -31,6 +31,12 @@ pub struct AppSettings {
     /// When true, closing the main window hides it to the system tray
     /// instead of exiting the app.
     pub close_to_tray: Option<bool>,
+    /// When true, recorded mouse movement is captured as relative deltas;
+    /// when false, as absolute positions. Only relevant when
+    /// `record_mouse_movement` is also true.
+    pub record_mouse_relative: Option<bool>,
+    /// Whether mouse movement is captured into recordings at all.
+    pub record_mouse_movement: Option<bool>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {

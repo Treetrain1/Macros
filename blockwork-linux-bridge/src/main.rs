@@ -21,13 +21,13 @@
 //!   `SetThreadPriority`.
 //!
 //!   Emission uses `EvdevBackend` (`uinput`) - the same one the native
-//!   Linux desktop app uses. An `XTestBackend` (X Test extension) briefly
-//!   replaced it, on the theory that talking to the X server directly
-//!   would skip hops `uinput` takes through the kernel/libinput/compositor
-//!   before reaching an XWayland client. That's wrong for a Wine install
-//!   using `winewayland.drv` (Wine's native Wayland driver, not XWayland) -
-//!   there GD is a native Wayland client with no X11 involvement at all,
-//!   so `uinput`'s path (kernel evdev -> libinput -> compositor -> Wayland
+//!   Linux desktop app uses. Talking to the X server directly via the X
+//!   Test extension briefly replaced it, on the theory that it would skip
+//!   hops `uinput` takes through the kernel/libinput/compositor before
+//!   reaching an XWayland client. That's wrong for a Wine install using
+//!   `winewayland.drv` (Wine's native Wayland driver, not XWayland) - there
+//!   GD is a native Wayland client with no X11 involvement at all, so
+//!   `uinput`'s path (kernel evdev -> libinput -> compositor -> Wayland
 //!   client) is identical for real hardware and synthetic input alike, and
 //!   XTest events went to the system's Xwayland instance instead, which
 //!   this GD install was never a client of - they just went nowhere.

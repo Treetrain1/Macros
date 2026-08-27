@@ -200,9 +200,12 @@ impl InputBackend for EvdevBackend {
     }
 
     fn move_mouse_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
-        // Compute delta from tracked position and emit as relative.
-        let cur_x = CURSOR_X.load(Ordering::Relaxed);
-        let cur_y = CURSOR_Y.load(Ordering::Relaxed);
+        // uinput has no absolute-positioning axis for a virtual mouse, so
+        // this has to land on an exact pixel by computing a relative delta
+        // from the real current position (re-queried fresh, not the
+        // free-running CURSOR_X/Y estimate - see `cursor_pos`) and emitting
+        // that.
+        let (cur_x, cur_y) = self.cursor_pos().unwrap_or((0, 0));
         let dx = x - cur_x;
         let dy = y - cur_y;
         self.move_mouse_rel(dx, dy)
@@ -230,6 +233,16 @@ impl InputBackend for EvdevBackend {
     }
 
     fn cursor_pos(&self) -> Option<(i32, i32)> {
+        // Prefer the real, compositor-tracked position (via XWayland) when
+        // reachable - see `x11_cursor`'s doc comment for why the free-running
+        // CURSOR_X/Y sum can't be trusted as ground truth. Re-anchor that sum
+        // to what we just learned so it stays a reasonable estimate for the
+        // (rarer) case a later call has no X11 to query.
+        if let Some(pos) = super::x11_cursor::query_cursor_pos() {
+            CURSOR_X.store(pos.0, Ordering::Relaxed);
+            CURSOR_Y.store(pos.1, Ordering::Relaxed);
+            return Some(pos);
+        }
         Some((
             CURSOR_X.load(Ordering::Relaxed),
             CURSOR_Y.load(Ordering::Relaxed),
@@ -247,6 +260,12 @@ enum DeviceMsg {
     MouseMove { dx: i32, dy: i32, raw_x: Option<InputEvent>, raw_y: Option<InputEvent> },
     Scroll { v: i32, h: i32, raw_v: Option<InputEvent>, raw_h: Option<InputEvent> },
     OtherBatch(Vec<InputEvent>),
+    /// Single-finger drag distance on a touchpad, read non-exclusively (see
+    /// `spawn_touchpad_reader`) - there's no raw event to suppress or
+    /// re-emit here, the physical device was never grabbed.
+    TouchpadMove { dx: i32, dy: i32, ts: std::time::SystemTime },
+    TouchpadButtonPress { ts: std::time::SystemTime },
+    TouchpadButtonRelease { ts: std::time::SystemTime },
 }
 
 pub(super) fn start_capture_thread(
@@ -265,22 +284,36 @@ pub(super) fn start_capture_thread(
 
         let (tx, rx) = std::sync::mpsc::sync_channel::<DeviceMsg>(256);
 
-        // Enumerate and grab physical input devices.
+        // Touchpads/tablets (ABS_X without REL_X, or the BUTTONPAD property)
+        // are never exclusively grabbed: our virtual device only declares
+        // relative axes, so we have nothing capable of re-emitting a
+        // touchpad's real ABS/multitouch protocol, and grabbing without
+        // re-emitting it would just make the touchpad stop working
+        // entirely. Instead they're read non-exclusively below, purely to
+        // observe single-finger drags and clicks for recording/hotkeys -
+        // the same non-exclusive approach the Wine bridge already uses for
+        // its own reasons (see its module doc comment).
+        let is_touchpad = |device: &evdev::Device| -> bool {
+            let is_buttonpad = device.properties().contains(PropType::BUTTONPAD);
+            let has_abs = device
+                .supported_absolute_axes()
+                .map(|s| s.contains(AbsoluteAxisCode::ABS_X))
+                .unwrap_or(false);
+            let has_rel = device
+                .supported_relative_axes()
+                .map(|s| s.contains(RelativeAxisCode::REL_X))
+                .unwrap_or(false);
+            is_buttonpad || (has_abs && !has_rel)
+        };
+
+        // Enumerate and grab exclusive (keyboard/mouse-like) devices.
         let grabbed: Vec<_> = evdev::enumerate()
             .filter_map(|(path, mut device)| {
                 let name = device.name().unwrap_or("").to_owned();
                 if name == "macros-input" {
                     return None;
                 }
-                // Skip touchpads and absolute pointer devices (tablets, trackpads).
-                // Touchpads report ABS_X and/or carry the BUTTONPAD property.
-                // External mice use only relative axes and will have neither.
-                let is_buttonpad = device.properties().contains(PropType::BUTTONPAD);
-                let has_abs = device
-                    .supported_absolute_axes()
-                    .map(|s| s.contains(AbsoluteAxisCode::ABS_X))
-                    .unwrap_or(false);
-                if is_buttonpad || has_abs {
+                if is_touchpad(&device) {
                     return None;
                 }
                 let has_keys = device
@@ -292,10 +325,14 @@ pub(super) fn start_capture_thread(
                     .map(|s| s.contains(RelativeAxisCode::REL_X))
                     .unwrap_or(false);
                 if !has_keys && !has_rel {
+                    tracing::info!("evdev: skipping {:?} ({}) - no keys or relative motion", path, name);
                     return None;
                 }
                 match device.grab() {
-                    Ok(()) => Some(device),
+                    Ok(()) => {
+                        tracing::info!("evdev: grabbed {:?} ({}) - keys={} rel={}", path, name, has_keys, has_rel);
+                        Some(device)
+                    }
                     Err(e) => {
                         warn!("Failed to grab {:?} ({}): {}", path, name, e);
                         None
@@ -304,11 +341,30 @@ pub(super) fn start_capture_thread(
             })
             .collect();
 
-        if grabbed.is_empty() {
-            warn!("No input devices could be grabbed; global hotkeys and recording unavailable.");
+        // Enumerate touchpads separately, opened non-exclusively.
+        let touchpads: Vec<_> = evdev::enumerate()
+            .filter_map(|(path, device)| {
+                let name = device.name().unwrap_or("").to_owned();
+                if name == "macros-input" || !is_touchpad(&device) {
+                    return None;
+                }
+                tracing::info!("evdev: reading {:?} ({}) non-exclusively as a touchpad", path, name);
+                Some(device)
+            })
+            .collect();
+
+        if grabbed.is_empty() && touchpads.is_empty() {
+            warn!("No input devices found; global hotkeys and recording unavailable.");
+            crate::recording::set_grab_failed(true);
+        } else if grabbed.is_empty() {
+            warn!("No devices could be exclusively grabbed (only touchpads found); global hotkeys unavailable, but touchpad recording still works.");
             crate::recording::set_grab_failed(true);
         } else {
             crate::recording::set_grab_failed(false);
+        }
+
+        for device in touchpads {
+            spawn_touchpad_reader(device, tx.clone());
         }
 
         // Spawn one reader thread per grabbed device.
@@ -534,11 +590,111 @@ pub(super) fn start_capture_thread(
                         DeviceMsg::OtherBatch(events) => {
                             reemit(vd, &events);
                         }
+                        DeviceMsg::TouchpadMove { dx, dy, ts } => {
+                            CURSOR_X.fetch_add(dx, Ordering::Relaxed);
+                            CURSOR_Y.fetch_add(dy, Ordering::Relaxed);
+                            // Never grabbed, so its real motion already
+                            // reached the desktop untouched - nothing to
+                            // suppress or re-emit, only observe.
+                            let _ = callback(CaptureEvent::MouseMoveRel(dx, dy), CaptureTimestamp::Hardware(ts));
+                        }
+                        DeviceMsg::TouchpadButtonPress { ts } => {
+                            let _ = callback(CaptureEvent::ButtonPress(MacroButton::Left), CaptureTimestamp::Hardware(ts));
+                        }
+                        DeviceMsg::TouchpadButtonRelease { ts } => {
+                            let _ = callback(CaptureEvent::ButtonRelease(MacroButton::Left), CaptureTimestamp::Hardware(ts));
+                        }
                     }
                 }
             })
             .ok();
     });
+}
+
+/// Reads a touchpad non-exclusively (never `.grab()`ed - see the comment
+/// where this is spawned) purely to observe single-finger drags and real
+/// clicks for recording/hotkeys. Two-/three-finger gestures are ignored via
+/// `BTN_TOOL_DOUBLETAP`/`BTN_TOOL_TRIPLETAP` so a scroll or swipe doesn't
+/// get misread as a pointer drag.
+fn spawn_touchpad_reader(mut device: evdev::Device, tx: std::sync::mpsc::SyncSender<DeviceMsg>) {
+    std::thread::Builder::new()
+        .name("evdev-touchpad-reader".into())
+        .spawn(move || {
+            crate::macros::priority::raise_current_thread_priority();
+            let mut x: Option<i32> = None;
+            let mut y: Option<i32> = None;
+            let mut last_x: Option<i32> = None;
+            let mut last_y: Option<i32> = None;
+            let mut finger_down = false;
+            let mut multi_finger = false;
+            let mut btn_left_down = false;
+
+            loop {
+                let events = match device.fetch_events() {
+                    Ok(e) => e,
+                    Err(e) => {
+                        warn!("evdev touchpad read error: {}", e);
+                        break;
+                    }
+                };
+
+                for event in events {
+                    match event.event_type() {
+                        EventType::ABSOLUTE => match AbsoluteAxisCode(event.code()) {
+                            AbsoluteAxisCode::ABS_X => x = Some(event.value()),
+                            AbsoluteAxisCode::ABS_Y => y = Some(event.value()),
+                            _ => {}
+                        },
+                        EventType::KEY => match KeyCode(event.code()) {
+                            KeyCode::BTN_TOOL_FINGER => {
+                                finger_down = event.value() != 0;
+                                if finger_down {
+                                    // Fresh contact: no baseline yet, so the
+                                    // next SYN just records a position
+                                    // rather than a (likely huge, bogus)
+                                    // delta from wherever the last touch let go.
+                                    last_x = None;
+                                    last_y = None;
+                                }
+                            }
+                            KeyCode::BTN_TOOL_DOUBLETAP | KeyCode::BTN_TOOL_TRIPLETAP => {
+                                multi_finger = event.value() != 0;
+                            }
+                            KeyCode::BTN_LEFT => {
+                                let pressed = event.value() != 0;
+                                if pressed != btn_left_down {
+                                    btn_left_down = pressed;
+                                    let ts = event.timestamp();
+                                    let msg = if pressed {
+                                        DeviceMsg::TouchpadButtonPress { ts }
+                                    } else {
+                                        DeviceMsg::TouchpadButtonRelease { ts }
+                                    };
+                                    let _ = tx.send(msg);
+                                }
+                            }
+                            _ => {}
+                        },
+                        EventType::SYNCHRONIZATION => {
+                            if finger_down && !multi_finger {
+                                if let (Some(cx), Some(cy)) = (x, y) {
+                                    if let (Some(lx), Some(ly)) = (last_x, last_y) {
+                                        let (dx, dy) = (cx - lx, cy - ly);
+                                        if dx != 0 || dy != 0 {
+                                            let _ = tx.send(DeviceMsg::TouchpadMove { dx, dy, ts: event.timestamp() });
+                                        }
+                                    }
+                                    last_x = Some(cx);
+                                    last_y = Some(cy);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        })
+        .ok();
 }
 
 fn reemit(vd: &'static Mutex<VirtualDevice>, events: &[InputEvent]) {

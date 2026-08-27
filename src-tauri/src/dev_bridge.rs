@@ -311,6 +311,10 @@ async fn invoke_handler(Path(cmd): Path<String>, AxumState(ctx): AxumState<Bridg
             let relative: bool = match field(&body, "relative") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
             call!(commands::toggle_record_mouse_relative(state, app, relative))
         }
+        "toggle_record_mouse_movement" => {
+            let enabled: bool = match field(&body, "enabled") { Ok(v) => v, Err(e) => return ok_response::<()>(Err(e)) };
+            call!(commands::toggle_record_mouse_movement(state, app, enabled))
+        }
         "open_settings" => call!(commands::open_settings(state, app)),
         "close_settings" => call!(commands::close_settings(state, app)),
         "start_combo_capture" => {

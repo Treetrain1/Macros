@@ -1772,6 +1772,18 @@ pub(crate) fn set_global_speed_multiplier<R: Runtime>(state: State<SharedState>,
 
 // ─── Recording ─────────────────────────────────────────────────────────────
 
+/// Seeds the recorder's tracked cursor position from the real, current
+/// cursor position so the first captured move has a baseline to work from —
+/// needed for absolute-move recording, which has to add each relative delta
+/// the backend reports onto a known starting point (see `recording::
+/// capture_event_to_instruction`). Best-effort: if the backend can't report
+/// a position, absolute recording just waits for one via a later seed.
+fn seed_recording_mouse_pos(s: &crate::state::AppState) {
+    if let Some((x, y)) = s.emulator.as_ref().and_then(|e| e.lock().ok()?.cursor_pos()) {
+        recording::set_last_mouse_pos(x as f64, y as f64);
+    }
+}
+
 #[tauri::command]
 pub(crate) fn start_recording<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -1795,6 +1807,7 @@ pub(crate) fn start_recording<R: Runtime>(state: State<SharedState>, app: tauri:
             if n == 0 {
                 s.recording_phase = RecordingPhase::Active;
                 recording::reset_timing();
+                seed_recording_mouse_pos(&s);
                 recording::RECORDING_ACTIVE.store(true, Ordering::Relaxed);
                 emit_state_updated(&app_clone, &s);
                 return;
@@ -1867,6 +1880,17 @@ pub(crate) fn toggle_record_mouse_relative<R: Runtime>(state: State<SharedState>
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.record_mouse_relative = relative;
     recording::RECORD_MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
+    config::update_settings(|settings| settings.record_mouse_relative = Some(relative));
+    emit_state_updated(&app, &s);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn toggle_record_mouse_movement<R: Runtime>(state: State<SharedState>, app: tauri::AppHandle<R>, enabled: bool) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.record_mouse_movement = enabled;
+    recording::RECORD_MOUSE_MOVEMENT.store(enabled, Ordering::Relaxed);
+    config::update_settings(|settings| settings.record_mouse_movement = Some(enabled));
     emit_state_updated(&app, &s);
     Ok(())
 }
@@ -2274,6 +2298,7 @@ pub(crate) fn handle_hotkey_action<R: Runtime>(state: &SharedState, app: &tauri:
                     s.recording_countdown_generation = s.recording_countdown_generation.wrapping_add(1);
                     s.recording_phase = RecordingPhase::Active;
                     recording::reset_timing();
+                    seed_recording_mouse_pos(&s);
                     recording::RECORDING_ACTIVE.store(true, Ordering::Relaxed);
                     emit_state_updated(app, &s);
                 }

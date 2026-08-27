@@ -136,7 +136,7 @@ pub mod evdev_mapping;
 #[cfg(target_os = "linux")]
 pub mod evdev;
 #[cfg(target_os = "linux")]
-pub mod xtest;
+mod x11_cursor;
 
 #[cfg(windows)]
 pub mod windows;

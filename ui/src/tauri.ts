@@ -123,6 +123,8 @@ export const startRecording = () => invoke<void>('start_recording');
 export const stopRecording = () => invoke<void>('stop_recording');
 export const toggleRecordMouseRelative = (relative: boolean) =>
   invoke<void>('toggle_record_mouse_relative', { relative });
+export const toggleRecordMouseMovement = (enabled: boolean) =>
+  invoke<void>('toggle_record_mouse_movement', { enabled });
 
 // ─── Settings navigation ────────────────────────────────────────────────────
 export const openSettings = () => invoke<void>('open_settings');

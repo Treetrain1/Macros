@@ -10,6 +10,10 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 pub static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Whether mouse movement is captured into the recording at all. Off by
+/// default — most recordings care about clicks/keys, and movement floods
+/// the instruction list with a token per pixel of travel.
+pub static RECORD_MOUSE_MOVEMENT: AtomicBool = AtomicBool::new(false);
 pub static RECORD_MOUSE_RELATIVE: AtomicBool = AtomicBool::new(false);
 static GRAB_FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -259,6 +263,22 @@ pub fn build_capture_callback() -> Box<dyn FnMut(CaptureEvent, CaptureTimestamp)
                 _ => {}
             }
 
+            // Track real cursor position, regardless of recording state, so
+            // absolute-move recording (and relative-move playback) always
+            // has an up-to-date baseline to work from.
+            let prev_pos = get_last_mouse_pos();
+            match &event {
+                CaptureEvent::MouseMoveRel(dx, dy) => {
+                    if let Some((lx, ly)) = prev_pos {
+                        set_last_mouse_pos(lx + *dx as f64, ly + *dy as f64);
+                    }
+                }
+                CaptureEvent::MouseMoveAbs(x, y) => {
+                    set_last_mouse_pos(*x, *y);
+                }
+                _ => {}
+            }
+
             if RECORDING_ACTIVE.load(Ordering::Relaxed) {
                 // The configured (combo-less) StopRecording key stops recording.
                 // Escape has no special status — it's just the shipped default binding.
@@ -274,7 +294,7 @@ pub fn build_capture_callback() -> Box<dyn FnMut(CaptureEvent, CaptureTimestamp)
                 }
 
                 let elapsed = elapsed_since_session_start(ts);
-                let instr = capture_event_to_instruction(&event);
+                let instr = capture_event_to_instruction(&event, prev_pos);
                 if let Some(instr) = instr {
                     let last_elapsed = LAST_ELAPSED.get_or_init(|| Mutex::new(None));
                     if let Ok(mut last) = last_elapsed.lock() {
@@ -293,19 +313,6 @@ pub fn build_capture_callback() -> Box<dyn FnMut(CaptureEvent, CaptureTimestamp)
                 }
 
                 return CaptureDecision::Passthrough;
-            }
-
-            // Track real cursor position for relative-move playback.
-            match &event {
-                CaptureEvent::MouseMoveRel(dx, dy) => {
-                    if let Some((lx, ly)) = get_last_mouse_pos() {
-                        set_last_mouse_pos(lx + *dx as f64, ly + *dy as f64);
-                    }
-                }
-                CaptureEvent::MouseMoveAbs(x, y) => {
-                    set_last_mouse_pos(*x, *y);
-                }
-                _ => {}
             }
 
             // Hotkey detection (only when not recording), against the physical
@@ -340,7 +347,12 @@ pub fn start_grab_thread() {
     });
 }
 
-fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
+/// `prev_pos` is the tracked absolute cursor position from just before this
+/// event was applied (see `build_capture_callback`) — used to convert
+/// between relative deltas and absolute coordinates, whichever the event
+/// itself isn't already expressed in, based on `RECORD_MOUSE_RELATIVE`.
+/// Mouse movement is dropped entirely unless `RECORD_MOUSE_MOVEMENT` is set.
+fn capture_event_to_instruction(event: &CaptureEvent, prev_pos: Option<(f64, f64)>) -> Option<Instruction> {
     Some(Instruction::new(match event {
         CaptureEvent::KeyPress(key) => {
             InstructionKind::Token(InputToken::Key(key.clone(), Direction::Press))
@@ -364,16 +376,38 @@ fn capture_event_to_instruction(event: &CaptureEvent) -> Option<Instruction> {
             }
         }
         CaptureEvent::MouseMoveRel(dx, dy) => {
-            if !RECORD_MOUSE_RELATIVE.load(Ordering::Relaxed) {
+            if !RECORD_MOUSE_MOVEMENT.load(Ordering::Relaxed) {
                 return None;
             }
             if *dx == 0 && *dy == 0 {
                 return None;
             }
-            InstructionKind::Token(InputToken::MoveMouse(Value::number(*dx as f64), Value::number(*dy as f64), Coordinate::Rel))
+            if RECORD_MOUSE_RELATIVE.load(Ordering::Relaxed) {
+                InstructionKind::Token(InputToken::MoveMouse(Value::number(*dx as f64), Value::number(*dy as f64), Coordinate::Rel))
+            } else {
+                // Absolute mode: no backend emits MouseMoveAbs directly (see
+                // `CaptureEvent` doc comment), so absolute recording is built
+                // by walking this delta against the tracked cursor position.
+                // Without a seeded baseline yet, there's nothing to add the
+                // delta onto — drop rather than record a bogus position.
+                let (x, y) = prev_pos?;
+                InstructionKind::Token(InputToken::MoveMouse(Value::number(x + *dx as f64), Value::number(y + *dy as f64), Coordinate::Abs))
+            }
         }
         CaptureEvent::MouseMoveAbs(x, y) => {
-            InstructionKind::Token(InputToken::MoveMouse(Value::number(*x), Value::number(*y), Coordinate::Abs))
+            if !RECORD_MOUSE_MOVEMENT.load(Ordering::Relaxed) {
+                return None;
+            }
+            if RECORD_MOUSE_RELATIVE.load(Ordering::Relaxed) {
+                let (px, py) = prev_pos?;
+                let (dx, dy) = (*x - px, *y - py);
+                if dx == 0.0 && dy == 0.0 {
+                    return None;
+                }
+                InstructionKind::Token(InputToken::MoveMouse(Value::number(dx), Value::number(dy), Coordinate::Rel))
+            } else {
+                InstructionKind::Token(InputToken::MoveMouse(Value::number(*x), Value::number(*y), Coordinate::Abs))
+            }
         }
     }))
 }

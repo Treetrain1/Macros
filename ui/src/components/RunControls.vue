@@ -2,8 +2,8 @@
 import { computed } from 'vue';
 import { state } from '../store';
 import { runMacro, startRecording, stopRecording, toggleLoopMode } from '../tauri';
-import AppButton from './AppButton.vue';
-import SwitchControl from './SwitchControl.vue';
+import { AppButton } from 'blockstitch';
+import { SwitchControl } from 'blockstitch';
 
 const runIcon = computed(() => (state.loop_mode_enabled ? 'repeat' : 'play'));
 const runLabel = computed(() => (state.loop_mode_enabled ? 'Start loop' : 'Run macro'));

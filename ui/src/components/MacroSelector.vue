@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue';
 import { state } from '../store';
 import { newMacro, openSettings, selectMacro } from '../tauri';
-import AppDropdown from './AppDropdown.vue';
-import AppButton from './AppButton.vue';
+import { AppDropdown } from 'blockstitch';
+import { AppButton } from 'blockstitch';
 import RemoveMacroDialog from './RemoveMacroDialog.vue';
 import MacroSettingsDialog from './MacroSettingsDialog.vue';
 

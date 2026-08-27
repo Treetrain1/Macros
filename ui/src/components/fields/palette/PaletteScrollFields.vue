@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import PaletteNumberField from '../../PaletteNumberField.vue';
-import AppDropdown from '../../AppDropdown.vue';
+import { PaletteNumberField } from 'blockstitch';
+import { AppDropdown } from 'blockstitch';
 import type { InstructionDto, ScrollAxis } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Scroll' }> }>();

@@ -2,23 +2,22 @@
 import { computed } from 'vue';
 import { Trash2 } from 'lucide-vue-next';
 import { INSTRUCTION_TYPE_LABELS } from '../icons';
-import PaletteInstructionBlock from './PaletteInstructionBlock.vue';
-import PaletteValueBlock from './PaletteValueBlock.vue';
+import { PaletteInstructionBlock, PaletteValueBlock, beginSidebarResize, sidebarWidth, type ValueNode } from 'blockstitch';
 import PaletteCallBlock from './PaletteCallBlock.vue';
 import PaletteCallValueBlock from './PaletteCallValueBlock.vue';
 import MakeVariableDialog from './MakeVariableDialog.vue';
 import MakeBlockDialog from './MakeBlockDialog.vue';
-import { beginSidebarResize, sidebarWidth } from '../composables/useSidebarWidth';
 import { OPERATOR_KINDS } from '../valueOps';
+import { applyPaletteValueEdit, paletteInstructions, paletteValueFor } from '../paletteState';
 import { state } from '../store';
 import { sortedVariableNames } from '../types';
-import type { InstructionDto, ValueKind } from '../types';
+import type { InstructionDto, ValueDto, ValueKind } from '../types';
 import { closeVariableDialog, openCreateVariableDialog, variableDialog } from '../variableDialogs';
 import { blockDialog, closeBlockDialog, openCreateBlockDialog } from '../blockDialogs';
 
 // SetVariable/ChangeVariable render in the Variables section below and
 // Return in the "My Blocks" section, not here; BlockHeader/CallBlock are
-// never dragged from a fixed prefab at all (see PaletteInstructionBlock.vue);
+// never dragged from a fixed prefab at all (see PaletteCallBlock.vue);
 // Comment is a floating note now (right-click canvas/a block), not a sidebar
 // prefab — all filtered out of the generic "Instruction" group.
 const instructionTypes = (Object.keys(INSTRUCTION_TYPE_LABELS) as InstructionDto['type'][])
@@ -35,6 +34,14 @@ const VALUE_KINDS: ValueKind[] = ['Number', 'Text', ...OPERATOR_KINDS.map(s => s
 
 // One reporter block per declared variable, alphabetical.
 const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.current_macro).map(n => `Var:${n}` as ValueKind));
+
+// blockstitch's PaletteValueBlock emits its own generic ValueNode shape (its
+// `op` is a plain string, since blockstitch doesn't know Macros' ValueOp
+// union) — safe to treat as Macros' own ValueDto here, since Macros'
+// operator registry is the only thing that ever populates it.
+function onValueUpdate(kind: ValueKind, next: ValueNode) {
+  applyPaletteValueEdit(kind, next as ValueDto);
+}
 </script>
 
 <template>
@@ -45,12 +52,18 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
     </div>
     <div class="sidebar-scroll">
       <div class="sidebar-palette" id="sidebar-palette">
-        <PaletteInstructionBlock v-for="type in instructionTypes" :key="type" :type="type" />
+        <PaletteInstructionBlock v-for="type in instructionTypes" :key="type" :type="type" :instruction="paletteInstructions[type]" />
       </div>
 
       <div class="sidebar-section-label">Operator</div>
       <div class="sidebar-palette sidebar-palette-values" id="sidebar-palette-values">
-        <PaletteValueBlock v-for="kind in VALUE_KINDS" :key="kind" :kind="kind" />
+        <PaletteValueBlock
+          v-for="kind in VALUE_KINDS"
+          :key="kind"
+          :kind="kind"
+          :value="paletteValueFor(kind)"
+          @update:value="v => onValueUpdate(kind, v)"
+        />
       </div>
 
       <div class="sidebar-section-label-row">
@@ -61,8 +74,8 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
         <PaletteValueBlock v-for="kind in variableKinds" :key="kind" :kind="kind" />
       </div>
       <div class="sidebar-palette">
-        <PaletteInstructionBlock type="SetVariable" />
-        <PaletteInstructionBlock type="ChangeVariable" />
+        <PaletteInstructionBlock type="SetVariable" :instruction="paletteInstructions.SetVariable" />
+        <PaletteInstructionBlock type="ChangeVariable" :instruction="paletteInstructions.ChangeVariable" />
       </div>
 
       <div class="sidebar-section-label-row">
@@ -74,7 +87,7 @@ const variableKinds = computed<ValueKind[]>(() => sortedVariableNames(state.curr
       </div>
       <div class="sidebar-palette">
         <PaletteCallBlock v-for="def in commandBlocks" :key="def.id" :def="def" />
-        <PaletteInstructionBlock type="Return" />
+        <PaletteInstructionBlock type="Return" :instruction="paletteInstructions.Return" />
       </div>
     </div>
     <div class="sidebar-resize-handle" @pointerdown="beginSidebarResize" />

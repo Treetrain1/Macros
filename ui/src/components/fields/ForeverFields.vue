@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import InstructionList from '../InstructionList.vue';
+import { InstructionList } from 'blockstitch';
 import { bodyBasePath } from '../../types';
 import type { InstrPath, InstructionDto } from '../../types';
 

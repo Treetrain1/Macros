@@ -3,8 +3,8 @@ import { computed } from 'vue';
 import { state } from '../../../store';
 import { sortedVariableNames } from '../../../types';
 import type { InstructionDto } from '../../../types';
-import AppDropdown from '../../AppDropdown.vue';
-import PaletteNumberField from '../../PaletteNumberField.vue';
+import { AppDropdown } from 'blockstitch';
+import { PaletteNumberField } from 'blockstitch';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'SetVariable' }> }>();
 

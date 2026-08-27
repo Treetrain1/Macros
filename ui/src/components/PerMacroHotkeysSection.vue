@@ -3,8 +3,8 @@ import { computed } from 'vue';
 import { Keyboard } from 'lucide-vue-next';
 import { state } from '../store';
 import { addMacroHotkey, removeHotkeyBinding, setPendingMacroIdx, startPendingComboCapture } from '../tauri';
-import AppDropdown from './AppDropdown.vue';
-import AppButton from './AppButton.vue';
+import { AppDropdown } from 'blockstitch';
+import { AppButton } from 'blockstitch';
 
 const perMacroBindings = computed(() => state.hotkey_bindings.filter(b => b.action.type === 'RunSpecificMacro'));
 

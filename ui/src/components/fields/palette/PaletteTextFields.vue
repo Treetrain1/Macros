@@ -3,7 +3,7 @@
 // an operator or dropped-in block): the sidebar refuses value drops outright
 // (see canvasDrag.ts's isOverSidebar), so this only ever edits the plain
 // `Text` leaf `defaultInstruction('Text')` seeds.
-import AutosizeInput from '../../AutosizeInput.vue';
+import { AutosizeInput } from 'blockstitch';
 import { textValue } from '../../../types';
 import type { InstructionDto } from '../../../types';
 

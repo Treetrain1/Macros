@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AppDropdown from '../../AppDropdown.vue';
+import { AppDropdown } from 'blockstitch';
 import type { InstructionDto, KeyDirection, MouseButton } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Button' }> }>();

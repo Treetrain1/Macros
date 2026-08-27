@@ -2,7 +2,7 @@
 import { Server } from 'lucide-vue-next';
 import { state } from '../store';
 import { setIpcAutoStart, setIpcPortText, startIpcServer, stopIpcServer } from '../tauri';
-import SwitchControl from './SwitchControl.vue';
+import { SwitchControl } from 'blockstitch';
 
 function onPortInput(e: Event) {
   setIpcPortText((e.target as HTMLInputElement).value);

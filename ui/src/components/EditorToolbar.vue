@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { state } from '../store';
 import { redo, saveMacro, undo } from '../tauri';
-import AppButton from './AppButton.vue';
+import { AppButton } from 'blockstitch';
 </script>
 
 <template>

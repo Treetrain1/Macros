@@ -7,7 +7,7 @@
 // other dialogs (MakeVariableDialog.vue, RemoveMacroDialog.vue, etc.).
 import { state } from '../store';
 import { setMacroAlwaysListen } from '../tauri';
-import SwitchControl from './SwitchControl.vue';
+import { SwitchControl } from 'blockstitch';
 
 const emit = defineEmits<{ close: [] }>();
 </script>

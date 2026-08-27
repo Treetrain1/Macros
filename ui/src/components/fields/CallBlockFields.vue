@@ -6,7 +6,7 @@
 import { computed } from 'vue';
 import { state } from '../../store';
 import { fieldLocation, findBlockDef } from '../../types';
-import ValueBlock from '../ValueBlock.vue';
+import { ValueBlock } from 'blockstitch';
 import type { InstrPath, InstructionDto } from '../../types';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'CallBlock' }> }>();

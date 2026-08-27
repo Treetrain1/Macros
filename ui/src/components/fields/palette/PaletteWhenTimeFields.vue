@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Clock } from 'lucide-vue-next';
-import AppDropdown from '../../AppDropdown.vue';
+import { AppDropdown } from 'blockstitch';
 import { MONTH_OPTIONS, SCHEDULE_MODE_OPTIONS, WEEKDAY_OPTIONS, scheduleTimeValue, withScheduleMode, withTimeValue } from '../../../timeSchedule';
 import type { InstructionDto, TimeScheduleDto, WeekdayDto } from '../../../types';
 

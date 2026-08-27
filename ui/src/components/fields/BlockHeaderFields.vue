@@ -10,7 +10,7 @@ import { computed } from 'vue';
 import { Blocks } from 'lucide-vue-next';
 import { state } from '../../store';
 import { findBlockDef } from '../../types';
-import PaletteValueBlock from '../PaletteValueBlock.vue';
+import { PaletteValueBlock } from 'blockstitch';
 import type { InstrPath, InstructionDto, ValueKind } from '../../types';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'BlockHeader' }> }>();

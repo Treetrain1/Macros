@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Static preview only — mirrors PaletteIfFields.vue's split (see its
 // comment) and RepeatFields.vue's own real-canvas shape.
-import PaletteNumberField from '../../PaletteNumberField.vue';
+import { PaletteNumberField } from 'blockstitch';
 import type { InstructionDto } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Repeat' }>; part: 'head' | 'body' }>();

@@ -2,7 +2,7 @@
 import { Minimize2 } from 'lucide-vue-next';
 import { state } from '../store';
 import { setCloseToTray } from '../tauri';
-import SwitchControl from './SwitchControl.vue';
+import { SwitchControl } from 'blockstitch';
 </script>
 
 <template>

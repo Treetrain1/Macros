@@ -9,8 +9,7 @@ import { computed } from 'vue';
 import type { BlockDefDto } from '../types';
 import { blockInputNames } from '../types';
 import { paletteCallArgs } from '../blockDefs';
-import { beginPaletteDrag } from '../canvasDrag';
-import PaletteNumberField from './PaletteNumberField.vue';
+import { beginPaletteDrag, PaletteNumberField } from 'blockstitch';
 import { openMyBlockMenu } from '../contextMenu';
 import { Blocks } from 'lucide-vue-next';
 

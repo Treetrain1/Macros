@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import ValueBlock from '../ValueBlock.vue';
-import InstructionList from '../InstructionList.vue';
+import { ValueBlock } from 'blockstitch';
+import { InstructionList } from 'blockstitch';
 import { bodyBasePath, fieldLocation } from '../../types';
 import type { InstrPath, InstructionDto } from '../../types';
 

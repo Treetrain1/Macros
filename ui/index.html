@@ -7,7 +7,7 @@
   <script>
     (function () {
       try {
-        var t = localStorage.getItem('macros-theme');
+        var t = localStorage.getItem('blockstitch-theme') || localStorage.getItem('blockwork-theme') || localStorage.getItem('macros-theme');
         if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
       } catch (e) {}
     })();

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { editInstruction } from '../../tauri';
-import ValueBlock from '../ValueBlock.vue';
-import AppDropdown from '../AppDropdown.vue';
+import { ValueBlock } from 'blockstitch';
+import { AppDropdown } from 'blockstitch';
 import { fieldLocation } from '../../types';
 import type { InstrPath, InstructionDto, ScrollAxis } from '../../types';
 

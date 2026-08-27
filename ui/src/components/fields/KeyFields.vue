@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { state } from '../../store';
 import { editInstruction, startKeyCapture } from '../../tauri';
-import AppDropdown from '../AppDropdown.vue';
+import { AppDropdown } from 'blockstitch';
 import { pathsEqual } from '../../types';
 import type { InstrPath, InstructionDto, KeyDirection } from '../../types';
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BatteryWarning } from 'lucide-vue-next';
-import PaletteNumberField from '../../PaletteNumberField.vue';
+import { PaletteNumberField } from 'blockstitch';
 import type { InstructionDto } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'WhenBatteryDischargedTo' }> }>();

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BatteryWarning } from 'lucide-vue-next';
-import ValueBlock from '../ValueBlock.vue';
+import { ValueBlock } from 'blockstitch';
 import { fieldLocation } from '../../types';
 import type { InstrPath, InstructionDto } from '../../types';
 

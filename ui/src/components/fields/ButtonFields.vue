@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { editInstruction } from '../../tauri';
-import AppDropdown from '../AppDropdown.vue';
+import { AppDropdown } from 'blockstitch';
 import type { InstrPath, InstructionDto, KeyDirection, MouseButton } from '../../types';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Button' }> }>();

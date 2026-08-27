@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { editInstruction } from '../../tauri';
-import AutosizeInput from '../AutosizeInput.vue';
+import { AutosizeInput } from 'blockstitch';
 import type { InstrPath, InstructionDto } from '../../types';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'Comment' }> }>();

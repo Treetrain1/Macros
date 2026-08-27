@@ -1,6 +1,30 @@
 // Mirrors src-tauri/src/state.rs's StateDto and friends exactly (serde field
 // names/shapes are a fixed contract with the Rust backend — do not rename).
+//
+// The generic block-graph addressing/navigation helpers (path types,
+// resolveInstructionList, isHeaderType, etc.) now live in blockstitch — this
+// file re-exports them under their original names so every existing call
+// site keeps working unchanged, and keeps only Macros' own concrete DTOs.
 import { defaultArgFor, specForKind } from './valueOps';
+import {
+  bodyBasePath as bsBodyBasePath,
+  fieldLocation as bsFieldLocation,
+  newId as bsNewId,
+  nextSiblingPath as bsNextSiblingPath,
+  pathsEqual as bsPathsEqual,
+  regenerateInstructionIds as bsRegenerateInstructionIds,
+  resolveInstructionAt as bsResolveInstructionAt,
+  resolveInstructionList as bsResolveInstructionList,
+  topLevelPath as bsTopLevelPath,
+  blankBoolValue as bsBlankBoolValue,
+  numberValue as bsNumberValue,
+  textValue as bsTextValue,
+  isCapType as bsIsCapType,
+  isEntryTriggerType as bsIsEntryTriggerType,
+  isHeaderType as bsIsHeaderType,
+  isWrapType as bsIsWrapType,
+} from 'blockstitch';
+import type { NodePath, PathStep, ValueLocation } from 'blockstitch';
 
 export type KeyDirection = 'Click' | 'Press' | 'Release';
 export type MouseButton = 'Left' | 'Right' | 'Middle' | 'Side' | 'Extra';
@@ -32,7 +56,8 @@ export type TimeScheduleDto =
 
 // A small recursive expression tree backing a value field — a number, text,
 // or an operator applied to nested `args` (e.g. `(5) + (3)`). Mirrors
-// src-tauri/src/state.rs's ValueDto.
+// src-tauri/src/state.rs's ValueDto, and satisfies blockstitch's generic
+// `ValueNode` shape structurally (see values/valueNode.ts there).
 export type ValueOp =
   | 'Add' | 'Sub' | 'Mul' | 'Div' | 'Mod' | 'Round' | 'Random' | 'Join' | 'NewLine' | 'Tab'
   | 'IndexOf' | 'LastIndexOf' | 'LetterOf' | 'Length' | 'Case'
@@ -60,7 +85,8 @@ export type ValueDto =
   | { kind: 'Text'; value: string }
   // Bare boolean leaf, no value of its own — the "nothing plugged in here"
   // state of a boolean slot (an If's condition, an And/Or/Not operand).
-  // Renders as a blank hexagon (ValueBlock.vue) and evaluates as false.
+  // Renders as a blank hexagon (blockstitch's ValueBlock.vue) and evaluates as
+  // false.
   | { kind: 'Bool' }
   | { kind: 'Op'; op: ValueOp; args: ValueDto[]; saved: ValueDto }
   | { kind: 'Var'; name: string }
@@ -68,17 +94,17 @@ export type ValueDto =
   | { kind: 'Call'; block_id: string; args: ValueDto[]; saved: ValueDto };
 
 export function numberValue(value: number): ValueDto {
-  return { kind: 'Number', value };
+  return bsNumberValue(value);
 }
 
 export function textValue(value: string): ValueDto {
-  return { kind: 'Text', value };
+  return bsTextValue(value);
 }
 
 // Fresh boolean-typed default — blank, same spirit as
 // `numberValue(0)`/`textValue('')`, not a pre-filled "false".
 export function blankBoolValue(): ValueDto {
-  return { kind: 'Bool' };
+  return bsBlankBoolValue();
 }
 
 // Fresh default tree for a value block dragged off the sidebar palette —
@@ -97,83 +123,49 @@ export function defaultValueForKind(kind: ValueKind): ValueDto {
   return { kind: 'Op', op: spec.op, args: Array.from({ length: spec.arity }, (_, i) => defaultArgFor(spec, i)), saved: numberValue(0) };
 }
 
-// One step of an InstrPath — `index` into the current instruction list, and
-// (for every step but the last) which nested body of that instruction to
-// descend into next: 0 for an If's body or IfElse's `then_body`, 1 for
-// IfElse's `else_body`. The last step's `slot` is omitted. Mirrors
-// src-tauri/src/state.rs's PathStep.
-export interface PathStep {
-  index: number;
-  slot?: number;
-}
+// ── Block-graph addressing (re-exported from blockstitch) ─────────────────────
+export type { PathStep };
+export type InstrPath = NodePath;
 
-// Addresses one instruction, possibly nested inside If/IfElse bodies —
-// generalizes a flat instruction index the same way a Value's `path:
-// number[]` already addresses a nested value-tree node.
-export type InstrPath = PathStep[];
-
-// The common case: a top-level instruction at `index` in a strand's own
-// instruction list — what every non-nested call site should pass.
 export function topLevelPath(index: number): InstrPath {
-  return [{ index }];
+  return bsTopLevelPath(index);
 }
 
-// Resolves `basePath` against a strand to the (possibly nested) instruction
-// list it addresses — a strand's own top-level list for `basePath: []`, or
-// an If/IfElse's body for anything longer. Shared by canvasDrag.ts (DOM-less
-// placement checks), clipboard.ts, and ContextMenu.vue.
+/** Resolves `basePath` against a strand to the (possibly nested) instruction
+ * list it addresses — a strand's own top-level list for `basePath: []`, or
+ * an If/IfElse's body for anything longer. Shared by canvasDrag.ts (DOM-less
+ * placement checks), clipboard.ts, and ContextMenu.vue. */
 export function resolveInstructionList(strand: StrandDto | null | undefined, basePath: PathStep[]): InstructionDto[] {
-  let list: InstructionDto[] | undefined = strand?.instructions;
-  for (const step of basePath) {
-    const ins = list?.[step.index];
-    if (!ins) return [];
-    if (ins.type === 'If' && step.slot === 0) list = ins.body;
-    else if (ins.type === 'IfElse' && step.slot === 0) list = ins.then_body;
-    else if (ins.type === 'IfElse' && step.slot === 1) list = ins.else_body;
-    else if (ins.type === 'Repeat' && step.slot === 0) list = ins.body;
-    else if (ins.type === 'Forever' && step.slot === 0) list = ins.body;
-    else if (ins.type === 'While' && step.slot === 0) list = ins.body;
-    else return [];
-  }
-  return list ?? [];
+  return bsResolveInstructionList(strand ?? undefined, basePath);
 }
 
-// The single instruction `path` addresses, or `null` if any step along the
-// way doesn't resolve (e.g. stale state mid-edit).
+/** The single instruction `path` addresses, or `null` if any step along the
+ * way doesn't resolve (e.g. stale state mid-edit). */
 export function resolveInstructionAt(strand: StrandDto | null | undefined, path: InstrPath): InstructionDto | null {
-  if (path.length === 0) return null;
-  const list = resolveInstructionList(strand, path.slice(0, -1));
-  return list[path[path.length - 1].index] ?? null;
+  return bsResolveInstructionAt(strand ?? undefined, path);
 }
 
-// The path of the instruction immediately after `path`, in the same body
-// list — e.g. for "insert a duplicate right after this block."
+/** The path of the instruction immediately after `path`, in the same body
+ * list — e.g. for "insert a duplicate right after this block." */
 export function nextSiblingPath(path: InstrPath): InstrPath {
-  const steps = [...path];
-  const last = steps[steps.length - 1];
-  steps[steps.length - 1] = { ...last, index: last.index + 1 };
-  return steps;
+  return bsNextSiblingPath(path);
 }
 
-// The base path for an If/IfElse instruction's own nested body — `path` is
-// that instruction's own address (its last step has no `slot`, since
-// nothing follows it yet); this stamps `slot` onto that last step, so an
-// InstructionList rendering the body can append its own children's indices
-// after it. `slot` is 0 for an If's body or IfElse's `then_body`, 1 for
-// IfElse's `else_body`.
+/** The base path for an If/IfElse instruction's own nested body — `path` is
+ * that instruction's own address (its last step has no `slot`, since
+ * nothing follows it yet); this stamps `slot` onto that last step, so an
+ * InstructionList rendering the body can append its own children's indices
+ * after it. `slot` is 0 for an If's body or IfElse's `then_body`, 1 for
+ * IfElse's `else_body`. */
 export function bodyBasePath(path: InstrPath, slot: number): InstrPath {
-  const steps = [...path];
-  const last = steps[steps.length - 1];
-  steps[steps.length - 1] = { ...last, slot };
-  return steps;
+  return bsBodyBasePath(path, slot);
 }
 
 // Addresses a single Value node: inside an instruction field (Field) or a
 // floating canvas block (Floating), at `path` within that root. Mirrors
-// src-tauri/src/state.rs's ValueLocation/ValueLocationDto.
-export type ValueLocationDto =
-  | { kind: 'Field'; strand_id: string; index: InstrPath; field_id: string; path: number[] }
-  | { kind: 'Floating'; floating_id: string; path: number[] };
+// src-tauri/src/state.rs's ValueLocation/ValueLocationDto, and is structurally
+// identical to blockstitch's generic `ValueLocation`.
+export type ValueLocationDto = ValueLocation;
 
 export interface FloatingValueDto {
   id: string;
@@ -200,7 +192,7 @@ export interface CommentDto {
 
 // Root-of-field location for the field components under ui/src/components/fields/.
 export function fieldLocation(strandId: string, instrPath: InstrPath, fieldId: string): ValueLocationDto {
-  return { kind: 'Field', strand_id: strandId, index: instrPath, field_id: fieldId, path: [] };
+  return bsFieldLocation(strandId, instrPath, fieldId);
 }
 
 export type InstructionDto = { id: string } & (
@@ -242,7 +234,7 @@ export type InstructionType = InstructionDto['type'];
 // A fresh id for a brand-new instruction/comment — same fallback pattern as
 // MakeBlockDialog.vue's piece ids, for a webview without `crypto.randomUUID`.
 export function newId(): string {
-  return crypto.randomUUID?.() ?? `i${Math.random().toString(36).slice(2)}`;
+  return bsNewId();
 }
 
 // Fresh instruction for a given type — mirrors src-tauri/src/commands.rs's
@@ -286,54 +278,39 @@ export function defaultInstruction(type: InstructionType): InstructionDto {
 // body/then_body/else_body) with a fresh id at every level — duplicating or
 // pasting an existing instruction must never leave two live instructions
 // sharing an id, since Comment.attached_to and the connecting-line rendering
-// resolve "the instruction" by id alone.
+// resolve "the instruction" by id alone. Delegates to blockstitch's generic
+// version, which walks bodies via the shapes registered in
+// blockstitchSetup.ts.
 export function regenerateInstructionIds(ins: InstructionDto): InstructionDto {
-  const copy: InstructionDto = { ...ins, id: newId() };
-  if (copy.type === 'If') return { ...copy, body: copy.body.map(regenerateInstructionIds) };
-  if (copy.type === 'IfElse') {
-    return { ...copy, then_body: copy.then_body.map(regenerateInstructionIds), else_body: copy.else_body.map(regenerateInstructionIds) };
-  }
-  if (copy.type === 'Repeat' || copy.type === 'Forever' || copy.type === 'While') {
-    return { ...copy, body: copy.body.map(regenerateInstructionIds) };
-  }
-  return copy;
+  return bsRegenerateInstructionIds(ins);
 }
-
-export const HEADER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'BlockHeader', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged']);
 
 export function isHeaderType(type: InstructionDto['type']): boolean {
-  return HEADER_TYPES.has(type);
+  return bsIsHeaderType(type);
 }
 
-// The subset of HEADER_TYPES that are "entry point" triggers (WhenRan and
+// The subset of header types that are "entry point" triggers (WhenRan and
 // every When-condition block) rather than a custom block's own definition
 // header (BlockHeader renders its own params instead of a fixed label, so it
 // gets its own look — see BlockHeaderFields.vue — not this quiet accent
-// tint). Drives `.instruction-row-when-ran`'s styling in InstructionRow.vue/
-// PaletteInstructionBlock.vue.
-export const ENTRY_TRIGGER_TYPES = new Set<InstructionDto['type']>(['WhenRan', 'WhenBatteryDischargedTo', 'WhenBatteryChargedTo', 'WhenTime', 'WhenPowerPluggedIn', 'WhenPowerUnplugged']);
-
+// tint). Drives `.instruction-row-when-ran`'s styling.
 export function isEntryTriggerType(type: InstructionDto['type']): boolean {
-  return ENTRY_TRIGGER_TYPES.has(type);
+  return bsIsEntryTriggerType(type);
 }
 
 // "Cap" blocks (the mirror of header blocks) never have anything stacked
 // below them — `Return` ends the strand's control flow, and `EscapeLoop`/
 // `ContinueLoop` jump straight to the enclosing loop's boundary — so they
 // render with a flat bottom edge instead of a connector tab.
-export const CAP_TYPES = new Set<InstructionDto['type']>(['Return', 'EscapeLoop', 'ContinueLoop']);
-
 export function isCapType(type: InstructionDto['type']): boolean {
-  return CAP_TYPES.has(type);
+  return bsIsCapType(type);
 }
 
 // "Wrap"/C-blocks encase a nested body (or two, for If-Else) between their
 // own top notch and bottom tab — unlike header/cap, they keep both, since
 // they snap above/below like any ordinary block.
-export const WRAP_TYPES = new Set<InstructionDto['type']>(['If', 'IfElse', 'Repeat', 'Forever', 'While']);
-
 export function isWrapType(type: InstructionDto['type']): boolean {
-  return WRAP_TYPES.has(type);
+  return bsIsWrapType(type);
 }
 
 export function hasElseSlot(type: InstructionDto['type']): boolean {
@@ -435,8 +412,7 @@ export interface KeyCaptureDto {
 /** Structural equality for two InstrPaths — used wherever a path is
  * compared instead of a bare index (e.g. "is this the row being captured"). */
 export function pathsEqual(a: InstrPath | null | undefined, b: InstrPath | null | undefined): boolean {
-  if (a == null || b == null) return a === b;
-  return a.length === b.length && a.every((step, i) => step.index === b[i].index && step.slot === b[i].slot);
+  return bsPathsEqual(a, b);
 }
 
 export type HotkeyActionDto =

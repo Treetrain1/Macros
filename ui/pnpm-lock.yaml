@@ -11,6 +11,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.0.0
         version: 2.11.1
+      blockstitch:
+        specifier: link:../../blockstitch
+        version: link:../../blockstitch
       lucide-vue-next:
         specifier: ^0.469.0
         version: 0.469.0(vue@3.5.39(typescript@5.9.3))
@@ -30,6 +33,25 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.0)
+      vue-tsc:
+        specifier: ^2.2.0
+        version: 2.2.12(typescript@5.9.3)
+
+  ../../blockstitch:
+    dependencies:
+      lucide-vue-next:
+        specifier: ^0.469.0
+        version: 0.469.0(vue@3.5.39(typescript@5.9.3))
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.39(typescript@5.9.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
       vue-tsc:
         specifier: ^2.2.0
         version: 2.2.12(typescript@5.9.3)

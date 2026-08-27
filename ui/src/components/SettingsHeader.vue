@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { closeSettings } from '../tauri';
-import { useTheme } from '../composables/useTheme';
-import AppButton from './AppButton.vue';
+import { useTheme } from 'blockstitch';
+import { AppButton } from 'blockstitch';
 
 const { currentTheme, toggleTheme } = useTheme();
 

@@ -7,8 +7,7 @@ import { computed } from 'vue';
 import type { BlockDefDto } from '../types';
 import { blockInputNames } from '../types';
 import { paletteCallArgs } from '../blockDefs';
-import { beginValuePaletteDrag, paletteEvalPreview } from '../valueDrag';
-import PaletteNumberField from './PaletteNumberField.vue';
+import { beginValuePaletteDrag, paletteEvalPreview, PaletteNumberField } from 'blockstitch';
 import { openMyBlockMenu } from '../contextMenu';
 
 const props = defineProps<{ def: BlockDefDto }>();

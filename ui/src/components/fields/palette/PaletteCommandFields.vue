@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AutosizeInput from '../../AutosizeInput.vue';
+import { AutosizeInput } from 'blockstitch';
 import type { InstructionDto } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Command' }> }>();

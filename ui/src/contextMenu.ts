@@ -3,8 +3,7 @@
 // clicked) for a single <ContextMenu> component to render either the
 // block-menu or canvas-menu item list.
 import { reactive } from 'vue';
-import { registerOpen, unregisterOpen } from './dropdownRegistry';
-import { clientToCanvas } from './canvasDrag';
+import { registerOpen, unregisterOpen, clientToCanvas } from 'blockstitch';
 import type { InstrPath } from './types';
 
 export type ContextMenuType = 'block' | 'canvas' | 'variable' | 'myBlock';

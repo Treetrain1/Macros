@@ -3,7 +3,7 @@ import { Keyboard } from 'lucide-vue-next';
 import { state } from '../store';
 import { clearNamedHotkey, resetHotkeyToDefault, startComboCapture } from '../tauri';
 import { NAMED_ACTIONS, NO_COMBO_ACTIONS, type NamedActionType } from '../constants';
-import AppButton from './AppButton.vue';
+import { AppButton } from 'blockstitch';
 
 function bindingFor(type: NamedActionType) {
   return state.hotkey_bindings.find(b => b.action.type === type);

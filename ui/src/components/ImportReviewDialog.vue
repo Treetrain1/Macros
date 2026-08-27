@@ -13,7 +13,7 @@ import { TriangleAlert } from 'lucide-vue-next';
 import { reactive, ref } from 'vue';
 import { cancelImportMacro, confirmImportMacro } from '../tauri';
 import type { ImportPromptDto } from '../types';
-import SwitchControl from './SwitchControl.vue';
+import { SwitchControl } from 'blockstitch';
 
 const props = defineProps<{ prompt: ImportPromptDto }>();
 const emit = defineEmits<{ close: [] }>();

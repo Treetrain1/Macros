@@ -42,6 +42,30 @@ const textSeed = defaultValueForKind('Text');
 export const paletteNumber = reactive({ value: numberSeed.kind === 'Number' ? numberSeed.value : 0 });
 export const paletteText = reactive({ value: textSeed.kind === 'Text' ? textSeed.value : '' });
 
+/** Applies an edit blockstitch's generic `PaletteValueBlock` made (via its
+ * `update:value` emit) back onto this kind's own persisted draft state —
+ * the inverse of `paletteValueFor`. No-op for `Var:`/`Param:` kinds, which
+ * have nothing to edit. */
+export function applyPaletteValueEdit(kind: ValueKind, next: ValueDto): void {
+  if (kind === 'Number' && next.kind === 'Number') {
+    paletteNumber.value = next.value;
+    return;
+  }
+  if (kind === 'Text' && next.kind === 'Text') {
+    paletteText.value = next.value;
+    return;
+  }
+  if (next.kind !== 'Op') return;
+  const spec = specForKind(kind);
+  if (!spec) return;
+  const args = paletteOperatorArgs[kind as OperatorValueKind];
+  if (!args) return;
+  next.args.forEach((arg, i) => {
+    if (arg.kind === 'Number') args[i] = arg.value;
+    else if (arg.kind === 'Text') args[i] = arg.value;
+  });
+}
+
 /** The ValueDto a value-palette entry currently represents, built from its
  * live edited state — what lands on the canvas when dragged out. */
 export function paletteValueFor(kind: ValueKind): ValueDto {

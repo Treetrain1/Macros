@@ -4,8 +4,8 @@ import { state } from '../../store';
 import { editInstruction } from '../../tauri';
 import { fieldLocation, sortedVariableNames } from '../../types';
 import type { InstrPath, InstructionDto } from '../../types';
-import AppDropdown from '../AppDropdown.vue';
-import ValueBlock from '../ValueBlock.vue';
+import { AppDropdown } from 'blockstitch';
+import { ValueBlock } from 'blockstitch';
 
 const props = defineProps<{ strandId: string; path: InstrPath; instruction: Extract<InstructionDto, { type: 'ChangeVariable' }> }>();
 

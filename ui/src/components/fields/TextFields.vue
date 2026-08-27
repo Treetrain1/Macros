@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ValueBlock from '../ValueBlock.vue';
+import { ValueBlock } from 'blockstitch';
 import { fieldLocation } from '../../types';
 import type { InstrPath, InstructionDto } from '../../types';
 

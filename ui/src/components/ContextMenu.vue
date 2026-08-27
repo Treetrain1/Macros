@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+// Thin wrapper around blockstitch's generic <ContextMenuPanel> — this is where
+// Macros' own menu content (what each of the four menu variants offers, and
+// what each item does) lives; the panel itself only handles positioning,
+// outside-click/Escape/scroll close, and rendering the item list.
+import { computed } from 'vue';
 import { state } from '../store';
 import { contextMenu, closeContextMenu } from '../contextMenu';
 import { copyAll, copyBlock, clipboardContents, hasClipboard } from '../clipboard';
 import { addInstruction, clearInstructions, createAttachedComment, createComment, deleteBlock, deleteInstruction, deleteVariable, pasteInstructions, setCommentCollapsed, setRecordingTarget } from '../tauri';
-import { clientToCanvas } from '../canvasDrag';
-import { focusCommentOnMount } from '../commentFocus';
+import { ContextMenuPanel, clientToCanvas, focusCommentOnMount, type ContextMenuItem } from 'blockstitch';
 import { ICONS } from '../icons';
 import { openRenameVariableDialog } from '../variableDialogs';
 import { openEditBlockDialog } from '../blockDialogs';
@@ -15,9 +18,6 @@ import { findBlockDef, nextSiblingPath, regenerateInstructionIds, resolveInstruc
 // relative to its block — clear of the block itself, matching the spirit of
 // commands.rs's next_strand_position ("offset from the existing thing").
 const ATTACHED_COMMENT_OFFSET = { dx: 220, dy: 0 };
-
-const panelRef = ref<HTMLDivElement | null>(null);
-const panelStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' });
 
 const strand = computed(() => state.current_macro?.strands.find(s => s.id === contextMenu.strandId) ?? null);
 const instruction = computed(() => resolveInstructionAt(strand.value, contextMenu.path));
@@ -44,46 +44,6 @@ const clearLabel = computed(() =>
     : `Delete ${totalBlocks.value} Blocks`,
 );
 
-function positionPanel() {
-  const panel = panelRef.value;
-  if (!panel) return;
-  const left = Math.max(4, Math.min(contextMenu.x, window.innerWidth - panel.offsetWidth - 4));
-  const top = Math.max(4, Math.min(contextMenu.y, window.innerHeight - panel.offsetHeight - 4));
-  panelStyle.value = { left: `${left}px`, top: `${top}px` };
-}
-
-function onOutsideMouseDown(e: MouseEvent) {
-  if (panelRef.value?.contains(e.target as Node)) return;
-  closeContextMenu();
-}
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') closeContextMenu();
-}
-function onScrollOrResize() {
-  closeContextMenu();
-}
-
-watch(
-  () => contextMenu.open,
-  async open => {
-    if (open) {
-      await nextTick();
-      positionPanel();
-      document.addEventListener('mousedown', onOutsideMouseDown, true);
-      document.addEventListener('keydown', onKeydown);
-      window.addEventListener('scroll', onScrollOrResize, true);
-      window.addEventListener('resize', onScrollOrResize);
-    } else {
-      document.removeEventListener('mousedown', onOutsideMouseDown, true);
-      document.removeEventListener('keydown', onKeydown);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    }
-  },
-);
-
-onBeforeUnmount(() => closeContextMenu());
-
 function deleteBlockPosition(): [number, number] {
   return clientToCanvas(contextMenu.x, contextMenu.y);
 }
@@ -96,7 +56,8 @@ function onDeleteBlock() {
   // A custom block's header row: delete the block definition (which also
   // removes this body strand and every call site referencing it) rather
   // than just detaching the strand and leaving an orphaned "My Blocks"
-  // prefab behind — mirrors the drag-to-trash handling in canvasDrag.ts.
+  // prefab behind — mirrors the drag-to-trash handling in blockstitch's
+  // canvas/canvasDrag.ts.
   if (headerBlockId.value) {
     deleteBlock(headerBlockId.value);
     closeContextMenu();
@@ -175,85 +136,47 @@ function onDeleteBlockDef() {
   deleteBlock(contextMenu.blockId);
   closeContextMenu();
 }
+
+const items = computed<ContextMenuItem[]>(() => {
+  if (contextMenu.type === 'block') {
+    const list: ContextMenuItem[] = [];
+    if (headerBlockId.value) {
+      list.push({ key: 'edit-header', label: 'Edit block', icon: ICONS.blocks, onSelect: onEditBlockHeader });
+    }
+    list.push(
+      { key: 'record-target', label: isRecordingTarget.value ? 'Recording Target (current)' : 'Set Recording Target', icon: ICONS.target, active: isRecordingTarget.value, onSelect: onSetRecordingTarget },
+      { key: 'copy', label: 'Copy block', icon: ICONS.copy, onSelect: onCopyBlock },
+      { key: 'copy-all', label: 'Copy all', icon: ICONS.layers, onSelect: onCopyAll },
+      { key: 'duplicate', label: 'Duplicate block', icon: ICONS['corner-down-right'], onSelect: onDuplicateBlock },
+      { key: 'cut', label: 'Cut block', icon: ICONS.scissors, onSelect: onCutBlock },
+      { key: 'comment', label: attachedComment.value ? 'Comment' : 'Add Comment', icon: ICONS['message-square'], onSelect: onAddOrFocusComment },
+      { key: 'delete', label: 'Delete block', icon: ICONS.trash, danger: true, onSelect: onDeleteBlock },
+    );
+    return list;
+  }
+  if (contextMenu.type === 'canvas') {
+    return [
+      {
+        key: 'clear', label: clearLabel.value, icon: ICONS[clearIcon.value], danger: true,
+        extraClass: state.confirm_clear_instructions ? 'confirm-armed' : undefined, onSelect: onDeleteAllBlocks,
+      },
+      { key: 'paste', label: 'Paste', icon: ICONS['clipboard-paste'], disabled: !hasClipboard(), onSelect: onPaste },
+      { key: 'add-comment', label: 'Add Comment', icon: ICONS['message-square'], onSelect: onAddCanvasComment },
+    ];
+  }
+  if (contextMenu.type === 'variable') {
+    return [
+      { key: 'rename', label: 'Rename variable', icon: ICONS.equal, onSelect: onRenameVariable },
+      { key: 'delete-var', label: 'Delete variable', icon: ICONS.trash, danger: true, onSelect: onDeleteVariable },
+    ];
+  }
+  return [
+    { key: 'edit', label: 'Edit block', icon: ICONS.blocks, onSelect: onEditBlock },
+    { key: 'delete-def', label: 'Delete block', icon: ICONS.trash, danger: true, onSelect: onDeleteBlockDef },
+  ];
+});
 </script>
 
 <template>
-  <Teleport to="#dd-portal">
-    <div v-if="contextMenu.open" ref="panelRef" class="context-menu" role="menu" :style="panelStyle">
-      <template v-if="contextMenu.type === 'block'">
-        <button v-if="headerBlockId" type="button" class="context-menu-item" role="menuitem" @click="onEditBlockHeader">
-          <span class="context-menu-item-icon"><component :is="ICONS.blocks" /></span>
-          <span>Edit block</span>
-        </button>
-        <button type="button" class="context-menu-item" :class="{ 'context-menu-item-active': isRecordingTarget }" role="menuitem" @click="onSetRecordingTarget">
-          <span class="context-menu-item-icon"><component :is="ICONS.target" /></span>
-          <span>{{ isRecordingTarget ? 'Recording Target (current)' : 'Set Recording Target' }}</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onCopyBlock">
-          <span class="context-menu-item-icon"><component :is="ICONS.copy" /></span>
-          <span>Copy block</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onCopyAll">
-          <span class="context-menu-item-icon"><component :is="ICONS.layers" /></span>
-          <span>Copy all</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onDuplicateBlock">
-          <span class="context-menu-item-icon"><component :is="ICONS['corner-down-right']" /></span>
-          <span>Duplicate block</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onCutBlock">
-          <span class="context-menu-item-icon"><component :is="ICONS.scissors" /></span>
-          <span>Cut block</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onAddOrFocusComment">
-          <span class="context-menu-item-icon"><component :is="ICONS['message-square']" /></span>
-          <span>{{ attachedComment ? 'Comment' : 'Add Comment' }}</span>
-        </button>
-        <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteBlock">
-          <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
-          <span>Delete block</span>
-        </button>
-      </template>
-      <template v-else-if="contextMenu.type === 'canvas'">
-        <button
-          type="button"
-          class="context-menu-item context-menu-item-danger"
-          :class="{ 'confirm-armed': state.confirm_clear_instructions }"
-          role="menuitem"
-          @click="onDeleteAllBlocks"
-        >
-          <span class="context-menu-item-icon"><component :is="ICONS[clearIcon]" /></span>
-          <span>{{ clearLabel }}</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" :disabled="!hasClipboard()" @click="onPaste">
-          <span class="context-menu-item-icon"><component :is="ICONS['clipboard-paste']" /></span>
-          <span>Paste</span>
-        </button>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onAddCanvasComment">
-          <span class="context-menu-item-icon"><component :is="ICONS['message-square']" /></span>
-          <span>Add Comment</span>
-        </button>
-      </template>
-      <template v-else-if="contextMenu.type === 'variable'">
-        <button type="button" class="context-menu-item" role="menuitem" @click="onRenameVariable">
-          <span class="context-menu-item-icon"><component :is="ICONS.equal" /></span>
-          <span>Rename variable</span>
-        </button>
-        <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteVariable">
-          <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
-          <span>Delete variable</span>
-        </button>
-      </template>
-      <template v-else>
-        <button type="button" class="context-menu-item" role="menuitem" @click="onEditBlock">
-          <span class="context-menu-item-icon"><component :is="ICONS.blocks" /></span>
-          <span>Edit block</span>
-        </button>
-        <button type="button" class="context-menu-item context-menu-item-danger" role="menuitem" @click="onDeleteBlockDef">
-          <span class="context-menu-item-icon"><component :is="ICONS.trash" /></span>
-          <span>Delete block</span>
-        </button>
-      </template>
-    </div>
-  </Teleport>
+  <ContextMenuPanel :open="contextMenu.open" :x="contextMenu.x" :y="contextMenu.y" :items="items" @close="closeContextMenu" />
 </template>

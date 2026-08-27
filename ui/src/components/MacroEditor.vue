@@ -3,8 +3,9 @@ import { computed } from 'vue';
 import { state } from '../store';
 import { setTitle, setMacroSpeedMultiplier } from '../tauri';
 import InstructionSidebar from './InstructionSidebar.vue';
-import Canvas from './Canvas.vue';
+import { Canvas } from 'blockstitch';
 import EditorToolbar from './EditorToolbar.vue';
+import ContextMenu from './ContextMenu.vue';
 
 const isRecording = computed(() => state.recording_phase.phase === 'Active');
 const speedMultiplier = computed(() => state.current_macro?.speed_multiplier ?? 1);
@@ -66,7 +67,18 @@ function onSpeedNumberChange(e: Event) {
 
     <div class="editor-content-area">
       <InstructionSidebar />
-      <Canvas :recording="isRecording" />
+      <Canvas>
+        <template #overlay>
+          <div id="recording-overlay" class="recording-overlay" v-show="isRecording">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6" fill="currentColor"></circle></svg>
+            <span>Recording…</span>
+            <span class="recording-overlay-hint">Adding and removing instructions is disabled while recording.</span>
+          </div>
+        </template>
+        <template #context-menu>
+          <ContextMenu />
+        </template>
+      </Canvas>
     </div>
 
     <EditorToolbar />

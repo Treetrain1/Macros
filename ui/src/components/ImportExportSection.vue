@@ -4,8 +4,8 @@ import { Inbox } from 'lucide-vue-next';
 import { state } from '../store';
 import { exportMacro, importMacro } from '../tauri';
 import type { ImportPromptDto } from '../types';
-import AppDropdown from './AppDropdown.vue';
-import AppButton from './AppButton.vue';
+import { AppDropdown } from 'blockstitch';
+import { AppButton } from 'blockstitch';
 import ImportReviewDialog from './ImportReviewDialog.vue';
 
 const exportMacroId = ref('');

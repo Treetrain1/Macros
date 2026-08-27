@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue';
 import { state } from '../../../store';
 import { clearStandaloneKeyCapture, startStandaloneKeyCapture } from '../../../tauri';
-import AppDropdown from '../../AppDropdown.vue';
+import { AppDropdown } from 'blockstitch';
 import type { InstructionDto, KeyDirection } from '../../../types';
 
 const props = defineProps<{ instruction: Extract<InstructionDto, { type: 'Key' }> }>();

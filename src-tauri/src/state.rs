@@ -166,6 +166,14 @@ pub(crate) struct AppState {
     pub(crate) ipc_auto_start: bool,
     pub(crate) close_to_tray: bool,
     pub(crate) tray_icon: Option<tauri::tray::TrayIcon<tauri::Cef>>,
+    /// Label of the currently-live main webview window, or `None` while
+    /// `tray::quit_ui` has torn it down to save memory. The tauri-cef runtime
+    /// never reports a destroyed window's label back to the window manager
+    /// (see `tray::rebuild_main_window`), so a closed window's label can
+    /// never be reused -- each reopen gets a fresh one, tracked here.
+    /// Doubles as the `RunEvent::ExitRequested` handler's signal in `lib.rs`
+    /// to keep the app alive instead of letting the now-window-less app quit.
+    pub(crate) main_window_label: Option<String>,
     pub(crate) confirm_clear_instructions: bool,
     pub(crate) clear_confirm_remaining_secs: u8,
     pub(crate) clear_confirm_generation: u64,

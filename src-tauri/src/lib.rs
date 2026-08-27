@@ -76,6 +76,7 @@ pub fn run() {
                 ipc_auto_start: settings.ipc_auto_start.unwrap_or(false),
                 close_to_tray: settings.close_to_tray.unwrap_or(false),
                 tray_icon: None,
+                main_window_label: Some("main".to_string()),
                 confirm_clear_instructions: false,
                 clear_confirm_remaining_secs: 0,
                 clear_confirm_generation: 0,
@@ -308,6 +309,25 @@ pub fn run() {
             commands::apply_update,
             commands::list_installed_apps,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // `code` is `None` when the exit was requested because the last
+            // window closed rather than via an explicit `AppHandle::exit`.
+            // That happens both for a genuine "close the last window" (which
+            // should quit normally) and for `tray::quit_ui` destroying the
+            // main window to save memory (which should not) -- `quit_ui`
+            // clears `main_window_label` right before destroying the window,
+            // so its absence tells these two cases apart.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                let ui_quit = app
+                    .state::<SharedState>()
+                    .lock()
+                    .map(|s| s.main_window_label.is_none())
+                    .unwrap_or(false);
+                if ui_quit {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

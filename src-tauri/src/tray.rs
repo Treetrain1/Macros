@@ -1,13 +1,20 @@
-use tauri::menu::MenuBuilder;
+use crate::state::SharedState;
+use tauri::menu::{Menu, MenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Cef, Manager};
+use tauri::{AppHandle, Cef, Manager, WebviewWindowBuilder};
 
 /// Builds the tray icon shown while "close to tray" is enabled: left click
-/// opens the main window, right click shows the Open/Quit menu.
+/// opens the main window, right click shows the Open/Quit menu ("Quit UI"
+/// only shown while the UI is actually running -- see `refresh_menu`).
+///
+/// Both call sites (startup, and the `set_close_to_tray` command) only ever
+/// run while holding the `SharedState` lock with the main window still up,
+/// so the initial menu can just assume the UI is open -- don't lock state
+/// here to check, that would deadlock against the caller's own lock.
 pub(crate) fn build(app: &AppHandle<Cef>) -> tauri::Result<TrayIcon<Cef>> {
     ensure_gtk_init(app);
 
-    let menu = MenuBuilder::new(app).text("open", "Open").text("quit", "Quit").build()?;
+    let menu = build_menu(app, true)?;
 
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -15,6 +22,7 @@ pub(crate) fn build(app: &AppHandle<Cef>) -> tauri::Result<TrayIcon<Cef>> {
         .tooltip("Blockwork")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
+            "quitui" => quit_ui(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -31,10 +39,105 @@ pub(crate) fn build(app: &AppHandle<Cef>) -> tauri::Result<TrayIcon<Cef>> {
     builder.build(app)
 }
 
+/// Builds the tray's context menu, including "Quit UI" only when `ui_open`.
+fn build_menu(app: &AppHandle<Cef>, ui_open: bool) -> tauri::Result<Menu<Cef>> {
+    let mut builder = MenuBuilder::new(app).text("open", "Open");
+    if ui_open {
+        builder = builder.text("quitui", "Quit UI");
+    }
+    builder.text("quit", "Quit").build()
+}
+
+/// Rebuilds and swaps in the tray's context menu to reflect whether the UI
+/// is currently running -- called right after `main_window_label` flips.
+fn refresh_menu(app: &AppHandle<Cef>) {
+    let shared = app.state::<SharedState>();
+    let Ok(guard) = shared.lock() else {
+        return;
+    };
+    let Some(tray) = guard.tray_icon.clone() else {
+        return;
+    };
+    let ui_open = guard.main_window_label.is_some();
+    drop(guard);
+
+    match build_menu(app, ui_open) {
+        Ok(menu) => {
+            let _ = tray.set_menu(Some(menu));
+        }
+        Err(e) => tracing::warn!("Failed to rebuild tray menu: {e}"),
+    }
+}
+
+/// Shows the main window, recreating it first if `quit_ui` had destroyed it.
 pub(crate) fn show_main_window(app: &AppHandle<Cef>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
+    let label = app.state::<SharedState>().lock().ok().and_then(|s| s.main_window_label.clone());
+
+    let window = match label.and_then(|label| app.get_webview_window(&label)) {
+        Some(window) => window,
+        None => match rebuild_main_window(app) {
+            Ok(window) => window,
+            Err(e) => {
+                tracing::warn!("Failed to rebuild main window: {e}");
+                return;
+            }
+        },
+    };
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Builds a fresh main window from the `main` entry in `tauri.conf.json`.
+///
+/// It gets a never-before-used label rather than reusing `"main"`: the
+/// tauri-cef runtime removes a destroyed window from its own bookkeeping
+/// before the OS confirms the destruction, so the later confirmation has
+/// nothing left to look up and never reaches the window manager -- the
+/// manager keeps thinking `"main"` is still alive forever, and handles to it
+/// (like the one `show_main_window` would otherwise get from
+/// `get_webview_window`) silently do nothing. Reusing the label would also
+/// make this `build()` fail outright with `WindowLabelAlreadyExists`.
+/// `capabilities/main.json` scopes its permissions to `main*` to cover
+/// whatever label ends up live.
+fn rebuild_main_window(app: &AppHandle<Cef>) -> tauri::Result<tauri::WebviewWindow<Cef>> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_LABEL: AtomicU64 = AtomicU64::new(1);
+
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .cloned()
+        .expect("`main` window must be declared in tauri.conf.json");
+    config.label = format!("main-{}", NEXT_LABEL.fetch_add(1, Ordering::Relaxed));
+
+    let window = WebviewWindowBuilder::from_config(app, &config)?.build()?;
+
+    if let Ok(mut s) = app.state::<SharedState>().lock() {
+        s.main_window_label = Some(config.label);
+    }
+    refresh_menu(app);
+
+    Ok(window)
+}
+
+/// Quits the tauri/chromium window to save memory, but keeps the core
+/// running in the background/tray so it can still respond to keybinds and
+/// everything. Opening the app again re-inits the tauri window (see
+/// `show_main_window`), reusing the same core process.
+pub(crate) fn quit_ui(app: &AppHandle<Cef>) {
+    let shared = app.state::<SharedState>();
+    let Some(label) = shared.lock().ok().and_then(|s| s.main_window_label.clone()) else {
+        return;
+    };
+    if let Some(window) = app.get_webview_window(&label) {
+        if let Ok(mut s) = shared.lock() {
+            s.main_window_label = None;
+        }
+        refresh_menu(app);
+        let _ = window.destroy();
     }
 }
 

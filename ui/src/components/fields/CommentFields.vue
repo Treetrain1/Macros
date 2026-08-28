@@ -17,7 +17,7 @@ function onChange(v: string) {
     :min-chars="6"
     placeholder="Comment"
     font-style="italic"
-    color="var(--text-dim)"
+    color="var(--blockstitch-text-dim)"
     @update:model-value="onChange"
   />
 </template>

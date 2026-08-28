@@ -31,7 +31,7 @@ if (-not $Version) {
 Push-Location $RepoRoot
 try {
     Write-Host "Building blockwork.exe (release, version $Version)..."
-    cargo build --release --target x86_64-pc-windows-msvc
+    cargo build --release --target x86_64-pc-windows-msvc --workspace --exclude blockwork-linux-bridge
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
     $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

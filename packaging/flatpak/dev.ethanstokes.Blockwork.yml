@@ -11,15 +11,15 @@ sdk-extensions:
 command: blockwork
 branch: stable
 
-add-extensions:
-  org.freedesktop.Sdk.Extension.rust-stable:
-    directory: sdk/rust-stable
-    version: '25.08'
-    no-autodownload: false
-  org.freedesktop.Sdk.Extension.node20:
-    directory: sdk/node20
-    version: '25.08'
-    no-autodownload: false
+# rust-stable/node20 are declared above via sdk-extensions only (build-time:
+# mounted at /usr/lib/sdk/<name> inside the build sandbox, see
+# build-options.append-path below) -- deliberately NOT also duplicated here
+# via add-extensions, which instead bakes an extension point into the
+# *exported app's* own metadata and makes flatpak try to mount them at
+# /app/sdk/<name> on every launch. Neither extension is actually installed
+# as a runtime-available extension on a user's system, so that mount failed
+# outright ("Read-only file system" / "ldconfig failed") and the app never
+# started.
 
 # Builds the Rust workspace and pnpm/Vite frontend from source inside the
 # sandbox, fully offline, rather than reusing a host-built binary -- a host
@@ -48,9 +48,20 @@ build-options:
 finish-args:
   - --share=ipc
   # No --share=network: nothing in the default "cef" build touches the network.
-  - --socket=wayland
-  - --socket=fallback-x11
-  - --socket=x11 # fallback-x11 alone isn't enough; window creation fails without this.
+  # No --socket=wayland: CEF doesn't support Wayland yet, so the app is forced
+  # onto X11 (via XWayland under a Wayland session) below instead of letting
+  # GTK auto-pick a backend it can't actually render through.
+  #
+  # Plain --socket=x11, NOT --socket=fallback-x11: fallback-x11 is designed
+  # to pair with --socket=wayland (grant X11 only once a Wayland attempt is
+  # unavailable) -- with no wayland socket requested at all, flatpak never
+  # exercises that fallback path and never exports DISPLAY into the sandbox,
+  # so GTK has no display to open and window creation fails outright
+  # (confirmed empirically: `flatpak run --command=env` showed no DISPLAY at
+  # all with fallback-x11 alone, and a correct one the moment it was dropped
+  # in favor of plain x11).
+  - --socket=x11
+  - --env=GDK_BACKEND=x11 # skip GDK's own Wayland-then-X11 probe, since CEF can only draw into the X11 path anyway.
   - --socket=pulseaudio # CEF's Chromium renderer wants audio output access.
   - --device=all # /dev/uinput + /dev/input/event* for evdev hotkeys & synthetic input.
   - --device=dri

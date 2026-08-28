@@ -33,7 +33,7 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 APP_NAME="Blockwork"
 
 echo "Building $APP_NAME (release, $TARGET)..."
-cargo build --release --target "$TARGET"
+cargo build --release --target "$TARGET" --workspace --exclude blockwork-linux-bridge
 
 RELEASE_DIR="target/$TARGET/release"
 

@@ -112,9 +112,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      - name: Build (release)
-        if: runner.os != 'macOS'
+      - name: Build (release, Linux)
+        if: runner.os == 'Linux'
         run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (release, Windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release --target ${{ matrix.target }} --workspace --exclude blockwork-linux-bridge
 
       - name: Stage CEF runtime files (Windows)
         if: runner.os == 'Windows'

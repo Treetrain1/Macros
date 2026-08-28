@@ -12,8 +12,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.1
       blockstitch:
-        specifier: link:../../blockstitch
-        version: link:../../blockstitch
+        specifier: github:EthanRStokes/blockstitch#04eabcbd6af14476ab86ba459012c02297d3cd5b
+        version: https://codeload.github.com/EthanRStokes/blockstitch/tar.gz/04eabcbd6af14476ab86ba459012c02297d3cd5b(lucide-vue-next@0.469.0(vue@3.5.39(typescript@5.9.3)))(vue@3.5.39(typescript@5.9.3))
       lucide-vue-next:
         specifier: ^0.469.0
         version: 0.469.0(vue@3.5.39(typescript@5.9.3))
@@ -33,25 +33,6 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.0)
-      vue-tsc:
-        specifier: ^2.2.0
-        version: 2.2.12(typescript@5.9.3)
-
-  ../../blockstitch:
-    dependencies:
-      lucide-vue-next:
-        specifier: ^0.469.0
-        version: 0.469.0(vue@3.5.39(typescript@5.9.3))
-      vue:
-        specifier: ^3.5.0
-        version: 3.5.39(typescript@5.9.3)
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.0
-        version: 22.20.0
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
       vue-tsc:
         specifier: ^2.2.0
         version: 2.2.12(typescript@5.9.3)
@@ -442,6 +423,13 @@ packages:
 
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
+
+  blockstitch@https://codeload.github.com/EthanRStokes/blockstitch/tar.gz/04eabcbd6af14476ab86ba459012c02297d3cd5b:
+    resolution: {gitHosted: true, integrity: sha512-c4c17P2l3GUBdOr6yj12WuIrd+w/uKegpYF0BmB9ahr/5PVAeQ7LwFEykdr+P7pzzTWoLNYqJLgYW7vQQTIIIg==, tarball: https://codeload.github.com/EthanRStokes/blockstitch/tar.gz/04eabcbd6af14476ab86ba459012c02297d3cd5b}
+    version: 0.1.0
+    peerDependencies:
+      lucide-vue-next: ^0.469.0
+      vue: ^3.5.0
 
   brace-expansion@2.1.1:
     resolution: {integrity: sha512-WR1cURNjuvBLMZBMbqM0UoE+WAfdUcEV1ccD8PVBVOI+Z3ND4+SZbN8RsfT2bMuG1qwz5RFvPukSZm5fF2D5eA==}
@@ -865,6 +853,11 @@ snapshots:
   alien-signals@1.0.13: {}
 
   balanced-match@1.0.2: {}
+
+  blockstitch@https://codeload.github.com/EthanRStokes/blockstitch/tar.gz/04eabcbd6af14476ab86ba459012c02297d3cd5b(lucide-vue-next@0.469.0(vue@3.5.39(typescript@5.9.3)))(vue@3.5.39(typescript@5.9.3)):
+    dependencies:
+      lucide-vue-next: 0.469.0(vue@3.5.39(typescript@5.9.3))
+      vue: 3.5.39(typescript@5.9.3)
 
   brace-expansion@2.1.1:
     dependencies:

@@ -1,6 +1,2 @@
-packages:
-  - '.'
-  - '../../blockstitch'
-
 allowBuilds:
   esbuild: true

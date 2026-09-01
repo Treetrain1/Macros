@@ -55,6 +55,7 @@ import {
   SlidersHorizontal,
   AppWindow,
   SquareX,
+  Info,
 } from 'lucide-vue-next';
 import type { InstructionType } from './types';
 
@@ -112,6 +113,7 @@ export const ICONS = {
   'sliders-horizontal': SlidersHorizontal,
   'app-window': AppWindow,
   'square-x': SquareX,
+  info: Info,
 } satisfies Record<string, Component>;
 
 export type IconName = keyof typeof ICONS;

@@ -4,9 +4,9 @@
 // block-menu or canvas-menu item list.
 import { reactive } from 'vue';
 import { registerOpen, unregisterOpen, clientToCanvas } from 'blockstitch';
-import type { InstrPath } from './types';
+import type { InstrPath, ValueDto } from './types';
 
-export type ContextMenuType = 'block' | 'canvas' | 'variable' | 'myBlock';
+export type ContextMenuType = 'block' | 'canvas' | 'variable' | 'myBlock' | 'paletteInstruction' | 'paletteValue' | 'value';
 
 interface ContextMenuState {
   open: boolean;
@@ -19,6 +19,10 @@ interface ContextMenuState {
   canvasY: number;
   variableName: string;
   blockId: string;
+  paletteInstructionType: string;
+  paletteVariantId: string | undefined;
+  paletteValueKind: string;
+  valueNode: ValueDto | null;
 }
 
 export const contextMenu = reactive<ContextMenuState>({
@@ -32,6 +36,10 @@ export const contextMenu = reactive<ContextMenuState>({
   canvasY: 0,
   variableName: '',
   blockId: '',
+  paletteInstructionType: '',
+  paletteVariantId: undefined,
+  paletteValueKind: '',
+  valueNode: null,
 });
 
 function openAt(e: MouseEvent) {
@@ -66,6 +74,29 @@ export function openMyBlockMenu(e: MouseEvent, blockId: string): void {
   openAt(e);
   contextMenu.type = 'myBlock';
   contextMenu.blockId = blockId;
+}
+
+export function openPaletteInstructionMenu(e: MouseEvent, type: string, variantId?: string): void {
+  openAt(e);
+  contextMenu.type = 'paletteInstruction';
+  contextMenu.paletteInstructionType = type;
+  contextMenu.paletteVariantId = variantId;
+}
+
+export function openPaletteValueMenu(e: MouseEvent, kind: string): void {
+  openAt(e);
+  contextMenu.type = 'paletteValue';
+  contextMenu.paletteValueKind = kind;
+}
+
+// Var/Param reporters placed on canvas have no Details to show (they're not
+// a fixed block with fixed behavior) — silently declining to open here, same
+// as before this menu existed, is better than opening one with nothing in it.
+export function openValueMenu(e: MouseEvent, value: ValueDto): void {
+  if (value.kind !== 'Op' && value.kind !== 'Call' && value.kind !== 'Number' && value.kind !== 'Text') return;
+  openAt(e);
+  contextMenu.type = 'value';
+  contextMenu.valueNode = value;
 }
 
 export function closeContextMenu(): void {

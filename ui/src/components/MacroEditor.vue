@@ -6,6 +6,7 @@ import InstructionSidebar from './InstructionSidebar.vue';
 import { Canvas } from 'blockstitch';
 import EditorToolbar from './EditorToolbar.vue';
 import ContextMenu from './ContextMenu.vue';
+import DetailsDialog from './DetailsDialog.vue';
 
 const isRecording = computed(() => state.recording_phase.phase === 'Active');
 const speedMultiplier = computed(() => state.current_macro?.speed_multiplier ?? 1);
@@ -82,5 +83,6 @@ function onSpeedNumberChange(e: Event) {
     </div>
 
     <EditorToolbar />
+    <DetailsDialog />
   </div>
 </template>

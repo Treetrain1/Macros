@@ -53,7 +53,16 @@ pub fn run() {
                 let close_to_tray = window.state::<SharedState>().lock().map(|s| s.close_to_tray).unwrap_or(false);
                 if close_to_tray {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if tauri_runtime_cef::is_wayland() {
+                        // `window.hide()` is a no-op under Wayland (winit has no
+                        // protocol-level way to unmap and remap a toplevel), so
+                        // the decoration Close button would otherwise do nothing
+                        // at all. Fall back to the same destroy-and-rebuild path
+                        // `quit_ui` already uses for "Quit UI" from the tray.
+                        tray::quit_ui(window.app_handle());
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         })

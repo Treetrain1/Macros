@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Thin wrapper around blockstitch's generic <ContextMenuPanel> — this is where
-// Blockwork's own menu content (what each of the four menu variants offers, and
-// what each item does) lives; the panel itself only handles positioning,
-// outside-click/Escape/scroll close, and rendering the item list.
+// Blockwork's own menu content (what each menu variant offers, and what each
+// item does) lives; the panel itself only handles positioning, outside-click/
+// Escape/scroll close, and rendering the item list.
 import { computed } from 'vue';
 import { state } from '../store';
 import { contextMenu, closeContextMenu } from '../contextMenu';
@@ -13,6 +13,9 @@ import { ICONS } from '../icons';
 import { openRenameVariableDialog } from '../variableDialogs';
 import { openEditBlockDialog } from '../blockDialogs';
 import { findBlockDef, nextSiblingPath, regenerateInstructionIds, resolveInstructionAt } from '../types';
+import type { InstructionType } from '../types';
+import { detailsForBlockDef, detailsForInstructionType, detailsForValueKind, type BlockDetails } from '../blockDetails';
+import { openDetailsDialog } from '../detailsDialog';
 
 // Default offset (canvas units) a freshly-attached comment spawns at,
 // relative to its block — clear of the block itself, matching the spirit of
@@ -33,6 +36,35 @@ const attachedComment = computed(() => {
 const isRecordingTarget = computed(
   () => contextMenu.strandId !== '' && contextMenu.strandId === state.current_macro?.recording_target_strand_id,
 );
+
+// What the "Details" item shows for the current 'value' menu target — a
+// placed operator or "My Blocks" reporter call on the canvas (openValueMenu
+// in contextMenu.ts already declines to open for anything else, e.g. a
+// Var/Param reporter with no fixed behavior to explain).
+const valueDetails = computed<BlockDetails | null>(() => {
+  const v = contextMenu.valueNode;
+  if (!v) return null;
+  if (v.kind === 'Call') {
+    const def = findBlockDef(state.current_macro, v.block_id);
+    return def ? detailsForBlockDef(def) : null;
+  }
+  return detailsForValueKind(v.kind === 'Op' ? v.op : v.kind);
+});
+
+// What the "Details" item shows for the current 'block' menu target — a
+// BlockHeader row or a CallBlock instruction both describe a custom block
+// (the "My Blocks" definition itself), everything else is a fixed built-in
+// instruction type.
+const blockDetails = computed<BlockDetails | null>(() => {
+  const ins = instruction.value;
+  if (!ins) return null;
+  const callId = headerBlockId.value ?? (ins.type === 'CallBlock' ? ins.block_id : null);
+  if (callId) {
+    const def = findBlockDef(state.current_macro, callId);
+    if (def) return detailsForBlockDef(def);
+  }
+  return detailsForInstructionType(ins.type);
+});
 
 const totalBlocks = computed(() =>
   (state.current_macro?.strands ?? []).reduce((n, s) => n + s.instructions.length, 0),
@@ -136,6 +168,27 @@ function onDeleteBlockDef() {
   deleteBlock(contextMenu.blockId);
   closeContextMenu();
 }
+function onShowBlockDetails() {
+  if (blockDetails.value) openDetailsDialog(blockDetails.value);
+  closeContextMenu();
+}
+function onShowMyBlockDetails() {
+  const def = findBlockDef(state.current_macro, contextMenu.blockId);
+  if (def) openDetailsDialog(detailsForBlockDef(def));
+  closeContextMenu();
+}
+function onShowPaletteInstructionDetails() {
+  openDetailsDialog(detailsForInstructionType(contextMenu.paletteInstructionType as InstructionType));
+  closeContextMenu();
+}
+function onShowPaletteValueDetails() {
+  openDetailsDialog(detailsForValueKind(contextMenu.paletteValueKind));
+  closeContextMenu();
+}
+function onShowValueDetails() {
+  if (valueDetails.value) openDetailsDialog(valueDetails.value);
+  closeContextMenu();
+}
 
 const items = computed<ContextMenuItem[]>(() => {
   if (contextMenu.type === 'block') {
@@ -150,6 +203,7 @@ const items = computed<ContextMenuItem[]>(() => {
       { key: 'duplicate', label: 'Duplicate block', icon: ICONS['corner-down-right'], onSelect: onDuplicateBlock },
       { key: 'cut', label: 'Cut block', icon: ICONS.scissors, onSelect: onCutBlock },
       { key: 'comment', label: attachedComment.value ? 'Comment' : 'Add Comment', icon: ICONS['message-square'], onSelect: onAddOrFocusComment },
+      { key: 'details', label: 'Details', icon: ICONS.info, onSelect: onShowBlockDetails },
       { key: 'delete', label: 'Delete block', icon: ICONS.trash, danger: true, onSelect: onDeleteBlock },
     );
     return list;
@@ -170,8 +224,18 @@ const items = computed<ContextMenuItem[]>(() => {
       { key: 'delete-var', label: 'Delete variable', icon: ICONS.trash, danger: true, onSelect: onDeleteVariable },
     ];
   }
+  if (contextMenu.type === 'paletteInstruction') {
+    return [{ key: 'details', label: 'Details', icon: ICONS.info, onSelect: onShowPaletteInstructionDetails }];
+  }
+  if (contextMenu.type === 'paletteValue') {
+    return [{ key: 'details', label: 'Details', icon: ICONS.info, onSelect: onShowPaletteValueDetails }];
+  }
+  if (contextMenu.type === 'value') {
+    return [{ key: 'details', label: 'Details', icon: ICONS.info, onSelect: onShowValueDetails }];
+  }
   return [
     { key: 'edit', label: 'Edit block', icon: ICONS.blocks, onSelect: onEditBlock },
+    { key: 'details', label: 'Details', icon: ICONS.info, onSelect: onShowMyBlockDetails },
     { key: 'delete-def', label: 'Delete block', icon: ICONS.trash, danger: true, onSelect: onDeleteBlockDef },
   ];
 });

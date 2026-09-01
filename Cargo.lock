@@ -5099,6 +5099,7 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 [[package]]
 name = "tauri"
 version = "2.11.5"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5149,6 +5150,7 @@ dependencies = [
 [[package]]
 name = "tauri-build"
 version = "2.6.3"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "anyhow",
  "cargo_toml",
@@ -5168,6 +5170,7 @@ dependencies = [
 [[package]]
 name = "tauri-codegen"
 version = "2.6.3"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "base64 0.22.1",
  "brotli",
@@ -5193,6 +5196,7 @@ dependencies = [
 [[package]]
 name = "tauri-macros"
 version = "2.6.3"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5205,6 +5209,7 @@ dependencies = [
 [[package]]
 name = "tauri-runtime"
 version = "2.11.3"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "cookie",
  "dpi",
@@ -5225,6 +5230,7 @@ dependencies = [
 [[package]]
 name = "tauri-runtime-cef"
 version = "0.1.0"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "base64 0.22.1",
  "cef",
@@ -5259,6 +5265,7 @@ dependencies = [
 [[package]]
 name = "tauri-runtime-wry"
 version = "2.11.4"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "gtk",
  "http",
@@ -5284,6 +5291,7 @@ dependencies = [
 [[package]]
 name = "tauri-utils"
 version = "2.9.3"
+source = "git+https://github.com/EthanRStokes/tauri?rev=9c153d0d#9c153d0d895fd2eb6000a7b907f5f6fb48047ab8"
 dependencies = [
  "anyhow",
  "brotli",

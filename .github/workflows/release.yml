@@ -95,6 +95,7 @@ jobs:
             libxkbcommon-dev \
             libxkbcommon-x11-0 \
             libx11-dev \
+            libx11-xcb-dev \
             libxtst-dev \
             libwayland-dev \
             wayland-protocols \

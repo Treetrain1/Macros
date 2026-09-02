@@ -121,6 +121,27 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo build --release --target ${{ matrix.target }} --workspace --exclude blockwork-linux-bridge
 
+      - name: Stage CEF runtime files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $releaseDir = "target/${{ matrix.target }}/release"
+          $cefBuildDir = Get-ChildItem "$releaseDir/build" -Directory -Filter "cef-dll-sys-*" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $cefRuntimeDir = Get-ChildItem (Join-Path $cefBuildDir.FullName "out") -Recurse -Directory -Filter "${{ matrix.cef_windows_dir }}" |
+            Select-Object -First 1
+          Get-ChildItem $cefRuntimeDir.FullName -File | Copy-Item -Destination $releaseDir -Force
+          Copy-Item (Join-Path $cefRuntimeDir.FullName "locales") $releaseDir -Recurse -Force
+
+      - name: Stage CEF runtime files (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          releaseDir="target/${{ matrix.target }}/release"
+          cefBuildDir=$(ls -dt "$releaseDir"/build/cef-dll-sys-*/ | head -1)
+          cefRuntimeDir=$(find "${cefBuildDir}out" -maxdepth 2 -type d -name "cef_linux_${{ matrix.linux_arch }}" | head -1)
+          find "$cefRuntimeDir" -maxdepth 1 -type f -exec cp -f {} "$releaseDir/" \;
+          cp -r "$cefRuntimeDir/locales" "$releaseDir/"
+
       - name: Rename binary (Linux)
         if: runner.os == 'Linux'
         run: cp target/${{ matrix.target }}/release/blockwork ${{ matrix.artifact_name }}

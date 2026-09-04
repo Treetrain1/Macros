@@ -8,8 +8,8 @@
     {
         "type": "git",
         "url": "https://github.com/ethanrstokes/tauri",
-        "commit": "6734dc2ef3fcf641102ff4618638b8567f1a0ab0",
-        "dest": "flatpak-cargo/git/tauri-6734dc2"
+        "commit": "6dac6b98bbdbf0335b9e0b506484c29a353edcdb",
+        "dest": "flatpak-cargo/git/tauri-6dac6b9"
     },
     {
         "type": "archive",
@@ -6269,7 +6269,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri\" \"cargo/vendor/tauri\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri\" \"cargo/vendor/tauri\""
         ]
     },
     {
@@ -6287,7 +6287,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-build\" \"cargo/vendor/tauri-build\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-build\" \"cargo/vendor/tauri-build\""
         ]
     },
     {
@@ -6305,7 +6305,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-codegen\" \"cargo/vendor/tauri-codegen\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-codegen\" \"cargo/vendor/tauri-codegen\""
         ]
     },
     {
@@ -6323,7 +6323,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-macros\" \"cargo/vendor/tauri-macros\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-macros\" \"cargo/vendor/tauri-macros\""
         ]
     },
     {
@@ -6341,7 +6341,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-runtime\" \"cargo/vendor/tauri-runtime\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-runtime\" \"cargo/vendor/tauri-runtime\""
         ]
     },
     {
@@ -6359,7 +6359,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-runtime-cef\" \"cargo/vendor/tauri-runtime-cef\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-runtime-cef\" \"cargo/vendor/tauri-runtime-cef\""
         ]
     },
     {
@@ -6377,7 +6377,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-runtime-wry\" \"cargo/vendor/tauri-runtime-wry\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-runtime-wry\" \"cargo/vendor/tauri-runtime-wry\""
         ]
     },
     {
@@ -6395,7 +6395,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6734dc2/crates/tauri-utils\" \"cargo/vendor/tauri-utils\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/tauri-6dac6b9/crates/tauri-utils\" \"cargo/vendor/tauri-utils\""
         ]
     },
     {
@@ -8843,7 +8843,7 @@
     },
     {
         "type": "inline",
-        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/ethanrstokes/cef-rs\"]\ngit = \"https://github.com/ethanrstokes/cef-rs\"\nreplace-with = \"vendored-sources\"\nrev = \"b8fad92\"\n\n[source.\"https://github.com/ethanrstokes/tauri\"]\ngit = \"https://github.com/ethanrstokes/tauri\"\nreplace-with = \"vendored-sources\"\nrev = \"6734dc2e\"\n",
+        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/ethanrstokes/cef-rs\"]\ngit = \"https://github.com/ethanrstokes/cef-rs\"\nreplace-with = \"vendored-sources\"\nrev = \"b8fad92\"\n\n[source.\"https://github.com/ethanrstokes/tauri\"]\ngit = \"https://github.com/ethanrstokes/tauri\"\nreplace-with = \"vendored-sources\"\nrev = \"6dac6b98\"\n",
         "dest": "cargo",
         "dest-filename": "config"
     }

@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "blockwork"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "blockwork-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "blockwork-ffi"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blockwork-core",
  "cbindgen",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "blockwork-linux-bridge"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blockwork-core",
  "evdev",

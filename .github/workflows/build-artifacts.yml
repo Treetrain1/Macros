@@ -210,6 +210,8 @@ jobs:
           CEF_DIR="target/${{ matrix.target }}/release"
           cp "$CEF_DIR/libcef.so" .
 
+          export LINUXDEPLOY_EXCLUDED_LIBRARIES="libnspr4.so;libplc4.so;libplds4.so;libnss3.so;libnssutil3.so;libsmime3.so"
+
           ./linuxdeploy.AppImage \
             --appdir AppDir \
             --executable ./blockwork \

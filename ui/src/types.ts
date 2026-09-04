@@ -501,6 +501,7 @@ export interface StateDto {
   ipc_port_invalid: boolean;
   emulator_available: boolean;
   grab_available: boolean;
+  razer_permission_warning: boolean;
   update_check_state: UpdateCheckStateDto;
 }
 
@@ -535,6 +536,7 @@ export function emptyState(): StateDto {
     ipc_port_invalid: false,
     emulator_available: true,
     grab_available: true,
+    razer_permission_warning: false,
     update_check_state: { state: 'Idle', version: null, error: null },
   };
 }

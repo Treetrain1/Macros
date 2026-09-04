@@ -78,30 +78,52 @@ modules:
     build-commands:
       # 1. Stage CEF where cef-dll-sys's build.rs expects it via $CEF_PATH (see
       # download-cef's extract_target_archive()), so it never tries to fetch it.
+      # CEF_VERSION must match the "+<version>" build metadata in cef-dll-sys's
+      # Cargo.toml version (see download_cef::default_version) -- bump it
+      # whenever that changes, alongside the source archives below.
       - |
         set -e
-        CEF_VERSION="150.0.10"
+        CEF_VERSION="151.3.24"
         case "$(uname -m)" in
-          x86_64)  CEF_ARCH_DIR=cef_linux_x86_64 ;;
-          aarch64) CEF_ARCH_DIR=cef_linux_aarch64 ;;
+          x86_64)
+            # Custom Wayland-patched build from cloud.frozenblock.net (see
+            # ../cef-rs/sys/build.rs's DEFAULT_LINUX_X64_ARCHIVE_URL, only used
+            # for x86_64-unknown-linux-gnu). Unlike the official minimal
+            # distribution below, this archive's single top-level directory is
+            # already the complete, flattened cef_dir -- build-time headers/cmake
+            # and runtime files together, plus its own valid archive.json -- so
+            # it just needs extracting and renaming, no Release/Resources merge.
+            DEST="$CEF_PATH/$CEF_VERSION/cef_linux_x86_64"
+            mkdir -p "$CEF_PATH/$CEF_VERSION"
+            ARCHIVE=cef_binary_wayland_linux64.tar.zst
+            EXTRACTED_DIR=$(tar --zstd -tf "$ARCHIVE" | head -1 | cut -d/ -f1)
+            tar --zstd -xf "$ARCHIVE"
+            mv "$EXTRACTED_DIR" "$DEST"
+            ;;
+          aarch64)
+            # Official upstream CEF minimal distribution -- no Wayland patch
+            # exists for aarch64, which is why window_info.rs's
+            # set_as_child_wayland is gated to x86_64 only. Split
+            # Release/Resources layout, same as x86_64 used to be.
+            DEST="$CEF_PATH/$CEF_VERSION/cef_linux_aarch64"
+            mkdir -p "$CEF_PATH/$CEF_VERSION"
+            ARCHIVE=$(ls cef_binary_*_linuxarm64_minimal.tar.bz2)
+            ARCHIVE_NAME=$(basename "$ARCHIVE")
+            SHA1=$(sha1sum "$ARCHIVE" | cut -d' ' -f1)
+            EXTRACTED_DIR="${ARCHIVE_NAME%.tar.bz2}"
+            tar -xjf "$ARCHIVE"
+            mv "$EXTRACTED_DIR/Release" "$DEST"
+            mv "$EXTRACTED_DIR"/Resources/* "$DEST/"
+            mv "$EXTRACTED_DIR/CMakeLists.txt" "$DEST/"
+            mv "$EXTRACTED_DIR/cmake" "$DEST/"
+            mv "$EXTRACTED_DIR/include" "$DEST/"
+            mv "$EXTRACTED_DIR/libcef_dll" "$DEST/"
+            mv "$EXTRACTED_DIR/CREDITS.html" "$DEST/"
+            rm -rf "$EXTRACTED_DIR"
+            printf '{"type":"minimal","name":"%s","sha1":"%s"}' "$ARCHIVE_NAME" "$SHA1" > "$DEST/archive.json"
+            ;;
           *) echo "unsupported arch for CEF staging: $(uname -m)" >&2; exit 1 ;;
         esac
-        ARCHIVE=$(ls cef_binary_*.tar.bz2)
-        ARCHIVE_NAME=$(basename "$ARCHIVE")
-        SHA1=$(sha1sum "$ARCHIVE" | cut -d' ' -f1)
-        EXTRACTED_DIR="${ARCHIVE_NAME%.tar.bz2}"
-        DEST="$CEF_PATH/$CEF_VERSION/$CEF_ARCH_DIR"
-        mkdir -p "$CEF_PATH/$CEF_VERSION"
-        tar -xjf "$ARCHIVE"
-        mv "$EXTRACTED_DIR/Release" "$DEST"
-        mv "$EXTRACTED_DIR"/Resources/* "$DEST/"
-        mv "$EXTRACTED_DIR/CMakeLists.txt" "$DEST/"
-        mv "$EXTRACTED_DIR/cmake" "$DEST/"
-        mv "$EXTRACTED_DIR/include" "$DEST/"
-        mv "$EXTRACTED_DIR/libcef_dll" "$DEST/"
-        mv "$EXTRACTED_DIR/CREDITS.html" "$DEST/"
-        rm -rf "$EXTRACTED_DIR"
-        printf '{"type":"minimal","name":"%s","sha1":"%s"}' "$ARCHIVE_NAME" "$SHA1" > "$DEST/archive.json"
       # 2. Stage pnpm (node20 extension has node/npm/corepack but not pnpm, and
       # corepack needs network on first use). Pinned to ui/package.json's
       # packageManager version.
@@ -171,15 +193,26 @@ modules:
         sha256: 383f644f50667e9c1752791173d274ba414117262b09c1b027c2d297bf520662
         only-arches: [aarch64]
 
-      # Pinned CEF prebuilt runtime matching cef-dll-sys 150.0.0+150.0.10. No
+      # Pinned CEF prebuilt runtime matching cef-dll-sys 151.8.0+151.3.24. No
       # source build: Flathub allows a pinned, hash-verified prebuilt binary as a
       # source (as with Electron apps bundling Chromium); what it disallows is
       # fetching it during the sandboxed build, which step 1 above avoids.
+      #
+      # x86_64: our own Wayland-patched build (chromiumembedded/cef#4233, built
+      # from ~/cef-wayland-build), hosted at a personal Nextcloud share -- there
+      # is no upstream equivalent. dest-filename is required since the URL
+      # itself has no filename/extension for flatpak-builder to infer one from.
+      # If this file is ever rebuilt at the same share link, its sha256 (and
+      # CEF_VERSION above, if the underlying CEF/Chromium version changes too)
+      # must be updated to match.
       - type: file
-        url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linux64_minimal.tar.bz2
-        sha256: 6c1d4891ef3886e3ccf65d09288d8304e3f7e3724a47c93293e2bd63e76528e4
+        url: https://cloud.frozenblock.net/s/82X5EQQ2ZoiPLWs/download
+        dest-filename: cef_binary_wayland_linux64.tar.zst
+        sha256: 970b867a865ca0a2f99c0f2ffe279fe58f36b169a8b485866c4eb687ab2871d0
         only-arches: [x86_64]
+      # aarch64: official upstream build, since it doesn't need the Wayland
+      # patch (see the build-commands comment above).
       - type: file
-        url: https://cef-builds.spotifycdn.com/cef_binary_150.0.10+g8042e43+chromium-150.0.7871.101_linuxarm64_minimal.tar.bz2
-        sha256: fb95362ac91a1f71ae6a8c8ba4d0641cad08375904c4e7dd1cc3ceebb1a2d875
+        url: https://cef-builds.spotifycdn.com/cef_binary_151.3.24+g2384915+chromium-151.0.7922.174_linuxarm64_minimal.tar.bz2
+        sha256: 47965b9c36a5958bdd6d6fdb3fe3360f38d17d65914ef636abade14881cdc59b
         only-arches: [aarch64]

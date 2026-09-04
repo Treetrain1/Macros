@@ -4,6 +4,7 @@ pub(crate) mod commands;
 pub(crate) mod dev_bridge;
 pub(crate) mod installed_apps;
 pub(crate) mod macros_thread;
+pub(crate) mod razer;
 pub(crate) mod scheduled_run;
 pub(crate) mod single_instance;
 pub(crate) mod state;

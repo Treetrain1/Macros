@@ -10,6 +10,7 @@ import { state } from '../store';
 // vanilla version, which had to track this by hand).
 const grabMissing = computed(() => !state.grab_available);
 const emulatorMissing = computed(() => !state.emulator_available);
+const razerPermissionMissing = computed(() => state.razer_permission_warning);
 </script>
 
 <template>
@@ -21,6 +22,10 @@ const emulatorMissing = computed(() => !state.emulator_available);
     <div v-if="emulatorMissing" class="warning-banner banner-enter">
       <TriangleAlert />
       <span>Input emulation unavailable.<br>Check system permissions.</span>
+    </div>
+    <div v-if="razerPermissionMissing" class="warning-banner banner-enter">
+      <TriangleAlert />
+      <span>Razer device access unavailable.<br>Check system permissions (openrazer / plugdev group).</span>
     </div>
   </div>
 </template>

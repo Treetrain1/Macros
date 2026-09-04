@@ -235,6 +235,7 @@ pub(crate) struct StateDto {
     pub(crate) ipc_port_invalid: bool,
     pub(crate) emulator_available: bool,
     pub(crate) grab_available: bool,
+    pub(crate) razer_permission_warning: bool,
     pub(crate) update_check_state: UpdateCheckStateDto,
 }
 
@@ -946,6 +947,7 @@ pub(crate) fn build_state_dto(s: &AppState) -> StateDto {
         ipc_port_invalid: s.ipc_port_invalid,
         emulator_available: s.emulator.is_some(),
         grab_available: !blockwork_core::recording::grab_failed(),
+        razer_permission_warning: crate::razer::permission_warning(),
         update_check_state,
     }
 }

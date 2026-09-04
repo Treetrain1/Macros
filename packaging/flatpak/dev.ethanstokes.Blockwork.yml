@@ -48,20 +48,13 @@ build-options:
 finish-args:
   - --share=ipc
   # No --share=network: nothing in the default "cef" build touches the network.
-  # No --socket=wayland: CEF doesn't support Wayland yet, so the app is forced
-  # onto X11 (via XWayland under a Wayland session) below instead of letting
-  # GTK auto-pick a backend it can't actually render through.
-  #
-  # Plain --socket=x11, NOT --socket=fallback-x11: fallback-x11 is designed
-  # to pair with --socket=wayland (grant X11 only once a Wayland attempt is
-  # unavailable) -- with no wayland socket requested at all, flatpak never
-  # exercises that fallback path and never exports DISPLAY into the sandbox,
-  # so GTK has no display to open and window creation fails outright
-  # (confirmed empirically: `flatpak run --command=env` showed no DISPLAY at
-  # all with fallback-x11 alone, and a correct one the moment it was dropped
-  # in favor of plain x11).
-  - --socket=x11
-  - --env=GDK_BACKEND=x11 # skip GDK's own Wayland-then-X11 probe, since CEF can only draw into the X11 path anyway.
+  # x86_64: the custom CEF build supports Wayland natively, so grant both
+  # sockets and let the wrapper script (see below) pick GDK_BACKEND=wayland.
+  # aarch64: no Wayland patch exists, so the wrapper forces
+  # GDK_BACKEND=x11 instead.  fallback-x11 ensures DISPLAY is always
+  # exported so XWayland works when needed.
+  - --socket=wayland
+  - --socket=fallback-x11
   - --socket=pulseaudio # CEF's Chromium renderer wants audio output access.
   - --device=all # /dev/uinput + /dev/input/event* for evdev hotkeys & synthetic input.
   - --device=dri
@@ -146,6 +139,16 @@ modules:
       - |
         cat > /app/bin/blockwork <<'EOF'
         #!/bin/sh
+        case "$(uname -m)" in
+          x86_64)
+            if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+              export GDK_BACKEND=wayland
+            else
+              export GDK_BACKEND=x11
+            fi
+            ;;
+          aarch64) export GDK_BACKEND=x11 ;;
+        esac
         exec /app/lib/blockwork/blockwork --no-sandbox "$@"
         EOF
         chmod +x /app/bin/blockwork
